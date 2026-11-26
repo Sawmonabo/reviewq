@@ -7,7 +7,9 @@ use axum::response::{IntoResponse, Response};
 use reviewq_app::access::AppError;
 use reviewq_protocol::field_errors::{FieldError, bounded_field_errors};
 use reviewq_protocol::{ErrorCode, ErrorDto, Failure};
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 
 pub(super) enum ApiError {
     Application(AppError),
@@ -104,35 +106,55 @@ fn field_errors(error: AppError, errors: &[FieldError]) -> Response {
 }
 
 /// The text of an MCP tool error, which the model reads to correct its call: for refused
-/// fields, one line per field with its path and message, capped as the HTTP reply is; for any
-/// other failure, the protocol's error object as JSON. A refusal whose errors are all at the
-/// root names no field, so its messages stand alone, one per line, without the line that asks
-/// for fields to be corrected. The Claude plugin's `toolResult` applies the same rule.
+/// fields, `field_error_text` of the errors capped as the HTTP reply caps them; for any other
+/// failure, the protocol's error object as JSON.
 pub(super) fn tool_error_text(error: ApiError) -> String {
     let error = match error {
-        ApiError::InvalidFields(errors) => {
-            let errors = capped(errors);
-            let mut lines = Vec::with_capacity(errors.len() + 1);
-            if errors.is_empty() || errors.iter().any(|error| !error.path.is_empty()) {
-                lines.push(format!(
-                    "{} Correct these fields and call again.",
-                    AppError::InvalidFields(Vec::new())
-                ));
-            }
-            lines.extend(errors.into_iter().map(|error| {
-                if error.path.is_empty() {
-                    error.message
-                } else {
-                    format!("{}: {}", error.path, error.message)
-                }
-            }));
-            return lines.join("\n");
-        }
+        ApiError::InvalidFields(errors) => return field_error_text(&capped(errors)),
         ApiError::Application(error) => error,
         ApiError::BrowserProofRejected => AppError::Forbidden,
     };
     let (_status, failure) = failure(error);
     serde_json::to_string(&failure.error).unwrap_or(failure.error.message)
+}
+
+/// The text a model reads for a refused ledger tool call that arrived as a tool route's error
+/// reply, which is how the Claude bridge receives it. It is the text `tool_error_text` gives
+/// the MCP server for the same refusal. `None` when `body` is not the common error reply.
+pub fn ledger_refusal_text(body: &[u8]) -> Option<String> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Refusal {
+        error: Value,
+        field_errors: Option<Vec<FieldError>>,
+    }
+    let refusal: Refusal = serde_json::from_slice(body).ok()?;
+    match refusal.field_errors {
+        Some(errors) => Some(field_error_text(&errors)),
+        None => serde_json::to_string(&refusal.error).ok(),
+    }
+}
+
+/// Refused fields as the model reads them: one line per error, `path: message`, after a line
+/// that asks for the fields to be corrected. A refusal whose errors are all at the root names
+/// no field, so its messages stand alone, one per line, without that first line. `errors` is
+/// the list as a reply carries it, already capped.
+pub fn field_error_text(errors: &[FieldError]) -> String {
+    let mut lines = Vec::with_capacity(errors.len() + 1);
+    if errors.is_empty() || errors.iter().any(|error| !error.path.is_empty()) {
+        lines.push(format!(
+            "{} Correct these fields and call again.",
+            AppError::InvalidFields(Vec::new())
+        ));
+    }
+    lines.extend(errors.iter().map(|error| {
+        if error.path.is_empty() {
+            error.message.clone()
+        } else {
+            format!("{}: {}", error.path, error.message)
+        }
+    }));
+    lines.join("\n")
 }
 
 /// Caps a refusal's field errors exactly once, whether they came from the protocol's validator

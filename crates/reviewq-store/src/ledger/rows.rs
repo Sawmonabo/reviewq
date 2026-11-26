@@ -6,7 +6,7 @@ use reviewq_app::ledger::{
     Author, FindingFields, FindingLine, FindingOutcome, FindingRecord, NoteKey, NoteRecord,
     NoteSection, RecordField,
 };
-use reviewq_app::reports::{FindingBasis, FindingDetails, FindingLocation};
+use reviewq_app::reports::{FindingBasis, FindingDetails, FindingLocation, FindingPreview};
 use reviewq_domain::ledger::{FindingId, RecordRevision};
 use rusqlite::{Connection, Row, params};
 use serde_json::{Value, json};
@@ -72,20 +72,30 @@ pub(super) fn finding(row: &Row<'_>, at: usize) -> Result<FindingRecord, StoreEr
     })
 }
 
-/// A finding's card details at one revision, as the report context shows them.
-pub(crate) fn details_at(
+/// What the Findings panel shows of a finding at one revision. It reads only those columns,
+/// so a long `details` or proposed comment is never loaded for the panel.
+pub(crate) fn preview_at(
     db: &Connection,
     run: &str,
     id: FindingId,
     revision: i64,
-) -> Result<Option<FindingDetails>, StoreError> {
+) -> Result<Option<FindingPreview>, StoreError> {
     let mut statement = db.prepare_cached(
-        "SELECT c.locations, c.issue, c.consequence, c.evidence_kind, c.evidence,
-           c.proposed_comment, c.details
+        "SELECT c.locations, c.consequence, c.evidence_kind, c.evidence
          FROM ledger_changes c WHERE c.run_id=?1 AND c.finding=?2 AND c.revision=?3",
     )?;
     let mut found = statement.query(params![run, id.number(), revision])?;
-    found.next()?.map(|row| details(row, 0)).transpose()
+    let Some(row) = found.next()? else {
+        return Ok(None);
+    };
+    Ok(Some(FindingPreview {
+        locations: locations(text(row, 0)?)?,
+        consequence: row.get(1)?,
+        evidence: FindingBasis {
+            kind: parse(text(row, 2)?)?,
+            text: row.get(3)?,
+        },
+    }))
 }
 
 /// Decodes the seven detail columns, `locations` through `details` in `FINDING_COLUMNS`

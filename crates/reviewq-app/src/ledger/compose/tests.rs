@@ -4,7 +4,7 @@ use reviewq_domain::identity::MergeRequestIid;
 use reviewq_domain::ledger::{FindingId, RecordRevision, VersionKind};
 
 use super::*;
-use crate::ledger::{Author, FindingRecord, NoteKey, ParentFinding, Span};
+use crate::ledger::{Author, FindingFields, FindingRecord, NoteKey, ParentFinding, Span};
 use crate::reports::{
     Coverage, DisplayIndex, FindingBasis, FindingConclusion, FindingDetails, FindingDisposition,
     FindingLocation, Publication, Verdict, build_report_display_index,

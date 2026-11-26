@@ -1,5 +1,5 @@
 //! The rule ReviewQ states to the model, written once, and the read-back after compaction: the
-//! rule, the open pass and what it owes, with the question it waits on, and one line per active
+//! rule, the open pass and what it owes, with the question it asked, and one line per active
 //! finding with its title quoted as data, newest change first, within 4,000 characters.
 
 use std::fmt::Write as _;
@@ -43,12 +43,12 @@ pub(crate) fn append_rule(text: &mut String) {
 }
 
 /// The read-back for a compacted lead session: the rule, what the open pass owes (with the
-/// question a waiting pass asked, quoted on one line), and one line per active finding (ID,
+/// question a held pass asked, quoted on one line), and one line per active finding (ID,
 /// revision, severity, blocking value and a title cut to 80 characters and quoted), newest
 /// change first, after a line that presents them as records agents filed, to be read as data.
 /// It holds at most 4,000 characters: the question is at most 1,024 characters, so the rule
-/// and the pass always fit, and when finding lines do not, the text ends with how many were
-/// left out. `None` unless `session` is a run's lead
+/// and the pass always fit, in under 3,500 even when every character of the question is
+/// escaped, and when finding lines do not, the text ends with how many were left out. `None` unless `session` is a run's lead
 /// session, so the hook shows nothing.
 pub async fn read_back(
     store: &(impl LedgerStore + ?Sized),

@@ -8,7 +8,7 @@ use rusqlite::{Connection, Row, params};
 
 use super::{current_receipt, optional, read_count, version};
 use crate::StoreError;
-use crate::ledger::details_at;
+use crate::ledger::preview_at;
 use crate::queue::{parse, text};
 
 pub(super) fn read(
@@ -89,21 +89,10 @@ pub(super) fn read(
             break;
         }
         let mut item = decode(collection, row)?;
-        if let Descriptor::Finding {
-            id,
-            record_revision,
-            details,
-            ..
-        } = &mut item
+        if let Descriptor::Finding { id, details, .. } = &mut item
             && let Ok(finding) = id.parse()
         {
-            *details = details_at(
-                connection,
-                run.as_str(),
-                finding,
-                record_revision.as_sqlite_integer(),
-            )?
-            .map(Box::new);
+            *details = preview_at(connection, run.as_str(), finding, row.get(4)?)?.map(Box::new);
         }
         items.push(item);
     }
@@ -115,11 +104,13 @@ pub(super) fn read(
     })
 }
 
+/// The page query of each collection. Finding IDs are canonical (`F-01`, `F-99`, `F-100`), so
+/// ordering and paging by length, then text, follow the finding number.
 fn query(collection: Collection) -> &'static str {
     match collection {
-        Collection::Findings =>
-            "SELECT f.finding_id, f.title, f.severity, f.blocking, f.section, f.category,
-                    f.record_revision, f.scalar_offset, f.scalar_length, f.evidence_sha256,
+        Collection::Findings => {
+            "SELECT f.finding_id, f.title, f.severity, f.blocking, f.record_revision,
+                    f.scalar_offset, f.scalar_length, f.evidence_sha256,
                     d.blocking, d.publication, d.reason
              FROM report_findings f
              LEFT JOIN finding_dispositions d ON d.run_id=f.run_id AND d.finding_id=f.finding_id
@@ -127,27 +118,34 @@ fn query(collection: Collection) -> &'static str {
                  SELECT MAX(a.disposition_version) FROM finding_dispositions a
                  WHERE a.run_id=f.run_id AND a.finding_id=f.finding_id AND a.disposition_version<=?4
                )
-             WHERE f.run_id=?1 AND f.receipt_id=?2 AND f.finding_id>?3
-             ORDER BY f.finding_id LIMIT ?5",
-        Collection::Changes =>
+             WHERE f.run_id=?1 AND f.receipt_id=?2
+               AND (length(f.finding_id), f.finding_id)>(length(?3), ?3)
+             ORDER BY length(f.finding_id), f.finding_id LIMIT ?5"
+        }
+        Collection::Changes => {
             "SELECT c.finding_id, c.conclusion, c.reason, c.checked_sha,
                 (SELECT json_group_array(d.discussion_id) FROM (
                     SELECT discussion_id FROM report_change_discussions
                     WHERE run_id=c.run_id AND receipt_id=c.receipt_id AND finding_id=c.finding_id
                     ORDER BY discussion_id
                 ) d)
-             FROM report_changes c WHERE c.run_id=?1 AND c.receipt_id=?2 AND c.finding_id>?3
-             ORDER BY c.finding_id LIMIT ?5",
-        Collection::Sections =>
+             FROM report_changes c WHERE c.run_id=?1 AND c.receipt_id=?2
+               AND (length(c.finding_id), c.finding_id)>(length(?3), ?3)
+             ORDER BY length(c.finding_id), c.finding_id LIMIT ?5"
+        }
+        Collection::Sections => {
             "SELECT title, scalar_offset, scalar_length, evidence_sha256
              FROM report_sections WHERE run_id=?1 AND receipt_id=?2 AND scalar_offset>?3
-             ORDER BY scalar_offset LIMIT ?5",
-        Collection::Dispositions =>
+             ORDER BY scalar_offset LIMIT ?5"
+        }
+        Collection::Dispositions => {
             "WITH available(finding_id) AS (
-                 SELECT finding_id FROM report_findings WHERE run_id=?1 AND receipt_id=?2 AND finding_id>?3
+                 SELECT finding_id FROM report_findings WHERE run_id=?1 AND receipt_id=?2
+                   AND (length(finding_id), finding_id)>(length(?3), ?3)
                  UNION
                  SELECT finding_id FROM finding_dispositions
-                 WHERE run_id=?1 AND receipt_id=?2 AND finding_id>?3 AND disposition_version<=?4
+                 WHERE run_id=?1 AND receipt_id=?2 AND disposition_version<=?4
+                   AND (length(finding_id), finding_id)>(length(?3), ?3)
              )
              SELECT a.finding_id, d.blocking, d.publication, d.reason
              FROM available a JOIN finding_dispositions d ON d.run_id=?1
@@ -155,12 +153,13 @@ fn query(collection: Collection) -> &'static str {
                  SELECT MAX(h.disposition_version) FROM finding_dispositions h
                  WHERE h.run_id=?1 AND h.finding_id=a.finding_id AND h.disposition_version<=?4
                )
-             WHERE d.removed=0 ORDER BY a.finding_id LIMIT ?5",
+             WHERE d.removed=0 ORDER BY length(a.finding_id), a.finding_id LIMIT ?5"
+        }
     }
 }
 
-/// Decodes one row of `query(collection)`. A finding's details are read from its record
-/// revision in `ledger_changes` afterwards.
+/// Decodes one row of `query(collection)`. A finding's details are read afterwards from its
+/// record revision, column 4, in `ledger_changes`.
 fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreError> {
     let range = |column: usize| -> Result<SourceRange, StoreError> {
         Ok(SourceRange {
@@ -175,17 +174,14 @@ fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreErro
             title: row.get(1)?,
             severity: parse(text(row, 2)?)?,
             blocking: row.get(3)?,
-            section: parse(text(row, 4)?)?,
-            category: row.get(5)?,
-            record_revision: revision(row.get(6)?)?,
-            source: range(7)?,
+            source: range(5)?,
             details: None,
             disposition: row
-                .get::<_, Option<String>>(12)?
+                .get::<_, Option<String>>(10)?
                 .map(|reason| {
                     Ok::<_, StoreError>(Box::new(FindingDisposition {
-                        blocking: row.get(10)?,
-                        publication: optional(row, 11)?,
+                        blocking: row.get(8)?,
+                        publication: optional(row, 9)?,
                         reason,
                     }))
                 })

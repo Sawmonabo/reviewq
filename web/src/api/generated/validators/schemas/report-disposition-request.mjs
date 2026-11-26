@@ -2,6 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate119 } from "./disposition-patch.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
+import { validate124 } from "./finding-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 function validate118(
   data,
@@ -112,7 +113,7 @@ function validate118(
               ) {
                 const _errs4 = errors;
                 if (
-                  !validate25(data.findingId, {
+                  !validate124(data.findingId, {
                     instancePath: instancePath + "/findingId",
                     parentData: data,
                     parentDataProperty: "findingId",
@@ -121,8 +122,8 @@ function validate118(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate25.errors
-                      : vErrors.concat(validate25.errors);
+                      ? validate124.errors
+                      : vErrors.concat(validate124.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs4 === errors;

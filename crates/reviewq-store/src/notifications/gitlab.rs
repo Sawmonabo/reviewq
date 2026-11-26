@@ -46,8 +46,8 @@ pub(crate) fn observe_head(
         "SELECT EXISTS(
            SELECT 1 FROM review_decisions WHERE review_id=?1 AND reviewed_sha IS NOT NULL AND reviewed_sha<>?2
            UNION ALL SELECT 1 FROM runs r JOIN report_heads h USING(run_id)
-             JOIN report_versions v USING(run_id,receipt_id) JOIN artifacts a USING(artifact_id)
-             WHERE r.review_id=?1 AND v.full_mr_reviewed_sha<>?2 AND a.sealed=1
+             JOIN report_versions v USING(run_id,receipt_id)
+             WHERE r.review_id=?1 AND v.full_mr_reviewed_sha<>?2
            UNION ALL SELECT 1 FROM notification_gitlab_observations WHERE review_id=?1 AND personally_approved=1
          )", params![review.as_str(),head.as_str()], |row| row.get(0),
     )?;

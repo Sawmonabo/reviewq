@@ -116,6 +116,33 @@ pub(super) async fn ack(
     signed(&entry, &proof, StatusCode::OK, result)
 }
 
+/// Whether Codex's stop hook has ever reported on this installation, which the installer
+/// reads to say, until it has, that the hooks still await the user's trust.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexHooks {
+    stop_hook_reported: bool,
+}
+
+/// `GET /control/codex-hooks`: the signed `CodexHooks` reply for the installer.
+pub(super) async fn codex_hooks(
+    State(entry): State<Arc<Entry>>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let target = uri
+        .path_and_query()
+        .ok_or(AppError::InvalidRequest)?
+        .as_str();
+    let proof = entry.auth.control("GET", target, &headers, b"")?;
+    let result = async {
+        let stop_hook_reported = entry.store.codex_stop_hook_reported().await?;
+        super::pages::success(CodexHooks { stop_hook_reported }, *entry.commits.borrow())
+    }
+    .await;
+    signed(&entry, &proof, StatusCode::OK, result)
+}
+
 fn authenticate<'a>(
     entry: &Entry,
     uri: &'a Uri,

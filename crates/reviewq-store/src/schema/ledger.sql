@@ -107,7 +107,7 @@ CREATE TABLE review_passes (
     held_at_ms INTEGER,
     hold_reason TEXT CHECK (length(hold_reason) BETWEEN 1 AND 1024),
     gate_turn_id TEXT CHECK (length(CAST(gate_turn_id AS BLOB)) BETWEEN 1 AND 512),
-    gate_blocks INTEGER NOT NULL DEFAULT 0 CHECK (gate_blocks BETWEEN 0 AND 2),
+    gate_blocks INTEGER NOT NULL DEFAULT 0 CHECK (gate_blocks >= 0),
     closed_by TEXT CHECK (closed_by IN ('publish', 'successor', 'archive')),
     closed_receipt_id TEXT,
     closed_at_ms INTEGER,
@@ -125,7 +125,6 @@ CREATE TABLE review_passes (
 ) STRICT;
 
 CREATE UNIQUE INDEX review_pass_current ON review_passes(run_id) WHERE state <> 'closed';
-CREATE INDEX review_pass_batch ON review_passes(review_id, batch_id) WHERE batch_id IS NOT NULL;
 
 CREATE TABLE ledger_calls (
     provider TEXT NOT NULL CHECK (provider IN ('codex', 'claude')),
@@ -146,9 +145,7 @@ CREATE INDEX ledger_call_closing ON ledger_calls(run_id, native_turn_id) WHERE t
 CREATE INDEX ledger_call_findings ON ledger_calls(run_id, accepted_at_ms)
     WHERE tool IN ('record_finding', 'assess_finding');
 
-CREATE TABLE hook_reports (
-    provider TEXT NOT NULL CHECK (provider IN ('codex', 'claude')),
-    event TEXT NOT NULL CHECK (event IN ('stop')),
-    reported_at_ms INTEGER NOT NULL,
-    PRIMARY KEY (provider, event)
-) STRICT, WITHOUT ROWID;
+-- One row once Codex's stop hook has reported on this installation.
+CREATE TABLE codex_stop_hook_reported (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1)
+) STRICT;

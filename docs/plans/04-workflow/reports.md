@@ -2,7 +2,7 @@
 
 **Start after HOST, HISTORY and SOURCES.** Deliver the findings ledger, the immutable composed report versions, exact review coverage, the unfinished-review state and feedback to the originating lead. Preserve historical versions and user decisions during failure and reconciliation. Use the [workflow and wire contract](../../specs/review-workflow.md#findings-ledger-and-report-versions), [worked review set](../01-foundation/fixtures.md#worked-review-set), [native evidence reader](../02-sessions/history.md) and [native entry points](../02-sessions/entrypoints.md).
 
-**The specification is ahead of the code.** The checkout still implements the earlier single hand-over call that pointed at a finished report. Every item under Implementation is open. The [build plan](findings-ledger-build.md) orders them as tasks: the earlier path is removed first, then the contract, storage and app are built, then the hosts.
+The [build plan](findings-ledger-build.md) orders the items under Implementation as tasks: the earlier single hand-over call is removed first, then the contract, storage and app are built, then the hosts.
 
 ## Deliverables and boundaries
 
@@ -18,7 +18,7 @@ For the display index over published versions, including chunk reuse, publicatio
 | `hosts/claude/plugin/hooks/ledger.js` | The six tool registrations and handlers, and the caller binding from the plugin event including a subagent's ID. [HOST](../02-sessions/hosts.md)'s `register.jsx` and `hooks.json` keep the registration points: they load this module, send the turn-end signal and carry the `Stop` gate and the `SessionStart` read-back. |
 | `crates/reviewq/src/install/codex_hook.rs` | Install and track the two Codex user hooks, `Stop` and `SessionStart`, and their reports. Remove the earlier `PreToolUse` entry. Never write Codex trust state. |
 
-`sha2` hashes the composed text. The composer writes Markdown and records offsets as it writes, so publishing needs no Markdown parser. `pulldown-cmark` stays only where the display path already uses it. [Dependency decisions](../../dependency-decisions.md)
+`sha2` hashes the composed text. The composer writes Markdown and records offsets as it writes, so no parse is needed to find a card or section. It parses a filed field only to check that the field stands alone and to shift its headings below the layout's own, with the parser the display path already uses. [Dependency decisions](../../dependency-decisions.md)
 
 ## Implementation
 

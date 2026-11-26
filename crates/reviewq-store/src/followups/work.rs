@@ -196,7 +196,7 @@ fn baseline(
     let mut statement = db.prepare_cached(
         "SELECT h.receipt_id,a.sha256,h.disposition_version FROM report_heads h
          JOIN report_versions v USING(run_id,receipt_id) JOIN artifacts a USING(artifact_id)
-         WHERE h.run_id=?1 AND a.sealed=1",
+         WHERE h.run_id=?1",
     )?;
     let mut rows = statement.query([run.as_str()])?;
     if let Some(row) = rows.next()? {
@@ -228,7 +228,7 @@ fn members(
                  original_note_id=o.original_note_id OR original_note_id IN (
                      SELECT original_note_id FROM followup_observation_origins l
                       WHERE l.review_id=o.review_id AND l.observation_id=o.observation_id))
-             ORDER BY finding_id) f),
+             ORDER BY length(finding_id), finding_id) f),
           (SELECT json_group_array(json_array(l.original_note_id,t.reviewer_id)) FROM followup_threads t
              JOIN followup_observation_origins l USING(review_id,generation,original_note_id)
              WHERE l.review_id=o.review_id AND l.observation_id=o.observation_id)

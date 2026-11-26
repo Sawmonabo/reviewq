@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
-import { schema363 } from "../metadata-9.mjs";
+import { schema364 } from "../metadata-9.mjs";
 import { validate116 } from "./review-id-dto.mjs";
-function validate1240(
+function validate1241(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -31,7 +31,7 @@ function validate1240(
           !func0.call(data, "reviewCheckout")) &&
           (missing0 = "reviewCheckout"))
       ) {
-        validate1240.errors = [
+        validate1241.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -44,7 +44,7 @@ function validate1240(
         if (data.cwd !== undefined && func0.call(data, "cwd")) {
           const _errs1 = errors;
           if (typeof data.cwd !== "string") {
-            validate1240.errors = [
+            validate1241.errors = [
               {
                 instancePath: instancePath + "/cwd",
                 schemaPath: "#/properties/cwd/type",
@@ -132,13 +132,13 @@ function validate1240(
                   let data4 = data.reviewCheckout;
                   const _errs6 = errors;
                   if (typeof data4 !== "string" && data4 !== null) {
-                    validate1240.errors = [
+                    validate1241.errors = [
                       {
                         instancePath: instancePath + "/reviewCheckout",
                         schemaPath: "#/properties/reviewCheckout/type",
                         keyword: "type",
                         params: {
-                          type: schema363.properties.reviewCheckout.type,
+                          type: schema364.properties.reviewCheckout.type,
                         },
                       },
                     ];
@@ -201,7 +201,7 @@ function validate1240(
         }
       }
     } else {
-      validate1240.errors = [
+      validate1241.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -212,7 +212,7 @@ function validate1240(
       return false;
     }
   }
-  validate1240.errors = vErrors;
+  validate1241.errors = vErrors;
   return errors === 0;
 }
-export { validate1240 };
+export { validate1241 };

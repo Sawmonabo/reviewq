@@ -1,4 +1,4 @@
-//! Find the unique exact passage in an admitted sealed report.
+//! Find the unique exact passage in a published report.
 
 use reviewq_app::access::AppError;
 use reviewq_app::reports::QuoteResolution;

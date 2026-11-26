@@ -11,7 +11,7 @@ Use two text fields. The title is `<ticket> · MR !<iid> · <event>`. Use the fi
 | RQ-41 · MR !42 · 3 new replies | Across 3 review discussions. |
 | RQ-41 · MR !42 · Codex needs your answer | Which revision should I review? |
 | RQ-41 · MR !42 · Findings ready | 2 findings · 1 blocking |
-| RQ-41 · MR !42 · Report update failed | Your last accepted findings are still available. |
+| RQ-41 · MR !42 · Report not published | Your last accepted findings are still available. |
 | RQ-41 · MR !42 · Follow-up complete | 2 discussions checked · findings unchanged. |
 
 These examples use synthetic data. Include a single short, verified detail. Format singular and plural, including zero, explicitly. Normalize whitespace, strip control characters, use plain text and use the existing Rust grapheme support to shorten text. Budget the encoded title and body together within the desktop protocol frame limit, including JSON escaping. Use a short native question only when a display-safe prompt is available. Otherwise use “Open Agent to answer.” Keep tool arguments, code, links with credentials, transcript bodies and raw provider errors out of desktop previews. Omit an unsupported detail. Windows and Chrome supply application identity in their own UI. [Windows notification guidance](https://learn.microsoft.com/en-us/windows/apps/develop/notifications/app-notifications/app-notifications-ux-guidance)
@@ -21,7 +21,7 @@ These examples use synthetic data. Include a single short, verified detail. Form
 | GitLab reply, edit, resolved or reopened discussion | “New reply”, “Reply edited”, “Discussion resolved” or “Discussion reopened”. For a batch, count distinct replies and discussions from the event members. Mixed changes can say “3 discussion updates” / “2 replies · 1 reopened”. |
 | Reviewed head changes or personal approval is withdrawn | “New commits after review” or “Your approval was withdrawn”. Use a verified short head or the project for context. |
 | Native question, permission, failed turn or Codex usage limit | Name the provider and the event, e.g. “Claude needs permission” or “Codex turn failed”. Give one useful next action. For a known account-wide quota episode shared across reviews, use “Codex usage limit” as the title and the affected review context in the body. |
-| Published version, unfinished or refused review, or `needs_input` | “Findings ready”, “Report update failed” or “Review needs input”. Use the count and blocking dispositions from that published version. Distinguish an unfinished full review from an unfinished selected-thread check (“Follow-up update failed”). Mention earlier findings only if a published version exists. An update that keeps its parent's attention lineage stays silent. |
+| Published version, unfinished or refused review, or `needs_input` | “Findings ready”, “Report not published” or “Review needs input”. Use the count and blocking dispositions from that published version. Distinguish an unfinished full review from an unfinished selected-thread check (“Follow-up update failed”). Mention earlier findings only if a published version exists. An update that keeps its parent's attention lineage stays silent. |
 | Accepted scoped follow-up or unconfirmed publication | “Follow-up complete” with the proved result, or “Publication needs verification” with the affected comment or approval when known. A successful scoped final that changes findings uses its verified findings result. |
 
 ## One owner for presentation and delivery

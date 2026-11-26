@@ -2,6 +2,7 @@
 //! bodies, and the one validator every entry point calls.
 
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use serde_json::{Map, Value};
 
@@ -25,7 +26,7 @@ pub use routes::{
 };
 #[cfg(feature = "schema")]
 pub use validate::validate_against;
-pub use validate::validate_ledger_input;
+pub use validate::{oversized_input, validate_ledger_input};
 
 /// The generated input schemas, one self-contained Draft 7 schema per tool name.
 const SCHEMAS: &str = include_str!("../../../contracts/ledger-tools.schema.json");
@@ -45,14 +46,19 @@ pub enum LedgerTool {
     NeedsInput,
 }
 
-/// Who may call a tool.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LedgerCaller {
-    /// The registered lead or one of its subagents.
-    LeadOrSubagent,
-    /// Only the registered lead itself.
-    Lead,
-}
+/// Largest JSON text of one tool's result, the text the model reads, on both hosts. A
+/// `review_ledger` page is the largest result. The store budgets a page at 64 KiB of the
+/// UTF-8 text of its records, or one record alone when it is larger, at most about 80 KiB;
+/// escaping a control character as `\u00XX` grows that text at most sixfold, to 480 KiB. The
+/// rest of a page is not budgeted but is bounded: at most 200 finding lines and 21 note lines,
+/// or 10 findings and 21 notes, each with an ID and author of at most 512 bytes, under 300 KiB
+/// escaped. So a full page always fits, and a refusal, at most 51 short field errors, does too.
+pub const MAX_LEDGER_RESULT_BYTES: usize = 1024 * 1024;
+
+/// What the model reads when ReviewQ does not answer a ledger call within its tool's deadline.
+/// The service may still have stored the call, so a blind repeat of a revision-guarded call
+/// would be refused as stale.
+pub const LEDGER_TIMED_OUT: &str = "ReviewQ did not answer this ledger call in time, but it may have stored it. Read the ledger with review_ledger before repeating the call.";
 
 /// Every ledger tool, in the order hosts list them.
 pub const LEDGER_TOOLS: [LedgerTool; 6] = [
@@ -89,13 +95,20 @@ impl LedgerTool {
         }
     }
 
-    /// Who may call the tool.
-    pub const fn caller(self) -> LedgerCaller {
+    /// How long ReviewQ takes at most to answer one call of the tool, on either host: the
+    /// Claude bridge's status check and call together, and the MCP server's handling of a Codex
+    /// call. `finish_review` composes and publishes a version, so it gets longer. Both are
+    /// chosen below the 60 seconds taken as Codex's default MCP tool timeout, so that ReviewQ's
+    /// own `LEDGER_TIMED_OUT` answers first; the Claude plugin waits a few seconds longer than
+    /// this for the bridge.
+    pub const fn deadline(self) -> Duration {
         match self {
-            Self::FinishReview | Self::NeedsInput => LedgerCaller::Lead,
-            Self::RecordFinding | Self::AssessFinding | Self::RecordNote | Self::ReviewLedger => {
-                LedgerCaller::LeadOrSubagent
-            }
+            Self::FinishReview => Duration::from_secs(55),
+            Self::RecordFinding
+            | Self::AssessFinding
+            | Self::RecordNote
+            | Self::ReviewLedger
+            | Self::NeedsInput => Duration::from_secs(30),
         }
     }
 

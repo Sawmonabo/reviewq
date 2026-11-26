@@ -66,6 +66,7 @@ mod workspace;
 
 pub use browser_desktop::{BrowserDesktop, BrowserOffer};
 pub use control::{BridgeDescriptor, ControlRequest, ServiceEndpoint, ServiceIdentity};
+pub use error::{field_error_text, ledger_refusal_text};
 
 use auth::Auth;
 use error::ApiError;
@@ -272,6 +273,7 @@ pub fn router(
         .route("/status", get(status))
         .route("/drawings/{reference}", get(diagrams::read))
         .route("/control/review", post(control_ops::review))
+        .route("/control/codex-hooks", get(control_ops::codex_hooks))
         .route(
             "/control/ack",
             post(control_ops::ack).layer(DefaultBodyLimit::max(160 * 1024)),

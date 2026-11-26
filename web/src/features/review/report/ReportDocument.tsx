@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { QuoteRef, ReportSummary } from "../../../api/generated/contracts/reports";
 import {
+  reportContext,
   reportDownload,
   reportFeedback,
   resolveReportQuote,
@@ -22,7 +23,6 @@ import { ReportDetails } from "./ReportDetails";
 import { ReportSource } from "./ReportSource";
 import { ReportTable } from "./ReportTable";
 import { RichReport } from "./RichReport";
-import { contextItems } from "./report-context";
 import { finishReading, readBookmark } from "./report-position";
 import { canWindowReport, wholeDocument, indexedDocument, reportMarkdown } from "./report-reader";
 import type { AcceptedFindingChange } from "./report-structure";
@@ -543,12 +543,32 @@ function readQuote(value: string): Quote | undefined {
   }
 }
 
-function acceptedChanges(runId: string, report: ReportSummary, signal: AbortSignal) {
-  return contextItems(
-    runId,
-    report,
-    (item): item is AcceptedFindingChange => item.kind === "change",
-    report.changeCount,
-    signal,
-  );
+// Reads every outcome recorded on the report. The count must match the report's own count.
+async function acceptedChanges(runId: string, report: ReportSummary, signal: AbortSignal) {
+  const changes = new Map<string, AcceptedFindingChange>();
+  let next: string | undefined;
+  do {
+    // The server halves a page until it fits the 64 KiB read; this only sets the usual size.
+    const result = await reportContext(runId, report.receiptId, "changes", next, signal, 20);
+    if (
+      result.data.baseReport?.receiptId !== report.receiptId ||
+      result.data.baseReport.sha256 !== report.sha256
+    )
+      throw new Error("The report changed while its outcomes were loading.");
+    for (const item of result.data.items) {
+      if (item.kind !== "change" || changes.has(item.findingId))
+        throw new Error("The report's outcomes repeat a finding or include another kind of item.");
+      changes.set(item.findingId, item);
+    }
+    const continuation = result.data.nextCursor;
+    if (
+      continuation &&
+      (!result.data.items.length || continuation === next || changes.size >= report.changeCount)
+    )
+      throw new Error("The report's outcomes ran past their recorded count or stopped advancing.");
+    next = continuation ?? undefined;
+  } while (next);
+  if (changes.size !== report.changeCount)
+    throw new Error("The report has fewer outcomes than it records.");
+  return changes;
 }

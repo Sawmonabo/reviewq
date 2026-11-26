@@ -47,7 +47,7 @@ const VERSION_SELECT: &str = "
         a.byte_length, a.total_code_points, a.line_count, a.max_line_bytes,
         v.coverage_source_sha, v.coverage_target_sha, v.kind, v.ledger_sequence, v.checked_at_ms
     FROM report_versions v JOIN artifacts a USING(artifact_id)
-    WHERE v.run_id=?1 AND a.sealed=1";
+    WHERE v.run_id=?1";
 
 impl ReportStore for SqliteStore {
     fn read_report(
@@ -267,7 +267,7 @@ impl ReportStore for SqliteStore {
                 let (hash, chunk): (String, Option<Vec<u8>>) = tx.query_row(
                     "SELECT a.sha256, c.raw FROM report_versions v JOIN artifacts a USING(artifact_id)
                      LEFT JOIN artifact_chunks c ON c.artifact_id=a.artifact_id AND c.ordinal=?3
-                     WHERE v.run_id=?1 AND v.receipt_id=?2 AND a.sealed=1",
+                     WHERE v.run_id=?1 AND v.receipt_id=?2",
                     params![run.as_str(), report.receipt_id.as_str(), ordinal],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 ).optional()?.ok_or(AppError::NotFound)?;

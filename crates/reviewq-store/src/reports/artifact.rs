@@ -1,4 +1,4 @@
-//! The immutable text of a report version, appended chunk by chunk and sealed once.
+//! The immutable text of a report version, written once with its hash and statistics.
 
 use reviewq_app::access::AppError;
 use reviewq_app::reports::{ArtifactStats, CHUNK_BYTES};
@@ -7,69 +7,62 @@ use rusqlite::{Connection, params};
 
 use crate::StoreError;
 
-/// Appends the next chunk of an unsealed artifact at its byte and scalar starts. A chunk that
-/// is empty, larger than `CHUNK_BYTES`, out of order or off the artifact's running offsets is a
-/// conflict and writes nothing.
-pub(crate) fn append(
+/// Writes `text` as artifact `artifact`: one row with its hash and statistics, then its
+/// chunks of at most `CHUNK_BYTES` in order, each ending on a character boundary and carrying
+/// its byte and scalar starts. Call it inside the transaction that references the artifact.
+pub(crate) fn write(
     db: &Connection,
     artifact: &str,
-    ordinal: u64,
-    start: (u64, u64),
     text: &str,
-) -> Result<(), StoreError> {
-    if text.is_empty() || text.len() > CHUNK_BYTES {
-        return Err(AppError::InvalidRequest.into());
-    }
-    let scalars = db_int(text.chars().count() as u64)?;
-    let ordinal = db_int(ordinal)?;
-    let (byte_start, scalar_start) = (db_int(start.0)?, db_int(start.1)?);
-    let valid = db.prepare_cached(
-        "UPDATE artifacts SET byte_length=byte_length+?4, total_code_points=total_code_points+?5
-         WHERE artifact_id=?1 AND sealed=0 AND byte_length=?2 AND total_code_points=?3
-           AND ?6=(SELECT coalesce(max(ordinal), -1)+1 FROM artifact_chunks WHERE artifact_id=?1)",
-    )?
-    .execute(params![artifact, byte_start, scalar_start, db_int(text.len() as u64)?, scalars, ordinal])?;
-    if valid != 1 {
-        return Err(AppError::Conflict.into());
-    }
-    db.prepare_cached(
-        "INSERT INTO artifact_chunks(artifact_id, ordinal, byte_start, scalar_start, raw)
-         VALUES(?1, ?2, ?3, ?4, ?5)",
-    )?
-    .execute(params![
-        artifact,
-        ordinal,
-        byte_start,
-        scalar_start,
-        text.as_bytes()
-    ])?;
-    Ok(())
-}
-
-/// Seals an artifact whose appended length matches `stats`, recording its hash and line
-/// statistics. Any mismatch, or an artifact already sealed, is a conflict.
-pub(crate) fn seal(
-    db: &Connection,
-    artifact: &str,
     hash: &ReportHash,
     stats: &ArtifactStats,
 ) -> Result<(), StoreError> {
-    let changed = db.execute(
-        "UPDATE artifacts SET sha256=?2, line_count=?3, max_line_bytes=?4, sealed=1
-         WHERE artifact_id=?1 AND byte_length=?5 AND total_code_points=?6 AND sealed=0",
-        params![
-            artifact,
-            hash.as_str(),
-            db_int(stats.line_count)?,
-            db_int(stats.max_line_bytes)?,
-            db_int(stats.byte_length)?,
-            db_int(stats.total_code_points)?
-        ],
+    db.prepare_cached(
+        "INSERT INTO artifacts(artifact_id, sha256, byte_length, total_code_points, line_count,
+           max_line_bytes) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+    )?
+    .execute(params![
+        artifact,
+        hash.as_str(),
+        db_int(stats.byte_length)?,
+        db_int(stats.total_code_points)?,
+        db_int(stats.line_count)?,
+        db_int(stats.max_line_bytes)?
+    ])?;
+    let mut insert = db.prepare_cached(
+        "INSERT INTO artifact_chunks(artifact_id, ordinal, byte_start, scalar_start, raw)
+         VALUES(?1, ?2, ?3, ?4, ?5)",
     )?;
-    if changed != 1 {
-        return Err(AppError::Conflict.into());
+    let (mut bytes, mut scalars) = (0_u64, 0_u64);
+    for (ordinal, chunk) in chunks(text).enumerate() {
+        insert.execute(params![
+            artifact,
+            db_int(ordinal as u64)?,
+            db_int(bytes)?,
+            db_int(scalars)?,
+            chunk.as_bytes()
+        ])?;
+        bytes += chunk.len() as u64;
+        scalars += chunk.chars().count() as u64;
     }
     Ok(())
+}
+
+/// The text in chunks of at most `CHUNK_BYTES`, each ending on a character boundary.
+fn chunks(text: &str) -> impl Iterator<Item = &str> {
+    let mut rest = text;
+    std::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        let mut end = rest.len().min(CHUNK_BYTES);
+        while !rest.is_char_boundary(end) {
+            end -= 1;
+        }
+        let (chunk, tail) = rest.split_at(end);
+        rest = tail;
+        Some(chunk)
+    })
 }
 
 fn db_int(value: u64) -> Result<i64, StoreError> {

@@ -43,9 +43,9 @@ pub async fn gate(
     Ok(block_reason(&answer))
 }
 
-/// The reason for a block, in under 600 characters: how many findings are on file, what each
-/// of the two calls does, and that one of them is owed before the turn ends. `None` for a
-/// release.
+/// The reason for a block, in under 600 characters plus a question the lead asked before the
+/// pass reopened: how many findings are on file, what each of the two calls does, and that
+/// one of them is owed before the turn ends. `None` for a release.
 fn block_reason(answer: &GateAnswer) -> Option<String> {
     let GateDecision::Block { .. } = answer.decision else {
         return None;
@@ -69,31 +69,46 @@ pub(super) fn findings_on_file(count: u32) -> String {
     }
 }
 
-/// What `pass` owes, for an agent. While it is open: the closing call with what it needs and
-/// that only it publishes, and `needs_input` for a review that must wait on the reviewer,
-/// which publishes nothing. While it waits: the question the lead asked, quoted as data on one
-/// line, and the closing call once the reviewer answers. The gate, the read-back and
+/// What `pass` owes, for an agent. While it waits: the question the lead asked, quoted as data
+/// on one line, and the closing call once the reviewer answers. Once the lead's next turn
+/// reopened it after a hold: that question again, the closing call if the lead has the answer
+/// and `needs_input` again if it still waits. While it is open and was never held: the closing
+/// call with what it needs and that only it publishes, and `needs_input` for a review that
+/// must wait on the reviewer, which publishes nothing. The gate, the read-back and
 /// `review_ledger`'s open pass all state it in these words.
 pub fn owed(pass: &OpenPass) -> String {
     let closing = closing_call(pass);
-    match pass.state {
-        PassState::Waiting => match &pass.question {
-            Some(question) => {
-                let mut sentence =
-                    "You asked the reviewer this with needs_input, quoted as you wrote it: "
-                        .to_owned();
-                // The tool input already bounds the question, so it is quoted whole.
-                push_quoted(&mut sentence, question, usize::MAX);
-                let _ = write!(sentence, ". Once the reviewer answers, {closing}.");
-                sentence
-            }
-            None => format!("Once the reviewer answers your question, {closing}."),
-        },
-        PassState::Open | PassState::Closed => format!(
+    match (pass.state, &pass.question) {
+        (PassState::Waiting, Some(question)) => {
+            let mut sentence = asked(question, "");
+            let _ = write!(sentence, ". Once the reviewer answers, {closing}.");
+            sentence
+        }
+        (PassState::Waiting, None) => {
+            format!("Once the reviewer answers your question, {closing}.")
+        }
+        (PassState::Open | PassState::Closed, Some(question)) => {
+            let mut sentence = asked(question, " earlier");
+            let _ = write!(
+                sentence,
+                ". If you now have the answer, {closing}: only that call shows the reviewer what is on file. If the review still waits for the answer, call needs_input again with that question and ask it in your reply as well."
+            );
+            sentence
+        }
+        (PassState::Open | PassState::Closed, None) => format!(
             "{}: only that call shows the reviewer what is on file. If the review must wait for the reviewer's answer to a question, call needs_input with that question instead and ask it in your reply as well; needs_input publishes nothing and only records that the review is waiting.",
             capitalized(&closing)
         ),
     }
+}
+
+/// `You asked the reviewer this{when} with needs_input, quoted as you wrote it: "…"`.
+fn asked(question: &str, when: &str) -> String {
+    let mut sentence =
+        format!("You asked the reviewer this{when} with needs_input, quoted as you wrote it: ");
+    // The tool input already bounds the question, so it is quoted whole.
+    push_quoted(&mut sentence, question, usize::MAX);
+    sentence
 }
 
 /// The closing call `pass` owes, as an instruction: `call finish_review with …`. A full

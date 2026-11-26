@@ -413,17 +413,6 @@
 .report-previous-threads [data-report-thread-status="attention"] {
   color: var(--amber);
 }
-.report-previous-threads .report-thread-outcome {
-  display: block;
-  font-size: 10px;
-  font-weight: 600;
-}
-.report-previous-threads .report-thread-outcome:first-child {
-  margin-bottom: 4px;
-}
-.report-previous-threads .report-thread-outcome:last-child {
-  margin-top: 4px;
-}
 .report-finding-assessment {
   color: var(--amber);
 }

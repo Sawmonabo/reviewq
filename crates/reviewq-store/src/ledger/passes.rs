@@ -1,6 +1,7 @@
 //! Review passes: opened inside the launch confirmation, the batch delivery and the first
 //! record write, held by `needs_input`, reopened by the lead's next turn, ended by a
-//! successor batch or archiving. Also the stop gate, the read-back and the hook reports.
+//! successor batch or archiving. Also the stop gate, the read-back and the Codex stop hook's
+//! report.
 
 use reviewq_app::access::AppError;
 use reviewq_app::events::ResourceKey;
@@ -11,10 +12,8 @@ use reviewq_app::ledger::{
 use reviewq_app::notifications::{Kind, Observation, Source};
 use reviewq_domain::identity::{NativeTurnId, ReviewId, RunId};
 use reviewq_domain::ledger::{
-    CallerRole, GateDecision, GateFacts, PassEvent, PassKind, PassState, Tool, gate, may_call,
-    opens_pass,
+    CallerRole, GateDecision, GateFacts, PassKind, PassState, Tool, gate, may_call,
 };
-use reviewq_domain::session::HostProvider;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::rows::LINE_COLUMNS;
@@ -25,7 +24,7 @@ use crate::events::now_ms;
 use crate::followups::completion;
 use crate::notifications::{insert_notification, publish};
 use crate::queue::{parse, text};
-use crate::workspace::{advance_queue, provider_label};
+use crate::workspace::advance_queue;
 
 /// A pass's state as the lead sees it: a held pass reads as open once the lead's next input
 /// is newer than the hold, a started ReviewQ message or a new Claude turn. Writes that see a
@@ -37,13 +36,21 @@ pub(super) const PASS_STATE: &str = "CASE WHEN p.state='waiting' AND (
              WHERE r.run_id=p.run_id AND p.held_turn_id IS NOT NULL AND c.turn_id<>p.held_turn_id))
     THEN 'open' ELSE p.state END";
 
+/// Whether settling decides anything for the run `run`, an SQL expression, once its lead is
+/// idle: it has a pass that `PASS_STATE` reads as open, or no pass and records changed after
+/// its published version. The other facts `settle` reads only hold a run back.
+pub(crate) fn awaits_idle_lead(run: &str) -> String {
+    format!(
+        "(EXISTS(SELECT 1 FROM review_passes p WHERE p.run_id={run} AND p.state<>'closed'
+            AND {PASS_STATE}='open')
+          OR (NOT EXISTS(SELECT 1 FROM review_passes p WHERE p.run_id={run} AND p.state<>'closed')
+            AND EXISTS(SELECT 1 FROM ledger_runs l JOIN report_heads h USING(run_id)
+              WHERE l.run_id={run} AND l.sequence>l.published_sequence)))"
+    )
+}
+
 /// The hold reason that frees an executing batch's slot once the lead is idle.
 const INPUT_REQUIRED: &str = "followup_native_input_required";
-
-/// What opened a pass.
-pub(super) enum Opener<'a> {
-    Record(&'a str),
-}
 
 /// The run's pass that is not closed, as `PASS_STATE` reads it.
 pub(super) struct PassRow {
@@ -57,8 +64,8 @@ pub(super) struct PassRow {
     pub(super) batch: Option<String>,
     gate_turn: Option<String>,
     gate_blocks: u8,
-    /// The question `needs_input` stored, read only while `state` is `Waiting`: a held pass
-    /// that `PASS_STATE` reads as open may still store the question it no longer waits on.
+    /// The question the last `needs_input` stored: the one a waiting pass waits on, or, once
+    /// the lead's next turn reopened the pass, the one it asked before.
     question: Option<String>,
 }
 
@@ -83,10 +90,7 @@ pub(super) fn current(db: &Connection, run: &str) -> Result<Option<PassRow>, Sto
         gate_turn: row.get(5)?,
         gate_blocks: u8::try_from(row.get::<_, i64>(6)?).map_err(|_| AppError::Internal)?,
         opened_at_ms: row.get(7)?,
-        question: match state {
-            PassState::Waiting => row.get(8)?,
-            PassState::Open | PassState::Closed => None,
-        },
+        question: row.get(8)?,
     }))
 }
 
@@ -130,16 +134,15 @@ pub(super) fn describe(db: &Connection, row: &PassRow) -> Result<OpenPass, Store
     })
 }
 
-/// Opens a pass unless the run already has one that is not closed.
-pub(super) fn open(
+/// Opens the full-review pass of the record write `call`, unless the run already has a pass
+/// that is not closed.
+pub(super) fn open_for_record(
     db: &Connection,
     run: &str,
-    kind: PassKind,
-    opener: Opener<'_>,
+    call: &str,
     opened_sequence: u64,
     time: i64,
 ) -> Result<(), StoreError> {
-    let Opener::Record(call) = opener;
     db.prepare_cached(
         "INSERT INTO review_passes(run_id, kind, state, opened_by, call_id, opened_sequence,
            opened_at_ms, lead_started_at_ms)
@@ -147,7 +150,7 @@ pub(super) fn open(
     )?
     .execute(params![
         run,
-        kind.as_str(),
+        PassKind::FullReview.as_str(),
         call,
         i64::try_from(opened_sequence).map_err(|_| AppError::Internal)?,
         time
@@ -168,9 +171,6 @@ fn started_at_open(run: &str, time: &str) -> String {
 /// Opens the full-review pass of a launch that just became confirmed. Inside the launch's
 /// confirmation transaction; opens nothing when the launch is not confirmed or bound to a run.
 pub(crate) fn open_for_launch(db: &Connection, launch: &str, time: i64) -> Result<(), StoreError> {
-    let Some(kind) = opens_pass(PassEvent::ReviewStarted) else {
-        return Ok(());
-    };
     let started = started_at_open("l.run_id", "?3");
     db.prepare_cached(&format!(
         "INSERT INTO review_passes(run_id, kind, state, opened_by, launch_id, opened_sequence,
@@ -180,7 +180,7 @@ pub(crate) fn open_for_launch(db: &Connection, launch: &str, time: i64) -> Resul
          FROM launch_attempts l WHERE l.id=?1 AND l.state='confirmed' AND l.run_id IS NOT NULL
          ON CONFLICT DO NOTHING"
     ))?
-    .execute(params![launch, kind.as_str(), time])?;
+    .execute(params![launch, PassKind::FullReview.as_str(), time])?;
     Ok(())
 }
 
@@ -192,9 +192,6 @@ pub(crate) fn open_for_batch(
     batch: &str,
     time: i64,
 ) -> Result<(), StoreError> {
-    let Some(kind) = opens_pass(PassEvent::BatchDelivered) else {
-        return Ok(());
-    };
     db.prepare_cached(
         "UPDATE review_passes SET state='closed', closed_by='successor', closed_at_ms=?3
          WHERE run_id=(SELECT run_id FROM followup_batches WHERE review_id=?1 AND batch_id=?2)
@@ -210,7 +207,12 @@ pub(crate) fn open_for_batch(
          FROM followup_batches b WHERE b.review_id=?1 AND b.batch_id=?2 AND b.state='executing'
          ON CONFLICT DO NOTHING"
     ))?
-    .execute(params![review.as_str(), batch, kind.as_str(), time])?;
+    .execute(params![
+        review.as_str(),
+        batch,
+        PassKind::SelectedThreads.as_str(),
+        time
+    ])?;
     Ok(())
 }
 
@@ -262,7 +264,8 @@ pub(crate) fn mark_started(db: &Connection, run: &str, time: i64) -> Result<(), 
 
 /// Stores the reopening of a held pass: the lead's stored activity started a new turn
 /// (`input`), its next input is newer than the hold, or it calls in a turn other than the one
-/// that held it. A batch still waiting for the lead keeps its slot again.
+/// that held it. The pass keeps the question it asked, so what it owes can name it. A batch
+/// still waiting for the lead keeps its slot again.
 pub(super) fn reopen(
     db: &Connection,
     run: &str,
@@ -270,8 +273,7 @@ pub(super) fn reopen(
     input: bool,
 ) -> Result<(), StoreError> {
     let sql = format!(
-        "UPDATE review_passes AS p SET state='open', held_turn_id=NULL, held_at_ms=NULL,
-           hold_reason=NULL
+        "UPDATE review_passes AS p SET state='open', held_turn_id=NULL
          WHERE p.run_id=?1 AND p.state<>'closed' AND p.state='waiting'
            AND (?3 OR (?2 IS NOT NULL AND p.held_turn_id IS NOT NULL AND ?2<>p.held_turn_id)
              OR {PASS_STATE}='open')
@@ -408,6 +410,26 @@ pub(super) fn hold(
     Ok(receipt)
 }
 
+/// The lead's own accepted record write proves its turn is running, so a stored `idle` or
+/// `failed` state, observed before the call, says nothing now: it becomes unknown, through the
+/// one activity writer, until the host reports the lead again. Unknown rather than working,
+/// because a change to working starts a turn and would reopen a hold made earlier in this
+/// same turn. A lead stored as working, blocked or unknown is left alone. Returns whether the
+/// stored activity changed.
+pub(super) fn lead_calling(db: &Connection, run: &str) -> Result<bool, StoreError> {
+    let lead: Option<String> = db
+        .prepare_cached(
+            "SELECT s.session_key FROM runs r JOIN sessions s ON s.session_key=r.lead_session_key
+             WHERE r.run_id=?1 AND s.host_activity IN ('idle','failed')",
+        )?
+        .query_row([run], |row| row.get(0))
+        .optional()?;
+    match lead {
+        Some(session) => crate::hosts::record_activity(db, &session, None, false),
+        None => Ok(false),
+    }
+}
+
 /// Stores the run's lead as working, through the one activity writer, unless it is already
 /// working or blocked. Returns whether the stored activity changed.
 fn lead_working(db: &Connection, run: &str) -> Result<bool, StoreError> {
@@ -430,27 +452,40 @@ fn lead_working(db: &Connection, run: &str) -> Result<bool, StoreError> {
 /// The target `needs_input` and `finish_review` store: the run, since neither names a record.
 pub(super) const RUN_TARGET: &str = "run";
 
-/// Answers one stop request and notes that the provider's stop hook reported.
+/// The release of a stop request that needs no write: one from a session that is not a run's
+/// lead, when it is Claude's or Codex's stop hook report is already stored. `None` when the
+/// request needs `answer`.
+pub(super) fn released(
+    db: &Connection,
+    request: &GateRequest,
+) -> Result<Option<GateAnswer>, StoreError> {
+    if matches!(request.session, HookSession::Codex(_)) && !stop_hook_reported(db)? {
+        return Ok(None);
+    }
+    Ok(match caller::hook(db, &request.session)? {
+        Some((_, _, true)) => None,
+        _ => Some(RELEASE),
+    })
+}
+
+const RELEASE: GateAnswer = GateAnswer {
+    decision: GateDecision::Release { blocks: 0 },
+    pass: None,
+    active_findings: 0,
+};
+
+/// Answers one stop request and, for Codex, stores that its stop hook reported.
 pub(super) fn answer(db: &Connection, request: &GateRequest) -> Result<GateAnswer, StoreError> {
-    let provider = match request.session {
-        HookSession::Claude(_) => HostProvider::Claude,
-        HookSession::Codex(_) => HostProvider::Codex,
+    if matches!(request.session, HookSession::Codex(_)) {
+        db.prepare_cached(
+            "INSERT INTO codex_stop_hook_reported(singleton) VALUES(1) ON CONFLICT DO NOTHING",
+        )?
+        .execute([])?;
+    }
+    let Some((run, session, true)) = caller::hook(db, &request.session)? else {
+        return Ok(RELEASE);
     };
     let time = now_ms()?;
-    db.prepare_cached(
-        "INSERT INTO hook_reports(provider, event, reported_at_ms) VALUES(?1, 'stop', ?2)
-         ON CONFLICT(provider, event) DO UPDATE SET reported_at_ms=excluded.reported_at_ms
-         WHERE reported_at_ms < excluded.reported_at_ms - 3600000",
-    )?
-    .execute(params![provider_label(provider), time])?;
-    let release = GateAnswer {
-        decision: GateDecision::Release { blocks: 0 },
-        pass: None,
-        active_findings: 0,
-    };
-    let Some((run, session, true)) = caller::hook(db, &request.session)? else {
-        return Ok(release);
-    };
     let run = run.as_str();
     lead_seen(db, run, request.turn.as_ref(), time)?;
     let row = current(db, run)?;
@@ -528,14 +563,9 @@ pub(super) fn lines(
     Ok(lines)
 }
 
-pub(super) fn last_stop_hook_report(
-    db: &Connection,
-    provider: HostProvider,
-) -> Result<Option<i64>, StoreError> {
+/// Whether Codex's stop hook has ever reported on this installation.
+pub(super) fn stop_hook_reported(db: &Connection) -> Result<bool, StoreError> {
     Ok(db
-        .prepare_cached(
-            "SELECT reported_at_ms FROM hook_reports WHERE provider=?1 AND event='stop'",
-        )?
-        .query_row([provider_label(provider)], |row| row.get(0))
-        .optional()?)
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM codex_stop_hook_reported)")?
+        .query_row([], |row| row.get(0))?)
 }

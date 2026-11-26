@@ -353,9 +353,6 @@ pub enum Descriptor {
         title: String,
         severity: Severity,
         blocking: bool,
-        section: FindingSection,
-        category: String,
-        record_revision: RevisionDto,
         source: SourceRange,
         #[serde(skip_serializing_if = "Option::is_none")]
         details: Option<Box<FindingDetails>>,
@@ -381,18 +378,15 @@ pub enum Descriptor {
     },
 }
 
+/// What a finding card in the Findings panel shows beside its title and badges. The rest of
+/// the finding is in the report text at the descriptor's `source`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FindingDetails {
     pub locations: Vec<FindingLocation>,
-    pub issue: String,
     pub consequence: String,
     pub evidence: FindingBasis,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub proposed_comment: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -439,7 +433,7 @@ pub struct DispositionRequest {
     pub submission_id: crate::SubmissionIdDto,
     pub expected_version: RevisionDto,
     pub receipt_id: ResourceIdDto,
-    pub finding_id: ResourceIdDto,
+    pub finding_id: FindingIdDto,
     pub disposition: DispositionPatch,
 }
 

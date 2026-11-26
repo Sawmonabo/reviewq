@@ -73,8 +73,8 @@ CREATE VIEW review_activity_evidence AS
       EXISTS (SELECT 1 FROM review_active_sessions n WHERE n.run_id=x.run_id
          AND n.host_activity='failed') AS family_failed,
       action.state AS action_state, action.intent AS action_intent,
-      CASE WHEN EXISTS (SELECT 1 FROM report_delivery_failures f WHERE f.run_id=x.run_id
-                        AND f.resolved_at_ms IS NULL) THEN 'failed' END AS report_state,
+      EXISTS (SELECT 1 FROM report_delivery_failures f WHERE f.run_id=x.run_id
+         AND f.resolved_at_ms IS NULL) AS report_failed,
       coalesce((SELECT batch.state FROM followup_batches batch JOIN followup_monitors monitor USING(review_id)
          WHERE batch.review_id=r.review_id AND batch.generation=monitor.generation AND monitor.state='enabled'
            AND batch.authority_verified=1 AND batch.state IN ('pending','reserved','executing','reconciliation')
@@ -138,7 +138,7 @@ CREATE VIEW review_activity_evidence AS
 CREATE VIEW review_activity AS
     SELECT e.*, (SELECT run_id FROM sessions s WHERE s.session_key=e.focus_session) AS focus_run, reviewq_stage(
         is_open,run_id IS NOT NULL,host_activity,blocking_question,has_questions,family_working,family_failed,
-        action_state,action_intent,report_state,followup_state,uncertain_delivery,personal_approval,
+        action_state,action_intent,report_failed,followup_state,uncertain_delivery,personal_approval,
         approval_withdrawn,pending_source,pending_report,current_decision,our_comments>0,recovery_state
     ) AS stage_reason,
     reviewq_queue_state(is_open,personal_approval,pending_source,changed_after_handoff,current_decision,our_comments>0) AS queue_state

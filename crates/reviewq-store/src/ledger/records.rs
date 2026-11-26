@@ -1,17 +1,17 @@
 //! `write_record`: one immediate transaction that replays a known call, applies the duplicate
 //! rules, the expected revision and the per-run limits, then writes the record, its change row,
-//! the run's ledger sequence, a pass when one opens, and the call's result.
+//! the run's ledger sequence, a pass when one opens, the lead's activity when its own call
+//! makes a stored idle state stale, and the call's result.
 
 use reviewq_app::access::AppError;
+use reviewq_app::events::ResourceKey;
 use reviewq_app::ledger::{
     Author, CallBinding, Caller, FindingAssessment, FindingFields, FindingPatch, FindingRecord,
     MAX_ACTIVE_FINDINGS, MAX_EXTRA_NOTES, NoteKey, NoteSection, NoteWrite, RecordField,
     RecordReceipt, RecordWrite, Recorded, WriteRefusal,
 };
 use reviewq_domain::identity::Revision;
-use reviewq_domain::ledger::{
-    CallerRole, FindingId, PassEvent, RecordRevision, may_call, opens_pass,
-};
+use reviewq_domain::ledger::{CallerRole, FindingId, RecordRevision, may_call, record_opens_pass};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::calls::{self, NEW_FINDING, finding_target, note_target};
@@ -22,7 +22,7 @@ use super::{active_findings, caller, passes, unpublished};
 use crate::StoreError;
 use crate::connection::WriteTx;
 use crate::events::now_ms;
-use crate::workspace::provider_label;
+use crate::workspace::{advance_queue, provider_label};
 
 /// A write that passed every rule: the record to store, or the stored one when the write
 /// equals it.
@@ -78,8 +78,10 @@ pub(super) fn write(
         Err(refusal) => return Ok(Err(refusal)),
     };
     let time = now_ms()?;
+    let mut activity_changed = false;
     if caller.role() == CallerRole::Lead {
         passes::lead_seen(db, run.as_str(), caller.turn.as_ref(), time)?;
+        activity_changed = passes::lead_calling(db, run.as_str())?;
     }
     let changed = match &planned {
         Planned::Finding { changed, .. } | Planned::Note { changed, .. } => *changed,
@@ -117,6 +119,10 @@ pub(super) fn write(
     };
     let result = calls::receipt_json(&receipt);
     calls::store(db, &caller, tool, &target, sequence, &result, time)?;
+    if activity_changed {
+        advance_queue(&tx.sql)?;
+        tx.emit(&[ResourceKey::Queue, ResourceKey::Run(Some(run.clone()))])?;
+    }
     Ok(Ok(Recorded { run, receipt }))
 }
 
@@ -620,19 +626,9 @@ fn open_pass(
         .prepare_cached("SELECT EXISTS(SELECT 1 FROM report_heads WHERE run_id=?1)")?
         .query_row([run], |row| row.get(0))?;
     let pass_open = passes::current_id(db, run)?.is_some();
-    if let Some(kind) = opens_pass(PassEvent::RecordFiled {
-        has_version,
-        pass_open,
-    }) {
+    if record_opens_pass(has_version, pass_open) {
         let before = sequence.get().saturating_sub(1);
-        passes::open(
-            db,
-            run,
-            kind,
-            passes::Opener::Record(&caller.call_id),
-            before,
-            time,
-        )?;
+        passes::open_for_record(db, run, &caller.call_id, before, time)?;
     }
     Ok(())
 }

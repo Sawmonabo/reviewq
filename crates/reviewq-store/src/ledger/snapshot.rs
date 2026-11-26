@@ -26,18 +26,7 @@ use crate::reports::authority::for_project;
 /// `finish_review`'s read: a replay, the snapshot of a call from the run's lead, or a refusal
 /// the caller records.
 pub(super) fn closing(db: &Connection, binding: &CallBinding) -> Result<ClosingRead, StoreError> {
-    let caller = match caller::resolve(db, binding) {
-        Ok(caller) => caller,
-        Err(error) => {
-            let error = error.app();
-            if matches!(error, AppError::Forbidden)
-                && let Some(run) = caller::former_lead(db, &binding.session)?
-            {
-                return Ok(ClosingRead::Refused(refused(db, run, binding)?));
-            }
-            return Err(error.into());
-        }
-    };
+    let caller = caller::resolve(db, binding)?;
     if caller.role() != CallerRole::Lead {
         return Err(AppError::Forbidden.into());
     }

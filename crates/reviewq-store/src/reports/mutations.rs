@@ -5,6 +5,7 @@ use reviewq_app::reports::{
     ViewedReport,
 };
 use reviewq_domain::identity::{ReceiptId, Revision, RunId};
+use reviewq_domain::ledger::FindingId;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use sha2::{Digest, Sha256};
 
@@ -26,9 +27,7 @@ impl ReportMutationStore for SqliteStore {
         edit: DispositionEdit,
     ) -> AppFuture<'_, Snapshot<DispositionReceipt>> {
         Box::pin(async move {
-            if edit.finding_id.is_empty()
-                || edit.finding_id.len() > 64
-                || edit.finding_id.chars().any(char::is_control)
+            if edit.finding_id.parse::<FindingId>().is_err()
                 || edit.reason.trim().is_empty()
                 || edit.reason.len() > 384
                 || (edit.blocking.is_none() && edit.publication.is_none())

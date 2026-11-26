@@ -9,13 +9,13 @@ use axum::http::{header, request::Parts};
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::ledger::{CallBinding, HostSession};
 use reviewq_protocol::ResourceIdDto;
-use reviewq_protocol::ledger::{LEDGER_TOOLS, LedgerTool};
+use reviewq_protocol::ledger::{LEDGER_TOOLS, LedgerTool, MAX_LEDGER_RESULT_BYTES};
 use rmcp::RoleServer;
-use rmcp::model::{JsonObject, RequestMetaObject, Tool};
+use rmcp::model::{CallToolResult, ContentBlock, JsonObject, RequestMetaObject, Tool};
 use rmcp::service::RequestContext;
 use serde_json::Value;
 
-use crate::entry::features::ledger::{self, LedgerResult};
+use crate::entry::features::ledger;
 use crate::entry::{ApiError, Entry};
 
 /// `_meta` key of the calling Codex thread.
@@ -55,22 +55,28 @@ pub(super) fn claude_client(context: &RequestContext<RoleServer>) -> bool {
         .is_some_and(|client| client.name == CLAUDE_CLIENT)
 }
 
-/// Runs one ledger tool call from Codex through the handler the Claude routes use. The caller
-/// is the thread `_meta` names, with its parent thread from the turn metadata when present and
-/// the request's checkout grant.
+/// Runs one ledger tool call from Codex through the handler the Claude routes use and returns
+/// its result as JSON text. The caller is the thread `_meta` names, with its parent thread from
+/// the turn metadata when present and the request's checkout grant.
 ///
 /// Fails with `Forbidden` when `_meta` names no thread or no call, because such a call cannot
-/// be attributed, and with `InvalidRequest` for a malformed thread or turn ID. Otherwise fails
-/// as the handler does.
+/// be attributed, with `InvalidRequest` for a malformed thread or turn ID, and with
+/// `PayloadTooLarge` for a result text above `MAX_LEDGER_RESULT_BYTES`, the limit the Claude
+/// bridge applies too. Otherwise fails as the handler does.
 pub(super) async fn call(
     entry: &Entry,
     tool: LedgerTool,
     meta: &RequestMetaObject,
     actor: Actor,
     input: JsonObject,
-) -> Result<LedgerResult, ApiError> {
+) -> Result<CallToolResult, ApiError> {
     let binding = binding(meta, actor)?;
-    ledger::call(entry, binding, tool, &Value::Object(input)).await
+    let result = ledger::call(entry, binding, tool, &Value::Object(input)).await?;
+    let text = serde_json::to_string(&result).map_err(|_| AppError::Internal)?;
+    if text.len() > MAX_LEDGER_RESULT_BYTES {
+        return Err(AppError::PayloadTooLarge.into());
+    }
+    Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
 }
 
 fn binding(meta: &RequestMetaObject, actor: Actor) -> Result<CallBinding, AppError> {

@@ -79,8 +79,8 @@ export function ReportHistory({
     >
       <Modal title="History" className="report-history-dialog" onClose={onClose}>
         {update?.state === "failed" && (
-          <section className="report-update-status" aria-label="Report update failed">
-            <h3>Report update failed</h3>
+          <section className="report-update-status" aria-label="Report not published">
+            <h3>Report not published</h3>
             {update.reason && <p>{update.reason}</p>}
             {accepted && (
               <p className="meta">

@@ -13,6 +13,12 @@ pub struct TrackedNative {
     pub child_cursor: Option<NativeChildCursor>,
     pub started_at_ms: i64,
     pub questions: Vec<ObservedAsyncQuestion>,
+    /// The session is its run's lead, and the run has an open pass that is not waiting, or
+    /// unpublished records on a published version and no pass: whether the lead is idle can
+    /// change what settling does. Only then does a provider read the saved turns of a thread
+    /// its connection has not loaded to tell whether it is idle; otherwise such a thread is
+    /// unknown.
+    pub idle_decides: bool,
 }
 
 pub struct NativeChildCursor {

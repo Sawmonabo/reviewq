@@ -142,40 +142,6 @@ fn lead_with_grant(
     Ok(covered.filter(|granted| granted == &lead))
 }
 
-/// The run a lead-less session belonged to as its top-level session, when it is no longer
-/// that run's registered lead. A closing call from it is refused with a failure.
-pub(super) fn former_lead(
-    db: &Connection,
-    session: &HostSession,
-) -> Result<Option<RunId>, StoreError> {
-    let (sql, key) = match session {
-        HostSession::Claude {
-            session,
-            agent: None,
-        } => (
-            "SELECT s.run_id FROM sessions s JOIN runs r USING(run_id)
-             WHERE s.session_key=?1 AND s.parent_session_key IS NULL
-               AND r.lead_session_key<>s.session_key",
-            session.as_str(),
-        ),
-        HostSession::Codex { thread, .. } => (
-            "SELECT s.run_id FROM sessions s JOIN runs r USING(run_id)
-             WHERE s.native_id=?1 AND s.provider='codex' AND s.parent_session_key IS NULL
-               AND r.lead_session_key<>s.session_key",
-            thread.as_str(),
-        ),
-        HostSession::Claude { .. } => return Ok(None),
-    };
-    let mut statement = db.prepare_cached(sql)?;
-    let runs: Vec<String> = statement
-        .query_map([key], |row| row.get(0))?
-        .collect::<Result<_, _>>()?;
-    match runs.as_slice() {
-        [run] => Ok(Some(parse(run)?)),
-        _ => Ok(None),
-    }
-}
-
 /// The session a hook names, its run, and whether it is that run's registered lead. `None`
 /// for a session in no run, or a Codex thread that two profiles share.
 pub(super) fn hook(

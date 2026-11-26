@@ -6,8 +6,8 @@ use std::io::{self, Write};
 
 use reviewq_protocol::followups::NextAction;
 use reviewq_protocol::ledger::{
-    AssessFinding, FinishReview, LEDGER_TOOLS, LedgerCaller, LedgerTool, NeedsInput, NoteSection,
-    RecordFinding, RecordNote, ReviewLedger, validate_against,
+    AssessFinding, FinishReview, LEDGER_TOOLS, LedgerTool, NeedsInput, NoteSection, RecordFinding,
+    RecordNote, ReviewLedger, validate_against,
 };
 use reviewq_protocol::reports::{
     Assessment, FindingBasis, FindingBasisKind, FindingConclusion, FindingLocation, FindingSection,
@@ -43,7 +43,7 @@ pub(super) fn export(mode: &str) -> Result<(), Box<dyn Error>> {
                     json!({
                         "name": tool.name(),
                         "description": tool.description(),
-                        "leadOnly": tool.caller() == LedgerCaller::Lead,
+                        "deadlineMs": tool.deadline().as_secs() * 1000,
                         "inputSchema": schema,
                     })
                 })

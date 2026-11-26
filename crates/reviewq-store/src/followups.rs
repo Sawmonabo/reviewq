@@ -160,7 +160,7 @@ fn selections(
            t.resolved, (SELECT json_group_array(f.finding_id) FROM (
                 SELECT finding_id FROM followup_thread_findings
                 WHERE review_id=t.review_id AND generation=t.generation AND original_note_id=t.original_note_id
-                ORDER BY finding_id LIMIT 50
+                ORDER BY length(finding_id), finding_id LIMIT 50
            ) f)
          FROM followup_threads t WHERE t.review_id=?1 AND t.generation=?2
          ORDER BY t.original_note_id LIMIT ?3"
@@ -237,7 +237,7 @@ fn results(
              (SELECT json_group_array(f.finding_id) FROM (
                  SELECT DISTINCT finding_id FROM followup_assessment_findings
                  WHERE review_id=r.review_id AND batch_id=r.batch_id
-                 ORDER BY finding_id LIMIT ?5
+                 ORDER BY length(finding_id), finding_id LIMIT ?5
              ) f),
              (SELECT substr(a.reason, 1, 150) FROM followup_assessments a
               WHERE a.review_id=r.review_id AND a.batch_id=r.batch_id
@@ -331,7 +331,7 @@ fn assessments(
             r.ordinal, (SELECT json_group_array(f.finding_id) FROM (
                  SELECT finding_id FROM followup_assessment_findings
                  WHERE review_id=a.review_id AND batch_id=a.batch_id AND discussion_id=a.discussion_id
-                 ORDER BY finding_id LIMIT 50
+                 ORDER BY length(finding_id), finding_id LIMIT 50
              ) f)
          FROM followup_results r JOIN followup_assessments a USING(review_id, batch_id)
          WHERE r.review_id=?1 AND r.ordinal BETWEEN CASE WHEN ?7 THEN ?2 ELSE 0 END AND ?2 AND

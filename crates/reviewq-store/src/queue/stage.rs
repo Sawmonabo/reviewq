@@ -19,7 +19,6 @@ pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
         let newest: Option<String> = args.get(2)?;
         let action: Option<String> = args.get(7)?;
         let intent: Option<String> = args.get(8)?;
-        let report: Option<String> = args.get(9)?;
         let followup: Option<String> = args.get(10)?;
         let decision: Option<String> = args.get(16)?;
         let recovery: Option<String> = args.get(18)?;
@@ -33,7 +32,7 @@ pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
             family_failed: args.get(6)?,
             action: action.as_deref(),
             action_intent: intent.as_deref(),
-            report_state: report.as_deref(),
+            report_failed: args.get(9)?,
             followup_state: followup.as_deref(),
             uncertain_delivery: args.get(11)?,
             personal_approval: args.get(12)?,

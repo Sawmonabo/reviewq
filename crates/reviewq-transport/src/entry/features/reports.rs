@@ -555,9 +555,6 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
             title,
             severity,
             blocking,
-            section,
-            category,
-            record_revision,
             source,
             details,
             disposition,
@@ -566,9 +563,6 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
             title,
             severity: project_severity(severity),
             blocking,
-            section: project_finding_section(section),
-            category,
-            record_revision: RevisionDto::new(record_revision.get()).ok_or(AppError::Internal)?,
             source: range(source)?,
             disposition: disposition.map(|value| {
                 Box::new(dto::FindingDisposition {
@@ -577,22 +571,17 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
                     reason: value.reason,
                 })
             }),
-            details: details
-                .map(|details| {
-                    Ok::<_, AppError>(Box::new(dto::FindingDetails {
-                        locations: details
-                            .locations
-                            .into_iter()
-                            .map(project_location)
-                            .collect(),
-                        issue: details.issue,
-                        consequence: details.consequence,
-                        evidence: project_basis(details.evidence),
-                        proposed_comment: details.proposed_comment,
-                        details: details.details,
-                    }))
+            details: details.map(|details| {
+                Box::new(dto::FindingDetails {
+                    locations: details
+                        .locations
+                        .into_iter()
+                        .map(project_location)
+                        .collect(),
+                    consequence: details.consequence,
+                    evidence: project_basis(details.evidence),
                 })
-                .transpose()?,
+            }),
         },
         Descriptor::Section { title, source, .. } => dto::Descriptor::Section {
             title,

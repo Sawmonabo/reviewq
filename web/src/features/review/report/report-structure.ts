@@ -27,7 +27,6 @@ const coverLabels = new Set(["Scope:", "Reviewed source:", "Reviewed target:", "
 export function reportStructure(
   nodes: readonly RootContent[],
   source: string,
-  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
   body?: { readonly previousThreads: boolean },
 ): readonly RootContent[] {
   const article = nodes.filter((node) => node.type !== "text" || node.value.trim());
@@ -73,7 +72,7 @@ export function reportStructure(
       }
     }
     if (node.tagName === "h2") previousThreads = isThreadSection(reportText(node).trim());
-    output.push(node.tagName === "table" ? reportTable(node, previousThreads, changes) : node);
+    output.push(node.tagName === "table" ? reportTable(node, previousThreads) : node);
   }
   return output;
 }
@@ -168,11 +167,7 @@ function countTone(label: string) {
       : label.slice(0, 2).toLowerCase();
 }
 
-function reportTable(
-  node: Element,
-  previousThreads: boolean,
-  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
-): Element {
+function reportTable(node: Element, previousThreads: boolean): Element {
   const head = node.children.find((child) => child.type === "element" && child.tagName === "thead");
   const rows =
     head?.type === "element" ? head.children.filter((child) => child.type === "element") : [];
@@ -192,13 +187,8 @@ function reportTable(
       ? [index]
       : [],
   );
-  const findingColumn = headings?.findIndex((label) => /^(?:finding|id)$/.test(label)) ?? -1;
-  const outcomeColumn =
-    headings?.findIndex((label) =>
-      /^(?:assessment|conclusion|outcome(?: and verification)?)$/.test(label),
-    ) ?? -1;
   const table = styled(node, "report-previous-threads");
-  if (!statusColumns?.length && findingColumn < 0) return table;
+  if (!statusColumns?.length) return table;
   return {
     ...table,
     children: table.children.map((body) =>
@@ -209,13 +199,7 @@ function reportTable(
               row.type === "element" && row.tagName === "tr"
                 ? {
                     ...row,
-                    children: styleStatuses(
-                      row.children,
-                      statusColumns ?? [],
-                      findingColumn,
-                      outcomeColumn,
-                      changes,
-                    ),
+                    children: styleStatuses(row.children, statusColumns),
                   }
                 : row,
             ),
@@ -249,37 +233,12 @@ function twoColumnBody(table: Element) {
   );
 }
 
-function styleStatuses(
-  cells: ElementContent[],
-  columns: number[],
-  findingColumn: number,
-  outcomeColumn: number,
-  changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
-) {
-  const identity = cells.filter((cell) => cell.type === "element" && cell.tagName === "td")[
-    findingColumn
-  ];
-  const id = identity && /^(F-\d+)\b/.exec(reportText(identity).trim())?.[1];
-  const accepted = id ? changes?.get(id) : undefined;
+function styleStatuses(cells: ElementContent[], columns: number[]) {
   let column = 0;
   return cells.map((cell) => {
     if (cell.type !== "element" || cell.tagName !== "td") return cell;
     const index = column++;
     const label = reportText(cell).trim();
-    if (accepted && index === (outcomeColumn >= 0 ? outcomeColumn : findingColumn)) {
-      const badge = {
-        ...element("span", "report-thread-outcome", [literal(outcomeLabels[accepted.conclusion])]),
-        properties: {
-          className: ["report-thread-outcome"],
-          title: accepted.reason,
-          dataReportThreadStatus: isRetired(accepted) ? "confirmed" : "attention",
-        },
-      };
-      return {
-        ...cell,
-        children: outcomeColumn >= 0 ? [badge, ...cell.children] : [...cell.children, badge],
-      };
-    }
     if (!columns.includes(index)) return cell;
     const tone =
       /^(?:fixed(?: in code)?|resolved(?: in GitLab)?|clarified(?: and withdrawn)?|withdrawn|superseded)$/i.test(
@@ -291,14 +250,6 @@ function styleStatuses(
           : "neutral";
     return { ...cell, properties: { ...cell.properties, dataReportThreadStatus: tone } };
   });
-}
-
-function isRetired(change: AcceptedFindingChange) {
-  return (
-    change.conclusion === "fixed" ||
-    change.conclusion === "clarified_withdrawn" ||
-    change.conclusion === "superseded"
-  );
 }
 
 function paragraph(node: RootContent | undefined): node is Element {

@@ -1,7 +1,5 @@
 # Findings Ledger Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Replace the single report hand-over with the findings ledger: agents file records through six tools, ReviewQ composes and publishes every report version, and no code of the earlier path remains.
 
 **Architecture:** Each ledger call is one short SQLite write behind the existing native tool paths. Publishing reads the records, composes the fixed layout outside SQLite and commits one conditional transaction. ReviewQ decides what a turn owes from stored state, states one rule at launch, repeats it after compaction and backs it with a stop gate.
@@ -82,7 +80,7 @@ Tasks use these names exactly. F1 and F2 give them their Rust types. Later tasks
 | Hook replies | Stop block: `{"decision":"block","reason":"…"}` on stdout. Read-back: the text on stdout. Nothing on stdout means no effect. |
 | Generated contract files | `contracts/ledger-tools.schema.json`, `fixtures/contracts/ledger-tools.json`, `hosts/claude/plugin/hooks/ledger-schema.js` |
 | Schema export flags | `--ledger-tools-schema`, `--ledger-tools-example`, `--claude-ledger-tools` |
-| Tables | `ledger_findings`, `ledger_notes`, `ledger_changes`, `review_passes`, `ledger_calls`, `report_delivery_failures`, `hook_reports` |
+| Tables | `ledger_findings`, `ledger_notes`, `ledger_changes`, `review_passes`, `ledger_calls`, `report_delivery_failures`, `codex_stop_hook_reported` |
 | Failure kinds | `unfinished_review`, `closing_refused`, `update_failed` |
 | Delivery states | absent, `saved`, `failed` |
 | Version kinds | `full_review`, `selected_threads`, `update` |
@@ -109,8 +107,8 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 | `capture/failures.rs`: `note` and `resolve` | `crates/reviewq-store/src/reports/failures.rs` | K2 keys them by pass and kind. |
 | `capture/authority.rs`: project and grant hash, `report_lead` | `crates/reviewq-store/src/reports/authority.rs`, with `report_lead` renamed `run_lead` | Actions use it today. K2 uses it for the caller binding. |
 | `capture/reconciliation.rs`: the reconciled-observations statement | beside `completion.rs` | Used by `complete`. |
-| The chunk-append statement and `accept::seal` | `crates/reviewq-store/src/reports/artifact.rs` | K2 seals the composed text with them. |
-| App `capture.rs`: `CHUNK_BYTES`, `ArtifactChunk`, `LineStats`, `Assessment`, `RevisionEvidence`, `ReportAuthority` | `crates/reviewq-app/src/reports.rs` | Used by reads and by K1. |
+| The chunk-append statement | `crates/reviewq-store/src/reports/artifact.rs` | K2 stores the composed text with it, in the publish transaction. |
+| App `capture.rs`: `CHUNK_BYTES`, `LineStats`, `Assessment`, `RevisionEvidence`, `ReportAuthority` | `crates/reviewq-app/src/reports.rs` | Used by reads and by K1. |
 | App `HandoffFieldError::bounded` | `crates/reviewq-app/src/access.rs` as `FieldError::bounded`; `AppError::InvalidHandoff` becomes `AppError::InvalidFields` | One field-error type for every tool. |
 | Protocol `validate.rs`: the jsonschema error collector and its cap | `crates/reviewq-protocol/src/field_errors.rs` | F2 validates six inputs with it. |
 | Protocol `limits.rs`: `MAX_DISCUSSION_ID_BYTES` | `crates/reviewq-protocol/src/scalar.rs` | Imported there already. |
@@ -122,7 +120,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 
 - `ReportSummary` loses `originalSha256`, `nativeProvenance`, `semanticIndex`, `unanchoredFindingCount` and `complete`. `capturedAt` becomes `publishedAt`. `findingCount` and `changeCount` are required numbers.
 - `DeliveryState` is `saved` or `failed`. The queue's `report_saving` tag, the stage input `pending_completion` and the browser's saving notice go with it. Keep `pending_report`: it marks an unhandled new version.
-- `Descriptor::Finding` has `severity` as `P0`–`P3`, a required `blocking`, `section`, `category` and `recordRevision`. `struck`, `carriedFrom` and `evidenceSha256` go. `FindingDetails` mirrors the record: `locations`, `issue`, `consequence`, `evidence`, `proposedComment`, `details`. Its store query returns no details until K2 reads them from `ledger_changes`.
+- `Descriptor::Finding` has `severity` as `P0`–`P3`, and a required `blocking`. `struck`, `carriedFrom` and `evidenceSha256` go. `FindingDetails` carries what the dispositions panel shows: `locations`, `consequence` and `evidence`. Its store query returns no details until K2 reads them from `ledger_changes`.
 - `CandidateReport`, `ReportRead::Candidate`, the candidates route, `DisplayFallback::IncompleteSource` and `ArtifactStats.complete` go.
 - `report_versions` drops `handoff_receipt_id` and `semantic_index`, renames `captured_at_ms` to `published_at_ms`, and gains `kind` and `ledger_sequence`. `report_findings` gains `record_revision`, `section` and `category`, and its offsets become required. `artifacts` drops `original_sha256`, `complete` and the staging index. `report_handoffs` and `report_correction_requests` go. `report_delivery_failures` gains `pass_id` and the three kinds, and loses the rejection kind. `claude_turns` loses `response_id` and `response_sha256`, and the plugin's turn report stops sending the response.
 - A finding ID is `F-` and a number from 1 to 999,999,999, written with at least two digits and no further leading zero: `^F-(0[1-9]|[1-9][0-9]{1,8})$`. The domain's `FindingId` and the protocol's scalar accept exactly this.
@@ -153,7 +151,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 - The app's `reports.rs` already owns `Verdict`, `Severity`, `FindingSection`, `FindingBasisKind` and `FindingConclusion` with `retires_finding`. The ledger uses them as its severity, section, evidence kind and outcome. Define none of them again. Add `NoteSection` beside the app's ledger types with the `labels!` macro.
 - Domain rules as pure functions over small input structs:
   - `may_call(Tool, CallerRole) -> bool`. Only the lead may call `finish_review` and `needs_input`.
-  - `opens_pass(...) -> Option<PassKind>` for a launch start, a delivered batch and the first record of a run with no version.
+  - `record_opens_pass(has_version, pass_open) -> bool` for the first record of a run with no version. A launch start and a delivered batch name their pass kind directly.
   - `gate(GateFacts) -> GateDecision`. Block only a lead's stop with an open pass that is not waiting, fewer than 2 blocks in this stop sequence, and no pending blocking question or permission. A stop with `stopHookActive` false starts a new sequence.
   - `settle(SettleFacts) -> Settlement` returning `Nothing`, `PublishUpdate` or `Unfinished`, from: lead idle, every known child idle, recovery pending, open pass and its state, unpublished records.
   - `closing_kind(ClosingFacts) -> Result<VersionKind, ClosingError>` covering a first version, an open pass of each kind, `fullReview`, and assessments without a selected-thread pass.
@@ -212,7 +210,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 **Steps**
 
 - [ ] Remove what composed versions never reach: cards drawn from context rows and their texts, struck and retired heading handling, the retired card, the source-only state, the `complete` check, the candidate types, `reportHandoffReason` (show the stored reason as it is), the `preparing` and `saving` notice, the `Severity:` and `Blocking:` line variants and the alternative previous-threads section names. Keep the `Evidence` field label, the identity line style and the verdict and counts handling: the composed layout uses them.
-- [ ] Keep the previous-threads table as it looks today: the outcome badge above the cell text and the toned `Status` cell of a table written in the `threads` note. Keep cards and the counts line as published. A user's later blocking choice shows in the dispositions panel and on the next version's card line, as it does today.
+- [ ] Remove the outcome badge from the previous-threads table: the composed outcome cell already starts with the outcome in bold. Keep the toned `Status` cell of a table written in the `threads` note. Keep cards and the counts line as published. A user's later blocking choice shows in the dispositions panel and on the next version's card line, as it does today.
 - [ ] Parse report text with raw HTML shown as text at every place report text is parsed: `report-reader.ts`, `ReportTable.tsx`, and the report callers of `settled.ts` and `table-page.ts`. Other callers of those two modules keep their mode. In `literalHtml`, turn a lone `<br>`, `<br/>` or `<br />` into a line break and every other HTML node into text.
 - [ ] Fix `stripPrefix` so a card whose title starts with code, emphasis or a link still loses its `F-01 ·` prefix.
 - [ ] Rename `capturedAt` reads to `publishedAt`. Run `make web-check` and `make web-build`.
@@ -236,7 +234,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 
 **Steps**
 
-- [ ] Write the composer as one pass that appends to a `String` reserved from the record sizes, recording spans as it writes. Escape `|` in table cells. Write locations as code spans with a fence longer than any backtick run in the path. Place the details after the evidence and `Proposed comment` last. Take every fixed word from `ledger/layout.rs`. Escape an extra note's title so it reads as written in a heading, including a trailing `#`. Write a gap under `Evidence`, beginning `Not confirmed.` Leave out the verdict line for `not_specified`. Parse nothing here: fields were checked when filed.
+- [ ] Write the composer as one pass that appends to a `String` reserved from the record sizes, recording spans as it writes. Escape `|` in table cells. Write locations as code spans with a fence longer than any backtick run in the path. Place the details after the evidence and `Proposed comment` last. Take every fixed word from `ledger/layout.rs`. Escape an extra note's title so it reads as written in a heading, including a trailing `#`. Write a gap under `Evidence`, beginning `Not confirmed.` Leave out the verdict line for `not_specified`. Parse a field only to shift its headings below the layout's own: fields were checked when filed.
 - [ ] Write `finish_review` and `settle` over the port. They hold no SQLite transaction while composing.
 - [ ] In `reports/display/cutter.rs`, treat an HTML block and inline HTML as ordinary content instead of falling back to the whole document. The reader now shows report HTML as text, so it needs no document context, and a large report that mentions `Vec<u8>` outside code keeps the windowed reader.
 - [ ] Add test `composed_worked_set_matches`: build the worked snapshot in the test, compose it, compare with `worked.md` byte for byte, and check that each recorded span slices exactly its card or section. The snapshot includes a subagent's finding, a gap, a retired finding, a user disposition, an extra note, a title that starts with a code span, a `|` in a reason, an authored level-two heading, and a line with `Vec<u8>` and `<runner>` outside code.
@@ -262,7 +260,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 - **Failures**: one row per run, pass and kind. A repeat updates the reason and raises nothing.
 - **Settle read**: the runs with an open pass or unpublished records, joined to the stored session states of the lead and its children and to pending recovery, from one indexed query. No provider is asked.
 - **Recovery eligibility**: a closing call accepted in the failed turn, read from `ledger_calls`, ends it.
-- **Hook reports**: one row per provider and event in `hook_reports`, written only when the stored time is more than an hour old.
+- **Hook report**: one row in `codex_stop_hook_reported`, written the first time Codex's stop hook reports.
 - **Delivery read** and the queue's report state from the head and the unresolved failure rows.
 
 **Steps**
@@ -344,7 +342,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 
 - [ ] Register the six tools from `ledger-schema.js`.
 - [ ] Handle a call with one bridge spawn that sends the tool, the tool-use ID, the active turn, the subagent's ID when the event has one, and the input. Send no heartbeat for a ledger call. Accept subagent calls for the four record tools and refuse the two closing tools from a subagent with a message that says the lead closes.
-- [ ] Return a result as the tool result and field errors as an error the model can read. Deny only an unlinked session.
+- [ ] Return a result as the tool result and field errors as an error the model can read. The plugin refuses nothing itself; the service words every refusal.
 - [ ] Return the link's rule as text the model reads, not as a display-only notice.
 - [ ] Add the `SessionStart` entry to `hooks.json` with the `compact` matcher, and end every hook command with a guard so a wrong binary can never block a turn. The plugin outlasts the bridge on every ledger call: the bridge allows 30 seconds for a record call and 55 for `finish_review`, and the plugin waits 5 seconds longer.
 - [ ] Keep `register.jsx` at or below its current size by moving the ledger handlers into `ledger.js`. Run `node --check` on `ledger.js`, `workflow.js` and `bridge.js`.

@@ -2,17 +2,13 @@ import { invoke } from "./bridge.js";
 import { ledgerTools } from "./ledger-schema.js";
 import { toolResult } from "./workflow.js";
 
-// The bridge's limit plus 5 seconds, so the bridge always answers first and its own timeout
-// message reaches the model: 30 seconds for a record call, 55 for the closing call, which
-// composes and publishes the report.
-const RECORD_TIMEOUT_MS = 35000;
-const FINISH_TIMEOUT_MS = 60000;
+// How much longer than a tool's deadline the plugin waits for the bridge, which spends that
+// deadline on the service, so the bridge always answers first with ReviewQ's own message.
+const BRIDGE_MARGIN_MS = 5000;
 // The host's own fields on a tool-call event. An input key that collides with one of them is
 // moved under `$shadowed`.
 const SHADOWED = "$shadowed";
 const HOST_FIELDS = new Set(["tool", "tool_use_id", "agentId", "requestMeta", "consent", SHADOWED]);
-const UNLINKED = "This session is not linked to a ReviewQ review. Ask the user to run /reviewq <merge request or ticket> to link it, then call the tool again.";
-const LEAD_CLOSES = "Only the lead agent closes the review. File your findings and notes with the record tools and report back to the lead.";
 
 export const ledgerToolIds = ledgerTools.map(tool => `mcp__reviewq__${tool.name}`);
 
@@ -22,17 +18,18 @@ export async function registerLedgerTools($) {
   }
 }
 
-// One bridge spawn per call: no heartbeat, status request or transcript work.
+// One bridge spawn per call. The bridge makes the signed status request that proves the
+// service, then posts the call; no heartbeat or transcript work. ReviewQ itself answers every
+// call it can be reached for, including one from a conversation that is not linked and a
+// closing call from a subagent. `state` is the session's state, absent before it is known.
 export async function callLedger($, state, event) {
   const tool = ledgerTools[ledgerToolIds.indexOf(event.tool)];
   if (!tool) return { result: "ReviewQ does not serve this tool.", isError: true };
-  if (!state?.linked) return { result: UNLINKED, isError: true };
-  if (tool.leadOnly && event.agentId) return { result: LEAD_CLOSES, isError: true };
   const call = { tool: tool.name, callId: event.tool_use_id, input: toolInput(event) };
-  if (state.activeTurn) call.turnId = state.activeTurn;
+  if (state?.activeTurn) call.turnId = state.activeTurn;
   if (event.agentId) call.agentId = event.agentId;
-  const timeoutMs = tool.name === "finish_review" ? FINISH_TIMEOUT_MS : RECORD_TIMEOUT_MS;
-  return toolResult(await invoke($, "ledger", state.id, call, timeoutMs));
+  const id = state?.id ?? await $.session.id();
+  return toolResult(await invoke($, "ledger", id, call, tool.deadlineMs + BRIDGE_MARGIN_MS));
 }
 
 // The event spreads the tool's arguments beside the host's fields. Drop only the host's and put

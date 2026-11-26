@@ -222,8 +222,8 @@ fn publish_is_conditional() {
             panic!("the version's finding has its details");
         };
         assert_eq!(
-            (id.as_str(), details.issue.as_str()),
-            ("F-01", fields().body.issue.as_str())
+            (id.as_str(), details.consequence.as_str()),
+            ("F-01", fields().body.consequence.as_str())
         );
 
         // A disposition saved after the snapshot makes the commit stale.
@@ -350,8 +350,10 @@ fn pass_hold_and_start_follow_lead_activity() {
             let page = store.read_ledger(lead(), short()).await.unwrap();
             page.pass.map(|pass| (pass.state, pass.question))
         };
-        // The question is read back while the pass waits and dropped once it reopens.
-        let waiting = Some((PassState::Waiting, Some("Which branch is the base?".into())));
+        // The question is read back while the pass waits and kept once it reopens, so what
+        // the pass owes can name it.
+        let question = || Some("Which branch is the base?".to_owned());
+        let waiting = Some((PassState::Waiting, question()));
         activity(&store, "working").await;
         assert_eq!(state().await, waiting);
         activity(&store, "idle").await;
@@ -361,7 +363,19 @@ fn pass_hold_and_start_follow_lead_activity() {
         activity(&store, "idle").await;
         assert_eq!(state().await, waiting);
         activity(&store, "working").await;
-        assert_eq!(state().await, Some((PassState::Open, None)));
+        assert_eq!(state().await, Some((PassState::Open, question())));
+
+        // The lead's own record write proves its turn is running, so an idle state stored
+        // before it is stale: the run settles only once the host reports the lead idle again.
+        activity(&store, "idle").await;
+        store
+            .write_record(call("file"), RecordWrite::CreateFinding(Box::new(fields())))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(settlements(&store).await, [Settlement::Nothing]);
+        activity(&store, "idle").await;
+        assert_eq!(settlements(&store).await, [Settlement::Unfinished]);
         store.close(Duration::from_secs(1)).await.unwrap();
     });
 }

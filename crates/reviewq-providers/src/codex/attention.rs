@@ -34,15 +34,23 @@ impl Codex {
                 }
             }
         } else {
-            let read = self.turns(&thread.id, None, false, 1, false).await;
-            let latest = if matches!(thread.status, ThreadStatus::NotLoaded) {
-                // Without a readable turn the thread is unknown; its stored state is replaced,
-                // not kept, because another process may have started a turn since.
-                let latest = read.ok().and_then(|page| page.data.into_iter().next());
-                activity = latest.as_ref().and_then(saved_turn_activity);
-                latest
-            } else {
-                read?.data.into_iter().next()
+            let latest = match thread.status {
+                // Only a lead whose idleness settling waits on is worth reading the saved turns
+                // for. Without a readable turn the thread is unknown; its stored state is
+                // replaced, not kept, because another process may have started a turn since.
+                ThreadStatus::NotLoaded if !target.idle_decides => None,
+                ThreadStatus::NotLoaded => {
+                    let read = self.turns(&thread.id, None, false, 1, false).await;
+                    let latest = read.ok().and_then(|page| page.data.into_iter().next());
+                    activity = latest.as_ref().and_then(saved_turn_activity);
+                    latest
+                }
+                _ => self
+                    .turns(&thread.id, None, false, 1, false)
+                    .await?
+                    .data
+                    .into_iter()
+                    .next(),
             };
             if let Some(activity) = &mut activity
                 && let Some(turn) = latest.filter(|turn| turn.status == "failed")
@@ -109,15 +117,15 @@ impl Codex {
     }
 }
 
-/// The activity of a thread this connection has not loaded, from its latest saved turn: idle
-/// after a completed turn and failed after a failed one. Any other turn is unknown: a turn
-/// running in another process reads as interrupted, and an interrupted turn leaves its review
-/// open, so neither counts as idle.
+/// The activity of a thread this connection has not loaded, from its latest saved turn: failed
+/// after a failed turn, and idle after any other turn with an end time, which completed or was
+/// interrupted. A turn without an end time is still running in another process, which reports
+/// it as interrupted, so the thread is unknown.
 fn saved_turn_activity(turn: &Turn) -> Option<HostActivity> {
-    let phase = match turn.status.as_str() {
-        "completed" => HostPhase::Idle,
-        "failed" => HostPhase::Failed,
-        _ => return None,
+    let phase = match (turn.status.as_str(), turn.completed_at) {
+        ("failed", _) => HostPhase::Failed,
+        (_, Some(_)) => HostPhase::Idle,
+        (_, None) => return None,
     };
     Some(HostActivity {
         phase,

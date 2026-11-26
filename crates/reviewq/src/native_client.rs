@@ -86,8 +86,35 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
     Ok(())
 }
 
-/// Shown after a Codex link while no Codex `Stop` hook has reported on this installation.
-const CODEX_HOOKS_PENDING: &str = "The ReviewQ hooks have not run in Codex yet: open /hooks in Codex to review and trust them. Until then the review still files, closes and shows as unfinished when it is not closed; only the end-of-turn reminder and the reminder after compaction are missing.";
+/// Shown by `reviewq link` and the installer while no Codex `Stop` hook has reported on this
+/// installation.
+pub(crate) const CODEX_HOOKS_PENDING: &str = "The ReviewQ hooks have not run in Codex yet: open /hooks in Codex to review and trust them. Until then a review still files, closes and shows as unfinished when it is not closed; only the end-of-turn reminder and the reminder after compaction are missing.";
+
+/// Whether the service behind `endpoint` has never had a Codex `Stop` hook report, so the
+/// installer still shows `CODEX_HOOKS_PENDING`. A service that cannot say counts as never.
+pub(crate) async fn codex_hooks_pending(endpoint: &ServiceEndpoint) -> bool {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CodexHooks {
+        stop_hook_reported: bool,
+    }
+    let reported = async {
+        let body = signed(
+            &client()?,
+            endpoint,
+            "GET",
+            "/api/v1/control/codex-hooks",
+            b"",
+        )
+        .await?;
+        Ok::<_, Failure>(
+            serde_json::from_slice::<Envelope<CodexHooks>>(&body)?
+                .data
+                .stop_hook_reported,
+        )
+    };
+    !reported.await.unwrap_or(false)
+}
 
 pub(crate) async fn claude(
     profile: &Path,
@@ -399,15 +426,23 @@ pub(crate) fn verify_service(
 
 /// Reads all of stdin, refusing more than `limit` bytes.
 fn read_input(limit: usize) -> Result<Vec<u8>, Failure> {
+    read_within(limit)?.ok_or_else(|| "ReviewQ companion input exceeds its limit.".into())
+}
+
+/// Reads all of stdin, or returns `None` when it holds more than `limit` bytes. Past the
+/// limit the rest is read and discarded, so memory stays within `limit` and the writer never
+/// meets a closed pipe.
+fn read_within(limit: usize) -> Result<Option<Vec<u8>>, Failure> {
+    let mut stdin = std::io::stdin().lock();
     let mut input = Vec::new();
-    std::io::stdin()
-        .lock()
+    (&mut stdin)
         .take((limit + 1) as u64)
         .read_to_end(&mut input)?;
     if input.len() > limit {
-        return Err("ReviewQ companion input exceeds its limit.".into());
+        std::io::copy(&mut stdin, &mut std::io::sink())?;
+        return Ok(None);
     }
-    Ok(input)
+    Ok(Some(input))
 }
 
 pub(crate) async fn bounded(

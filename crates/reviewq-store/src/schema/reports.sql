@@ -1,12 +1,10 @@
 CREATE TABLE artifacts (
     artifact_id TEXT PRIMARY KEY,
-    sha256 TEXT CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
+    sha256 TEXT NOT NULL CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
     byte_length INTEGER NOT NULL CHECK (byte_length >= 0),
     total_code_points INTEGER NOT NULL CHECK (total_code_points BETWEEN 0 AND byte_length),
     line_count INTEGER NOT NULL CHECK (line_count BETWEEN 0 AND total_code_points),
-    max_line_bytes INTEGER NOT NULL CHECK (max_line_bytes BETWEEN 0 AND byte_length),
-    sealed INTEGER NOT NULL CHECK (sealed IN (0, 1) AND (sealed=0 OR sha256 IS NOT NULL)),
-    created_at_ms INTEGER NOT NULL
+    max_line_bytes INTEGER NOT NULL CHECK (max_line_bytes BETWEEN 0 AND byte_length)
 ) STRICT;
 
 CREATE TABLE artifact_chunks (
@@ -60,16 +58,16 @@ CREATE TABLE report_heads (
     FOREIGN KEY (run_id, receipt_id) REFERENCES report_versions(run_id, receipt_id)
 ) STRICT, WITHOUT ROWID;
 
+-- Each `finding_id` below is a finding ID in its canonical form (`F-01`, `F-100`), the only
+-- form ReviewQ writes, so ordering by length, then text, is finding-number order.
 CREATE TABLE report_findings (
     run_id TEXT NOT NULL,
     receipt_id TEXT NOT NULL,
-    finding_id TEXT NOT NULL CHECK (length(finding_id) BETWEEN 1 AND 64),
+    finding_id TEXT NOT NULL,
     record_revision INTEGER NOT NULL CHECK (record_revision > 0),
     title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 200),
     severity TEXT NOT NULL CHECK (severity IN ('P0', 'P1', 'P2', 'P3')),
     blocking INTEGER NOT NULL CHECK (blocking IN (0, 1)),
-    section TEXT NOT NULL CHECK (section IN ('functional', 'quality')),
-    category TEXT NOT NULL CHECK (length(category) BETWEEN 1 AND 48),
     scalar_offset INTEGER NOT NULL CHECK (scalar_offset >= 0),
     scalar_length INTEGER NOT NULL CHECK (scalar_length > 0),
     evidence_sha256 TEXT NOT NULL CHECK (length(evidence_sha256) = 64),
@@ -92,7 +90,7 @@ CREATE TABLE report_sections (
 CREATE TABLE report_changes (
     run_id TEXT NOT NULL,
     receipt_id TEXT NOT NULL,
-    finding_id TEXT NOT NULL CHECK (length(finding_id) BETWEEN 1 AND 64),
+    finding_id TEXT NOT NULL,
     conclusion TEXT NOT NULL CHECK (conclusion IN (
         'fixed', 'clarified_withdrawn', 'superseded', 'partly_addressed', 'still_present', 'unverified')),
     reason TEXT NOT NULL CHECK (length(CAST(reason AS BLOB)) BETWEEN 1 AND 1024),
@@ -115,7 +113,7 @@ CREATE TABLE finding_dispositions (
     run_id TEXT NOT NULL,
     disposition_version INTEGER NOT NULL CHECK (disposition_version > 0),
     receipt_id TEXT NOT NULL,
-    finding_id TEXT NOT NULL CHECK (length(finding_id) BETWEEN 1 AND 64),
+    finding_id TEXT NOT NULL,
     blocking INTEGER CHECK (blocking IN (0, 1)),
     publication TEXT CHECK (publication IN ('withheld', 'authorized', 'published')),
     reason TEXT NOT NULL CHECK (length(CAST(reason AS BLOB)) BETWEEN 1 AND 384),

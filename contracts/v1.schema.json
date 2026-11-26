@@ -2039,9 +2039,6 @@
             "blocking": {
               "type": "boolean"
             },
-            "category": {
-              "type": "string"
-            },
             "details": {
               "anyOf": [
                 {
@@ -2069,12 +2066,6 @@
               "const": "finding",
               "type": "string"
             },
-            "recordRevision": {
-              "$ref": "#/definitions/RevisionDto"
-            },
-            "section": {
-              "$ref": "#/definitions/FindingSection"
-            },
             "severity": {
               "$ref": "#/definitions/Severity"
             },
@@ -2091,9 +2082,6 @@
             "title",
             "severity",
             "blocking",
-            "section",
-            "category",
-            "recordRevision",
             "source"
           ],
           "type": "object"
@@ -2994,38 +2982,23 @@
       "type": "string"
     },
     "FindingDetails": {
+      "description": "What a finding card in the Findings panel shows beside its title and badges. The rest of\nthe finding is in the report text at the descriptor's `source`.",
       "properties": {
         "consequence": {
           "type": "string"
         },
-        "details": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "evidence": {
           "$ref": "#/definitions/FindingBasis"
-        },
-        "issue": {
-          "type": "string"
         },
         "locations": {
           "items": {
             "$ref": "#/definitions/FindingLocation"
           },
           "type": "array"
-        },
-        "proposedComment": {
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
         "locations",
-        "issue",
         "consequence",
         "evidence"
       ],
@@ -3060,6 +3033,12 @@
       ],
       "type": "object"
     },
+    "FindingIdDto": {
+      "description": "A report finding ID: `F-` and the finding's number, written with at least two digits and\nno other leading zero, such as `F-01` or `F-100`.",
+      "maxLength": 11,
+      "pattern": "^F-(0[1-9]|[1-9][0-9]{1,8})$",
+      "type": "string"
+    },
     "FindingLocation": {
       "additionalProperties": false,
       "description": "A file a finding points at, with an optional 1-based line.",
@@ -3083,13 +3062,6 @@
         "path"
       ],
       "type": "object"
-    },
-    "FindingSection": {
-      "enum": [
-        "functional",
-        "quality"
-      ],
-      "type": "string"
     },
     "FocusedActivity": {
       "description": "Most recent verified phase on the focused native session.",
@@ -8183,7 +8155,7 @@
           "$ref": "#/definitions/RevisionDto"
         },
         "findingId": {
-          "$ref": "#/definitions/ResourceIdDto"
+          "$ref": "#/definitions/FindingIdDto"
         },
         "receiptId": {
           "$ref": "#/definitions/ResourceIdDto"

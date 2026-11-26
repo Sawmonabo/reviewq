@@ -61,13 +61,12 @@ pub enum ClosingRead {
     Replayed(FinishReceipt),
     Current(Box<ClosingSnapshot>),
     /// The lead may not close the run now. Record `closing_refused`, then refuse the call
-    /// with `Conflict`.
+    /// with one root field error worded for the agent.
     Refused(RefusedClosing),
 }
 
 /// A closing call from a run's lead that the store refuses, with what its `closing_refused`
-/// failure records. It names the run rather than a `Caller`, because the calling session may
-/// no longer be the run's registered lead.
+/// failure records.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RefusedClosing {
     pub run: RunId,
@@ -251,8 +250,7 @@ pub struct Composed {
     pub sha256: ReportHash,
     pub stats: ArtifactStats,
     /// One per active finding, in text order. The store copies each row's other columns from
-    /// the record at the guarded ledger sequence, writing `default_category` for a record
-    /// without a category.
+    /// the record at the guarded ledger sequence.
     pub cards: Vec<CardSpan>,
     pub sections: Vec<SectionSpan>,
 }

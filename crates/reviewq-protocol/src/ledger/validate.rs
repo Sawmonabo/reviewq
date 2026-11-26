@@ -77,6 +77,18 @@ pub fn validate_against(
     check(tool, &validator, input)
 }
 
+/// The refusal of an input larger than `MAX_TOOL_INPUT_BYTES` as compact JSON. A host that
+/// cannot carry such an input as far as the validator refuses it with this same error.
+pub fn oversized_input() -> FieldError {
+    FieldError::new(
+        "",
+        format!(
+            "The input is larger than {} KiB, so shorten the longest fields.",
+            MAX_TOOL_INPUT_BYTES / 1024
+        ),
+    )
+}
+
 fn compile(schema: &Value) -> Result<Validator, ValidationError<'static>> {
     jsonschema::options()
         .with_draft(jsonschema::Draft::Draft7)
@@ -90,13 +102,7 @@ fn check(
     input: &Value,
 ) -> Result<LedgerInput, Vec<FieldError>> {
     if compact_length(input) > MAX_TOOL_INPUT_BYTES {
-        return Err(vec![FieldError::new(
-            "",
-            format!(
-                "The input is larger than {} KiB, so shorten the longest fields.",
-                MAX_TOOL_INPUT_BYTES / 1024
-            ),
-        )]);
+        return Err(vec![oversized_input()]);
     }
     let mut errors = BTreeSet::new();
     collect_schema_errors(validator, input, &mut errors);

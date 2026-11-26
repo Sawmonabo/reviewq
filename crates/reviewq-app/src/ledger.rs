@@ -273,6 +273,26 @@ pub struct FindingPatch {
     pub details: Option<Option<String>>,
 }
 
+impl FindingFields {
+    /// The UTF-8 bytes of the authored text: title, category, location paths, issue,
+    /// consequence, evidence, proposed comment and details.
+    pub fn text_bytes(&self) -> usize {
+        let body = &self.body;
+        self.title.len()
+            + self.category.as_ref().map_or(0, String::len)
+            + body
+                .locations
+                .iter()
+                .map(|location| location.path.len())
+                .sum::<usize>()
+            + body.issue.len()
+            + body.consequence.len()
+            + body.evidence.text.len()
+            + body.proposed_comment.as_ref().map_or(0, String::len)
+            + body.details.as_ref().map_or(0, String::len)
+    }
+}
+
 /// What became of a finding, as `assess_finding` recorded it. A retiring conclusion
 /// (`FindingConclusion::retires_finding`) removes the finding from the active set.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -525,8 +545,9 @@ pub struct OpenPass {
     pub state: PassState,
     /// The frozen batch of a selected-thread pass.
     pub batch: Option<FrozenBatch>,
-    /// The question `needs_input` asked, while the pass waits on the reviewer; `None` while
-    /// it is open.
+    /// The question the last `needs_input` asked: the one a waiting pass waits on, or, once
+    /// the lead's next turn reopened the pass, the one it asked before. `None` when the pass
+    /// was never held.
     pub question: Option<String>,
 }
 
@@ -617,8 +638,10 @@ pub trait LedgerStore: Send + Sync {
     /// the expected revision and the per-run limits, and returns a broken rule as a
     /// `WriteRefusal` with nothing written. Otherwise writes the record, appends its full
     /// state to the change history, advances the run's ledger sequence, opens a full-review
-    /// pass when `opens_pass` says so and stores the result for replay. Never reads or
-    /// changes a user's disposition.
+    /// pass when `record_opens_pass` says so and stores the result for replay. A call from the
+    /// lead itself proves its turn is running, so a stored idle or failed state of the lead
+    /// becomes unknown until the host reports it again. Never reads or changes a user's
+    /// disposition.
     fn write_record(
         &self,
         binding: CallBinding,
@@ -638,19 +661,17 @@ pub trait LedgerStore: Send + Sync {
     fn hold_pass(&self, binding: CallBinding, reason: String)
     -> AppFuture<'_, Option<HoldReceipt>>;
 
-    /// Answers one stop request: applies `gate` to the stored facts, stores the decision's
-    /// block count for the turn on the pass, and notes that the provider's stop hook
-    /// reported, rewriting that time only when it is more than an hour old. The session is
-    /// the lead when it is a run's lead session and a child otherwise, which is released. The
-    /// report is noted even for a session in no run, because the Codex hook runs for every
-    /// session; such a session is released too.
+    /// Answers one stop request: applies `gate` to the stored facts and stores the decision's
+    /// block count for the turn on the pass. The session is the lead when it is a run's lead
+    /// session; any other session, including one in no run, is released. A Codex request also
+    /// stores that Codex's stop hook has reported, once; the hook runs for every Codex
+    /// session, so a released request writes nothing once that is stored.
     fn answer_gate(&self, request: GateRequest) -> AppFuture<'_, GateAnswer>;
 
     /// Reads what `finish_review` composes from. A known call returns `Replayed`. A call from
     /// a run's lead returns `Current`, or `Refused` when the run's workspace, grant or
-    /// settings authority or its follow-up binding changed, or the calling session is no
-    /// longer the run's registered lead; the caller then records `closing_refused` and
-    /// refuses the call. A call from a child is `Forbidden`, and so is one attributed to no
+    /// settings authority or its follow-up binding changed; the caller then records
+    /// `closing_refused` and refuses the call. A call from a child is `Forbidden`, and so is one attributed to no
     /// run's lead or child; neither records a failure.
     fn closing_snapshot(&self, binding: CallBinding) -> AppFuture<'_, ClosingRead>;
 
@@ -667,10 +688,10 @@ pub trait LedgerStore: Send + Sync {
     ///    being refused.
     /// 2. For an update, a pass opened after the snapshot is `Stale`: the next snapshot shows
     ///    the pass, and settling then publishes nothing.
-    /// 3. A changed lead or authority, or for a closing call a changed pass or frozen batch,
-    ///    is `Err(Conflict)`. The closing caller records `closing_refused`.
+    /// 3. A changed authority, or for a closing call a changed pass or frozen batch, is
+    ///    `Err(Conflict)`. The closing caller records `closing_refused`.
     /// 4. Assessments that do not cover the frozen batch are `Invalid`.
-    /// 5. Otherwise, in one transaction: seals the text in `CHUNK_BYTES` chunks, appends the
+    /// 5. Otherwise, in one transaction: stores the text in `CHUNK_BYTES` chunks, appends the
     ///    version with its finding, section and outcome rows, moves the head, binds the
     ///    disposition revisions, closes the pass, completes the batch, resolves earlier
     ///    failures, stores the closing acknowledgement for replay, inserts the notification
@@ -697,7 +718,7 @@ pub trait LedgerStore: Send + Sync {
     /// What the read-back shows, or `None` unless `session` is a run's lead session.
     fn read_back(&self, session: HookSession) -> AppFuture<'_, Option<ReadBack>>;
 
-    /// When the provider's stop hook last reported on this installation, in Unix
-    /// milliseconds, or `None` if it never has.
-    fn last_stop_hook_report(&self, provider: HostProvider) -> AppFuture<'_, Option<i64>>;
+    /// Whether Codex's stop hook has ever reported on this installation. Until it has, the
+    /// hook most likely still awaits the user's trust.
+    fn codex_stop_hook_reported(&self) -> AppFuture<'_, bool>;
 }

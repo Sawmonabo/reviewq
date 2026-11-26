@@ -8,7 +8,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
-use reviewq_protocol::ledger::LedgerTool;
+use reviewq_protocol::ledger::{LEDGER_TIMED_OUT, LedgerTool};
 use reviewq_protocol::mcp::{
     AnswerReviewQuestion, ConfigureFollowups, GetReview, ListReviews, ReadTranscript,
     SendReviewMessage, StartReview,
@@ -27,7 +27,6 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use super::features::ledger::MAX_TOOL_BODY_BYTES;
 use super::{ApiError, Entry};
 
 mod gates;
@@ -37,6 +36,12 @@ mod workflow;
 use gates::Gates;
 
 const MAX_TOOL_RESPONSE: usize = 512 * 1024;
+/// Largest MCP request body. It is set well above the largest ledger tool input, and meant to
+/// exceed the arguments a model writes in one tool call, so a call whose input is too large
+/// still reaches the ledger validator and gets its field error. rmcp answers a larger body with `413` before
+/// any tool code runs; the body is read under the router's 30-second body timeout and only
+/// after the grant is authenticated.
+const MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone)]
 struct Server {
@@ -53,7 +58,7 @@ pub(super) fn mount(entry: Arc<Entry>) -> Router<Arc<Entry>> {
         .enforce_origin_validation()
         .with_legacy_session_mode(false)
         .with_json_response(true)
-        .with_max_request_body_bytes(MAX_TOOL_BODY_BYTES);
+        .with_max_request_body_bytes(MAX_REQUEST_BODY_BYTES);
     let application = Server {
         entry: entry.clone(),
         gates: Arc::new(Gates::default()),
@@ -193,26 +198,27 @@ impl ServerHandler for Server {
             .and_then(|parts| parts.extensions.get::<Actor>())
             .cloned()
             .ok_or_else(|| ErrorData::invalid_request("checkout authorization required", None))?;
-        let deadline = match (LedgerTool::from_name(&request.name), request.name.as_ref()) {
-            (Some(LedgerTool::FinishReview), _)
-            | (None, "SendReviewMessage" | "StartReview" | "ConfigureFollowups") => 60,
-            _ => 30,
+        let ledger = LedgerTool::from_name(&request.name);
+        let deadline = match (ledger, request.name.as_ref()) {
+            (Some(tool), _) => tool.deadline(),
+            (None, "SendReviewMessage" | "StartReview" | "ConfigureFollowups") => {
+                Duration::from_secs(60)
+            }
+            (None, _) => Duration::from_secs(30),
         };
         let meta = context.meta;
         let cancelled = context.ct;
         let result = tokio::select! {
             _ = cancelled.cancelled() => return Err(ErrorData::internal_error("request cancelled", None)),
-            result = tokio::time::timeout(Duration::from_secs(deadline), self.call(request, &meta, actor)) => {
-                result.unwrap_or(Err(AppError::Busy.into()))
-            }
+            result = tokio::time::timeout(deadline, self.call(request, &meta, actor)) => result,
         };
-        let output = match result {
-            Ok(output) => output,
-            Err(error) => CallToolResult::error(vec![ContentBlock::text(
-                super::error::tool_error_text(error),
-            )]),
+        let text = match result {
+            Ok(Ok(output)) => return Ok(output.into()),
+            Ok(Err(error)) => super::error::tool_error_text(error),
+            Err(_) if ledger.is_some() => LEDGER_TIMED_OUT.to_owned(),
+            Err(_) => super::error::tool_error_text(AppError::Busy.into()),
         };
-        Ok(output.into())
+        Ok(CallToolResult::error(vec![ContentBlock::text(text)]).into())
     }
 }
 
@@ -237,9 +243,7 @@ impl Server {
         let _permit = self.gates.enter(&actor).await?;
         let input = request.arguments.unwrap_or_default();
         if let Some(tool) = LedgerTool::from_name(&request.name) {
-            let result = ledger::call(&self.entry, tool, meta, actor, input).await?;
-            let value = serde_json::to_value(result).map_err(|_| AppError::Internal)?;
-            return Ok(bounded_result(&value)?);
+            return ledger::call(&self.entry, tool, meta, actor, input).await;
         }
         let result = match request.name.as_ref() {
             "ListReviews" => operations::list(&self.entry, actor, arguments(input)?).await,

@@ -35,7 +35,6 @@ const fieldOrder = new Map([
 ]);
 
 export type GroupPosition = {
-  readonly sourceOrder: number;
   readonly offset: number;
   readonly name?: string;
   readonly findingId?: string;
@@ -83,7 +82,7 @@ export function reportBlocks(
   changes: ReadonlyMap<string, AcceptedFindingChange> | null | undefined,
   body?: { readonly previousThreads: boolean },
 ): readonly ReportBlock[] {
-  const groups = groupReportItems(reportStructure(tree.children, source, changes, body), (node) => {
+  const groups = groupReportItems(reportStructure(tree.children, source, body), (node) => {
     const level =
       node.type === "element" && /^h[1-3]$/.test(node.tagName)
         ? Number(node.tagName[1])
@@ -97,7 +96,6 @@ export function reportBlocks(
     const finding = authoredFinding(group.items, source, changes);
     return {
       offset: group.offset,
-      sourceOrder: index,
       end: groups[index + 1]?.offset ?? source.length,
       nodes: finding ? [] : annotate(group.items),
       ...(group.name && { name: group.name }),

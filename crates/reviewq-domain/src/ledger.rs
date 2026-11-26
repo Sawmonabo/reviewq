@@ -235,37 +235,13 @@ pub fn may_call(tool: Tool, role: CallerRole) -> bool {
     }
 }
 
-/// Something that may open a pass.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PassEvent {
-    /// Start confirmed a review that ReviewQ launched. A launch registers a new run, so no
-    /// pass of that run is open yet.
-    ReviewStarted,
-    /// A selected-thread batch was delivered to the lead. The store ends the predecessor
-    /// batch's pass in the same transaction; delivery never starts while a full-review pass
-    /// is open.
-    BatchDelivered,
-    /// A record was filed or changed.
-    RecordFiled {
-        /// The run has a published version.
-        has_version: bool,
-        /// The run already has a pass that is not closed.
-        pass_open: bool,
-    },
-}
-
-/// The pass `event` opens, if any. A record opens a full-review pass only on a run with no
-/// version and no open pass. A message the reviewer sends, report feedback and a publication
-/// action open nothing and are not events here.
-pub fn opens_pass(event: PassEvent) -> Option<PassKind> {
-    match event {
-        PassEvent::ReviewStarted => Some(PassKind::FullReview),
-        PassEvent::BatchDelivered => Some(PassKind::SelectedThreads),
-        PassEvent::RecordFiled {
-            has_version,
-            pass_open,
-        } => (!has_version && !pass_open).then_some(PassKind::FullReview),
-    }
+/// Whether filing or changing a record opens a full-review pass: only on a run with no
+/// published version and no pass that is not closed, because a first version needs a verdict
+/// and a reviewed revision. Starting a review opens a full-review pass and a delivered batch a
+/// selected-thread pass; a message the reviewer sends, report feedback and a publication action
+/// open nothing.
+pub fn record_opens_pass(has_version: bool, pass_open: bool) -> bool {
+    !has_version && !pass_open
 }
 
 /// What the stop gate knows about one stop request.
@@ -332,8 +308,10 @@ pub struct SettleFacts {
     pub recovery_pending: bool,
     /// The state of the run's pass, or `None` with no pass. `Closed` counts as no pass.
     pub pass: Option<PassState>,
-    /// Some record changed after the run's current version. A run without a version always
-    /// has a pass while it has records, because its first record opened one.
+    /// The run has a published version, which an update follows.
+    pub has_version: bool,
+    /// Some record changed after the run's current version, or, on a run with no version,
+    /// some record was filed.
     pub unpublished: bool,
 }
 
@@ -348,8 +326,11 @@ pub enum Settlement {
 }
 
 /// A run is settled when its lead and every known child are idle and no recovery is pending.
-/// A settled run with an open pass that is not waiting is unfinished. A settled run with no
-/// pass and unpublished records gets an update. Anything else needs nothing yet.
+/// A settled run with an open pass that is not waiting is unfinished. A settled run with a
+/// version, no pass and unpublished records gets an update. Anything else needs nothing yet:
+/// records on a run with no version and no pass, which archiving the review leaves, wait for
+/// the lead, whose next record opens a full-review pass and whose `finish_review` publishes
+/// them as a full review.
 pub fn settle(facts: SettleFacts) -> Settlement {
     if !facts.lead_idle || !facts.children_idle || facts.recovery_pending {
         return Settlement::Nothing;
@@ -357,7 +338,9 @@ pub fn settle(facts: SettleFacts) -> Settlement {
     match facts.pass {
         Some(PassState::Open) => Settlement::Unfinished,
         Some(PassState::Waiting) => Settlement::Nothing,
-        Some(PassState::Closed) | None if facts.unpublished => Settlement::PublishUpdate,
+        Some(PassState::Closed) | None if facts.has_version && facts.unpublished => {
+            Settlement::PublishUpdate
+        }
         Some(PassState::Closed) | None => Settlement::Nothing,
     }
 }
@@ -468,6 +451,7 @@ mod tests {
             children_idle: true,
             recovery_pending: false,
             pass: None,
+            has_version: true,
             unpublished: false,
         };
         let settle_cases = [

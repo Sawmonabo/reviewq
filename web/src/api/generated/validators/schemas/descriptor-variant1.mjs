@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate1257 } from "./finding-details.mjs";
 import { validate1265 } from "./finding-disposition.mjs";
-import { validate35 } from "./event-cursor-dto.mjs";
-import { validate1269 } from "./finding-section.mjs";
+import { validate1268 } from "./severity.mjs";
+import { validate1270 } from "./source-range.mjs";
 function validate1256(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
@@ -12,50 +12,57 @@ function validate1256(
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
-      if (data.blocking !== undefined && func0.call(data, "blocking")) {
-        const _errs1 = errors;
-        if (typeof data.blocking !== "boolean") {
-          validate1256.errors = [
-            {
-              instancePath: instancePath + "/blocking",
-              schemaPath: "#/properties/blocking/type",
-              keyword: "type",
-              params: { type: "boolean" },
-            },
-          ];
-          return false;
-        }
-        var valid0 = _errs1 === errors;
+      let missing0;
+      if (
+        ((data.kind === undefined || !func0.call(data, "kind")) &&
+          (missing0 = "kind")) ||
+        ((data.findingId === undefined || !func0.call(data, "findingId")) &&
+          (missing0 = "findingId")) ||
+        ((data.title === undefined || !func0.call(data, "title")) &&
+          (missing0 = "title")) ||
+        ((data.severity === undefined || !func0.call(data, "severity")) &&
+          (missing0 = "severity")) ||
+        ((data.blocking === undefined || !func0.call(data, "blocking")) &&
+          (missing0 = "blocking")) ||
+        ((data.source === undefined || !func0.call(data, "source")) &&
+          (missing0 = "source"))
+      ) {
+        validate1256.errors = [
+          {
+            instancePath,
+            schemaPath: "#/required",
+            keyword: "required",
+            params: { missingProperty: missing0 },
+          },
+        ];
+        return false;
       } else {
-        var valid0 = true;
-      }
-      if (valid0) {
-        if (data.category !== undefined && func0.call(data, "category")) {
-          const _errs3 = errors;
-          if (typeof data.category !== "string") {
+        if (data.blocking !== undefined && func0.call(data, "blocking")) {
+          const _errs1 = errors;
+          if (typeof data.blocking !== "boolean") {
             validate1256.errors = [
               {
-                instancePath: instancePath + "/category",
-                schemaPath: "#/properties/category/type",
+                instancePath: instancePath + "/blocking",
+                schemaPath: "#/properties/blocking/type",
                 keyword: "type",
-                params: { type: "string" },
+                params: { type: "boolean" },
               },
             ];
             return false;
           }
-          var valid0 = _errs3 === errors;
+          var valid0 = _errs1 === errors;
         } else {
           var valid0 = true;
         }
         if (valid0) {
           if (data.details !== undefined && func0.call(data, "details")) {
-            let data2 = data.details;
-            const _errs5 = errors;
-            const _errs6 = errors;
+            let data1 = data.details;
+            const _errs3 = errors;
+            const _errs4 = errors;
             let valid1 = false;
-            const _errs7 = errors;
+            const _errs5 = errors;
             if (
-              !validate1257(data2, {
+              !validate1257(data1, {
                 instancePath: instancePath + "/details",
                 parentData: data,
                 parentDataProperty: "details",
@@ -68,11 +75,11 @@ function validate1256(
                   : vErrors.concat(validate1257.errors);
               errors = vErrors.length;
             }
-            var _valid0 = _errs7 === errors;
+            var _valid0 = _errs5 === errors;
             valid1 = valid1 || _valid0;
             if (!valid1) {
-              const _errs8 = errors;
-              if (data2 !== null) {
+              const _errs6 = errors;
+              if (data1 !== null) {
                 const err0 = {
                   instancePath: instancePath + "/details",
                   schemaPath: "#/properties/details/anyOf/1/type",
@@ -86,7 +93,7 @@ function validate1256(
                 }
                 errors++;
               }
-              var _valid0 = _errs8 === errors;
+              var _valid0 = _errs6 === errors;
               valid1 = valid1 || _valid0;
             }
             if (!valid1) {
@@ -105,16 +112,16 @@ function validate1256(
               validate1256.errors = vErrors;
               return false;
             } else {
-              errors = _errs6;
+              errors = _errs4;
               if (vErrors !== null) {
-                if (_errs6) {
-                  vErrors.length = _errs6;
+                if (_errs4) {
+                  vErrors.length = _errs4;
                 } else {
                   vErrors = null;
                 }
               }
             }
-            var valid0 = _errs5 === errors;
+            var valid0 = _errs3 === errors;
           } else {
             var valid0 = true;
           }
@@ -123,13 +130,13 @@ function validate1256(
               data.disposition !== undefined &&
               func0.call(data, "disposition")
             ) {
-              let data3 = data.disposition;
-              const _errs10 = errors;
-              const _errs11 = errors;
+              let data2 = data.disposition;
+              const _errs8 = errors;
+              const _errs9 = errors;
               let valid2 = false;
-              const _errs12 = errors;
+              const _errs10 = errors;
               if (
-                !validate1265(data3, {
+                !validate1265(data2, {
                   instancePath: instancePath + "/disposition",
                   parentData: data,
                   parentDataProperty: "disposition",
@@ -142,11 +149,11 @@ function validate1256(
                     : vErrors.concat(validate1265.errors);
                 errors = vErrors.length;
               }
-              var _valid1 = _errs12 === errors;
+              var _valid1 = _errs10 === errors;
               valid2 = valid2 || _valid1;
               if (!valid2) {
-                const _errs13 = errors;
-                if (data3 !== null) {
+                const _errs11 = errors;
+                if (data2 !== null) {
                   const err2 = {
                     instancePath: instancePath + "/disposition",
                     schemaPath: "#/properties/disposition/anyOf/1/type",
@@ -160,7 +167,7 @@ function validate1256(
                   }
                   errors++;
                 }
-                var _valid1 = _errs13 === errors;
+                var _valid1 = _errs11 === errors;
                 valid2 = valid2 || _valid1;
               }
               if (!valid2) {
@@ -179,16 +186,16 @@ function validate1256(
                 validate1256.errors = vErrors;
                 return false;
               } else {
-                errors = _errs11;
+                errors = _errs9;
                 if (vErrors !== null) {
-                  if (_errs11) {
-                    vErrors.length = _errs11;
+                  if (_errs9) {
+                    vErrors.length = _errs9;
                   } else {
                     vErrors = null;
                   }
                 }
               }
-              var valid0 = _errs10 === errors;
+              var valid0 = _errs8 === errors;
             } else {
               var valid0 = true;
             }
@@ -197,7 +204,7 @@ function validate1256(
                 data.findingId !== undefined &&
                 func0.call(data, "findingId")
               ) {
-                const _errs15 = errors;
+                const _errs13 = errors;
                 if (typeof data.findingId !== "string") {
                   validate1256.errors = [
                     {
@@ -209,15 +216,15 @@ function validate1256(
                   ];
                   return false;
                 }
-                var valid0 = _errs15 === errors;
+                var valid0 = _errs13 === errors;
               } else {
                 var valid0 = true;
               }
               if (valid0) {
                 if (data.kind !== undefined && func0.call(data, "kind")) {
-                  let data5 = data.kind;
-                  const _errs17 = errors;
-                  if (typeof data5 !== "string") {
+                  let data4 = data.kind;
+                  const _errs15 = errors;
+                  if (typeof data4 !== "string") {
                     validate1256.errors = [
                       {
                         instancePath: instancePath + "/kind",
@@ -228,7 +235,7 @@ function validate1256(
                     ];
                     return false;
                   }
-                  if ("finding" !== data5) {
+                  if ("finding" !== data4) {
                     validate1256.errors = [
                       {
                         instancePath: instancePath + "/kind",
@@ -239,57 +246,79 @@ function validate1256(
                     ];
                     return false;
                   }
-                  var valid0 = _errs17 === errors;
+                  var valid0 = _errs15 === errors;
                 } else {
                   var valid0 = true;
                 }
                 if (valid0) {
                   if (
-                    data.recordRevision !== undefined &&
-                    func0.call(data, "recordRevision")
+                    data.severity !== undefined &&
+                    func0.call(data, "severity")
                   ) {
-                    const _errs19 = errors;
+                    const _errs17 = errors;
                     if (
-                      !validate35(data.recordRevision, {
-                        instancePath: instancePath + "/recordRevision",
+                      !validate1268(data.severity, {
+                        instancePath: instancePath + "/severity",
                         parentData: data,
-                        parentDataProperty: "recordRevision",
+                        parentDataProperty: "severity",
                         rootData,
                       })
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate35.errors
-                          : vErrors.concat(validate35.errors);
+                          ? validate1268.errors
+                          : vErrors.concat(validate1268.errors);
                       errors = vErrors.length;
                     }
-                    var valid0 = _errs19 === errors;
+                    var valid0 = _errs17 === errors;
                   } else {
                     var valid0 = true;
                   }
                   if (valid0) {
                     if (
-                      data.section !== undefined &&
-                      func0.call(data, "section")
+                      data.source !== undefined &&
+                      func0.call(data, "source")
                     ) {
-                      const _errs20 = errors;
+                      const _errs18 = errors;
                       if (
-                        !validate1269(data.section, {
-                          instancePath: instancePath + "/section",
+                        !validate1270(data.source, {
+                          instancePath: instancePath + "/source",
                           parentData: data,
-                          parentDataProperty: "section",
+                          parentDataProperty: "source",
                           rootData,
                         })
                       ) {
                         vErrors =
                           vErrors === null
-                            ? validate1269.errors
-                            : vErrors.concat(validate1269.errors);
+                            ? validate1270.errors
+                            : vErrors.concat(validate1270.errors);
                         errors = vErrors.length;
                       }
-                      var valid0 = _errs20 === errors;
+                      var valid0 = _errs18 === errors;
                     } else {
                       var valid0 = true;
+                    }
+                    if (valid0) {
+                      if (
+                        data.title !== undefined &&
+                        func0.call(data, "title")
+                      ) {
+                        const _errs19 = errors;
+                        if (typeof data.title !== "string") {
+                          validate1256.errors = [
+                            {
+                              instancePath: instancePath + "/title",
+                              schemaPath: "#/properties/title/type",
+                              keyword: "type",
+                              params: { type: "string" },
+                            },
+                          ];
+                          return false;
+                        }
+                        var valid0 = _errs19 === errors;
+                      } else {
+                        var valid0 = true;
+                      }
                     }
                   }
                 }

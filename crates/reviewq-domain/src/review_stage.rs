@@ -35,7 +35,7 @@ pub struct WorkspaceEvidence<'a> {
     pub family_failed: bool,
     pub action: Option<&'a str>,
     pub action_intent: Option<&'a str>,
-    pub report_state: Option<&'a str>,
+    pub report_failed: bool,
     pub followup_state: Option<&'a str>,
     pub uncertain_delivery: bool,
     pub personal_approval: Option<bool>,
@@ -63,7 +63,7 @@ pub fn classify_review(evidence: &WorkspaceEvidence<'_>) -> Option<Stage> {
         e if e.family_working => (Working, "session_working"),
         e if e.any_question => (NeedsInput, "agent_input"),
         e if matches!(e.action, Some("working" | "checking")) => (Working, "action_verifying"),
-        e if e.report_state == Some("failed") => (NeedsInput, "report_failed"),
+        e if e.report_failed => (NeedsInput, "report_failed"),
         e if matches!(e.recovery, Some("waiting" | "queued")) => (Waiting, "recovery_pending"),
         e if matches!(e.recovery, Some("disabled" | "cancelled")) => {
             (NeedsInput, "recovery_required")

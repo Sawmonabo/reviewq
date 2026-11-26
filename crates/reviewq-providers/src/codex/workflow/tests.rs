@@ -52,7 +52,7 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
     let recorded_resumes = resumed.clone();
     let turn_reads = Arc::new(AtomicUsize::new(0));
     let recorded_turn_reads = turn_reads.clone();
-    let latest_turn = Arc::new(Mutex::new("completed"));
+    let latest_turn = Arc::new(Mutex::new(("completed", Some(1))));
     let saved_turn = latest_turn.clone();
     let host_profile = profile.clone();
     let server = tokio::spawn(async move {
@@ -75,8 +75,8 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
                     assert_eq!(params["threadId"], thread_id);
                     assert_eq!(params["limit"], 1);
                     recorded_turn_reads.fetch_add(1, Ordering::Relaxed);
-                    let status = *saved_turn.lock().unwrap();
-                    json!({"data":[{"id":turn_id,"status":status,"items":[
+                    let (status, completed_at) = *saved_turn.lock().unwrap();
+                    json!({"data":[{"id":turn_id,"status":status,"completedAt":completed_at,"items":[
                         {"type":"userMessage","id":"last-request","content":[]}
                     ]}]})
                 }
@@ -124,9 +124,10 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
     );
 
     // The thread is loaded only in another process. Its latest saved turn shows it idle once
-    // completed, and unknown while interrupted, which is how a turn running elsewhere reads.
-    // Each observation reads one turn.
-    let tracked = || TrackedNative {
+    // the turn has an end time, completed or interrupted, and unknown while it reads as
+    // interrupted without one, which is how a turn running elsewhere reads. Each observation
+    // of a lead that settling waits on reads one turn; any other session's reads none.
+    let tracked = |idle_decides| TrackedNative {
         session: HistorySession {
             target: lead.target().clone(),
             binding: lead.binding().clone(),
@@ -137,17 +138,24 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
         child_cursor: None,
         started_at_ms: 0,
         questions: Vec::new(),
+        idle_decides,
     };
-    let observed = codex.attention(tracked()).await.unwrap().unwrap();
-    assert_eq!(
-        observed.activity.map(|seen| seen.phase),
-        Some(HostPhase::Idle)
-    );
-    *latest_turn.lock().unwrap() = "interrupted";
-    let observed = codex.attention(tracked()).await.unwrap().unwrap();
-    assert!(observed.activity.is_none());
-    assert_eq!(turn_reads.load(Ordering::Relaxed), 2);
-    *latest_turn.lock().unwrap() = "completed";
+    let phase = async |idle_decides| {
+        let observed = codex
+            .attention(tracked(idle_decides))
+            .await
+            .unwrap()
+            .unwrap();
+        observed.activity.map(|seen| seen.phase)
+    };
+    assert_eq!(phase(true).await, Some(HostPhase::Idle));
+    *latest_turn.lock().unwrap() = ("interrupted", None);
+    assert_eq!(phase(true).await, None);
+    *latest_turn.lock().unwrap() = ("interrupted", Some(2));
+    assert_eq!(phase(true).await, Some(HostPhase::Idle));
+    assert_eq!(phase(false).await, None);
+    assert_eq!(turn_reads.load(Ordering::Relaxed), 3);
+    *latest_turn.lock().unwrap() = ("completed", Some(1));
 
     assert!(matches!(
         readers.dispatch_readiness(lead.clone()).await.unwrap(),

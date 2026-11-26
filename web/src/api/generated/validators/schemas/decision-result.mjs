@@ -2,11 +2,11 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-import { validate157 } from "./disposition.mjs";
+import { validate158 } from "./disposition.mjs";
 import { validate116 } from "./review-id-dto.mjs";
-import { validate237 } from "./utc-timestamp-dto.mjs";
-import { validate152 } from "./git-sha-dto.mjs";
-function validate1438(
+import { validate238 } from "./utc-timestamp-dto.mjs";
+import { validate153 } from "./git-sha-dto.mjs";
+function validate1432(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -31,7 +31,7 @@ function validate1438(
           !func0.call(data, "checkpointId")) &&
           (missing0 = "checkpointId"))
       ) {
-        validate1438.errors = [
+        validate1432.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -98,7 +98,7 @@ function validate1438(
               vErrors.push(err1);
             }
             errors++;
-            validate1438.errors = vErrors;
+            validate1432.errors = vErrors;
             return false;
           } else {
             errors = _errs2;
@@ -149,7 +149,7 @@ function validate1438(
               let valid2 = false;
               const _errs9 = errors;
               if (
-                !validate157(data2, {
+                !validate158(data2, {
                   instancePath: instancePath + "/disposition",
                   parentData: data,
                   parentDataProperty: "disposition",
@@ -158,8 +158,8 @@ function validate1438(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate157.errors
-                    : vErrors.concat(validate157.errors);
+                    ? validate158.errors
+                    : vErrors.concat(validate158.errors);
                 errors = vErrors.length;
               }
               var _valid1 = _errs9 === errors;
@@ -196,7 +196,7 @@ function validate1438(
                   vErrors.push(err3);
                 }
                 errors++;
-                validate1438.errors = vErrors;
+                validate1432.errors = vErrors;
                 return false;
               } else {
                 errors = _errs8;
@@ -244,7 +244,7 @@ function validate1438(
                   let valid3 = false;
                   const _errs15 = errors;
                   if (
-                    !validate237(data4, {
+                    !validate238(data4, {
                       instancePath: instancePath + "/reviewedAt",
                       parentData: data,
                       parentDataProperty: "reviewedAt",
@@ -253,8 +253,8 @@ function validate1438(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate237.errors
-                        : vErrors.concat(validate237.errors);
+                        ? validate238.errors
+                        : vErrors.concat(validate238.errors);
                     errors = vErrors.length;
                   }
                   var _valid2 = _errs15 === errors;
@@ -291,7 +291,7 @@ function validate1438(
                       vErrors.push(err5);
                     }
                     errors++;
-                    validate1438.errors = vErrors;
+                    validate1432.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs14;
@@ -318,7 +318,7 @@ function validate1438(
                     let valid4 = false;
                     const _errs20 = errors;
                     if (
-                      !validate152(data5, {
+                      !validate153(data5, {
                         instancePath: instancePath + "/reviewedSha",
                         parentData: data,
                         parentDataProperty: "reviewedSha",
@@ -327,8 +327,8 @@ function validate1438(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate152.errors
-                          : vErrors.concat(validate152.errors);
+                          ? validate153.errors
+                          : vErrors.concat(validate153.errors);
                       errors = vErrors.length;
                     }
                     var _valid3 = _errs20 === errors;
@@ -365,7 +365,7 @@ function validate1438(
                         vErrors.push(err7);
                       }
                       errors++;
-                      validate1438.errors = vErrors;
+                      validate1432.errors = vErrors;
                       return false;
                     } else {
                       errors = _errs19;
@@ -388,7 +388,7 @@ function validate1438(
         }
       }
     } else {
-      validate1438.errors = [
+      validate1432.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -399,7 +399,7 @@ function validate1438(
       return false;
     }
   }
-  validate1438.errors = vErrors;
+  validate1432.errors = vErrors;
   return errors === 0;
 }
-export { validate1438 };
+export { validate1432 };

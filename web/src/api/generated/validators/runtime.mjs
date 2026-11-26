@@ -16,21 +16,22 @@ const pattern3 = new RegExp(
   "u",
 );
 const pattern5 = new RegExp("^[A-Za-z0-9_-]{1,512}$", "u");
-const pattern6 = new RegExp("^[0-9a-f]{64}$", "u");
-const pattern7 = new RegExp("^[^\\ud800-\\udfff]{1,12000}$", "u");
-const pattern8 = new RegExp("^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$", "u");
+const pattern6 = new RegExp("^F-(0[1-9]|[1-9][0-9]{1,8})$", "u");
+const pattern7 = new RegExp("^[0-9a-f]{64}$", "u");
+const pattern8 = new RegExp("^[^\\ud800-\\udfff]{1,12000}$", "u");
+const pattern9 = new RegExp("^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$", "u");
 const formats0 = {
   "date-time": function isUtcTimestamp(value) {
     const date = new Date(value);
     return Number.isFinite(date.getTime()) && date.toISOString() === value;
   },
 }["date-time"];
-const pattern9 = new RegExp(
+const pattern10 = new RegExp(
   "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
   "u",
 );
-const pattern10 = new RegExp("^[^\\ud800-\\udfff]*$", "u");
-const pattern11 = new RegExp('^"[0-9a-f]{64}"$', "u");
+const pattern11 = new RegExp("^[^\\ud800-\\udfff]*$", "u");
+const pattern12 = new RegExp('^"[0-9a-f]{64}"$', "u");
 export {
   func0,
   pattern0,
@@ -42,8 +43,9 @@ export {
   pattern6,
   pattern7,
   pattern8,
-  formats0,
   pattern9,
+  formats0,
   pattern10,
   pattern11,
+  pattern12,
 };

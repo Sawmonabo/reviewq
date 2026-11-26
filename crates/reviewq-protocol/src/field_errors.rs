@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::scalar::{FINDING_ID_PATTERN, GIT_SHA_PATTERN};
 
 /// Field errors one reply lists before a single summary of the rest, which keeps a refusal
-/// within the bridge's 256 KiB and MCP's 512 KiB reply caps.
+/// short enough to read and far below the ledger result limit.
 pub const MAX_FIELD_ERRORS: usize = 50;
 /// Longest unexpected field name an error repeats. Every schema field name is shorter.
 const MAX_ECHOED_NAME_BYTES: usize = 64;

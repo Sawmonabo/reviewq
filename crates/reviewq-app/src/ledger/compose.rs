@@ -21,8 +21,8 @@ use super::layout::{
 };
 use super::markdown::shift_headings;
 use super::{
-    Composed, CoverFacts, FindingFields, FindingOutcome, NoteRecord, NoteSection, SnapshotFinding,
-    VersionFacts, default_category,
+    Composed, CoverFacts, FindingOutcome, NoteRecord, NoteSection, SnapshotFinding, VersionFacts,
+    default_category,
 };
 use crate::reports::{FindingBasisKind, FindingSection, RevisionEvidence, Severity};
 use output::{
@@ -92,23 +92,6 @@ pub(super) fn checked_revision<'a>(
     })
 }
 
-/// The UTF-8 bytes of a finding's authored text, the measure a size refusal ranks by.
-pub(super) fn finding_bytes(fields: &FindingFields) -> usize {
-    let body = &fields.body;
-    fields.title.len()
-        + fields.category.as_ref().map_or(0, String::len)
-        + body
-            .locations
-            .iter()
-            .map(|location| location.path.len())
-            .sum::<usize>()
-        + body.issue.len()
-        + body.consequence.len()
-        + body.evidence.text.len()
-        + body.proposed_comment.as_ref().map_or(0, String::len)
-        + body.details.as_ref().map_or(0, String::len)
-}
-
 /// The effective blocking value at publish: the user's disposition when it sets one,
 /// otherwise the lead's.
 fn effective_blocking(finding: &SnapshotFinding) -> bool {
@@ -132,7 +115,7 @@ impl Report<'_> {
         let findings: usize = self
             .findings
             .iter()
-            .map(|finding| finding_bytes(&finding.record.fields) + BLOCK_OVERHEAD_BYTES)
+            .map(|finding| finding.record.fields.text_bytes() + BLOCK_OVERHEAD_BYTES)
             .sum();
         let notes: usize = self
             .notes

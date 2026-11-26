@@ -2,10 +2,10 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate48 } from "./history-cursor-dto.mjs";
-import { validate129 } from "./safe-count-dto.mjs";
-import { validate629 } from "./history-text.mjs";
-import { validate237 } from "./utc-timestamp-dto.mjs";
-function validate693(
+import { validate130 } from "./safe-count-dto.mjs";
+import { validate630 } from "./history-text.mjs";
+import { validate238 } from "./utc-timestamp-dto.mjs";
+function validate694(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate693(
         ((data.locator === undefined || !func0.call(data, "locator")) &&
           (missing0 = "locator"))
       ) {
-        validate693.errors = [
+        validate694.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -81,7 +81,7 @@ function validate693(
             if (data.ordinal !== undefined && func0.call(data, "ordinal")) {
               const _errs3 = errors;
               if (
-                !validate129(data.ordinal, {
+                !validate130(data.ordinal, {
                   instancePath: instancePath + "/ordinal",
                   parentData: data,
                   parentDataProperty: "ordinal",
@@ -90,8 +90,8 @@ function validate693(
               ) {
                 vErrors =
                   vErrors === null
-                    ? validate129.errors
-                    : vErrors.concat(validate129.errors);
+                    ? validate130.errors
+                    : vErrors.concat(validate130.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs3 === errors;
@@ -102,7 +102,7 @@ function validate693(
               if (data.text !== undefined && func0.call(data, "text")) {
                 const _errs4 = errors;
                 if (
-                  !validate629(data.text, {
+                  !validate630(data.text, {
                     instancePath: instancePath + "/text",
                     parentData: data,
                     parentDataProperty: "text",
@@ -111,8 +111,8 @@ function validate693(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate629.errors
-                      : vErrors.concat(validate629.errors);
+                      ? validate630.errors
+                      : vErrors.concat(validate630.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs4 === errors;
@@ -130,7 +130,7 @@ function validate693(
                   let valid1 = false;
                   const _errs7 = errors;
                   if (
-                    !validate237(data4, {
+                    !validate238(data4, {
                       instancePath: instancePath + "/timestamp",
                       parentData: data,
                       parentDataProperty: "timestamp",
@@ -139,8 +139,8 @@ function validate693(
                   ) {
                     vErrors =
                       vErrors === null
-                        ? validate237.errors
-                        : vErrors.concat(validate237.errors);
+                        ? validate238.errors
+                        : vErrors.concat(validate238.errors);
                     errors = vErrors.length;
                   }
                   var _valid0 = _errs7 === errors;
@@ -177,7 +177,7 @@ function validate693(
                       vErrors.push(err1);
                     }
                     errors++;
-                    validate693.errors = vErrors;
+                    validate694.errors = vErrors;
                     return false;
                   } else {
                     errors = _errs6;
@@ -199,7 +199,7 @@ function validate693(
         }
       }
     } else {
-      validate693.errors = [
+      validate694.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -210,7 +210,7 @@ function validate693(
       return false;
     }
   }
-  validate693.errors = vErrors;
+  validate694.errors = vErrors;
   return errors === 0;
 }
-export { validate693 };
+export { validate694 };

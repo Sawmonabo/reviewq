@@ -200,8 +200,8 @@ export default function Findings({
         className="quiet-button history-trigger"
         aria-haspopup="dialog"
         data-update={updateFailed ? "failed" : undefined}
-        title={updateFailed ? "A report update failed. Open History for details." : undefined}
-        aria-label={updateFailed ? "History, report update failed" : undefined}
+        title={updateFailed ? "A report was not published. Open History for details." : undefined}
+        aria-label={updateFailed ? "History, report not published" : undefined}
         aria-expanded={history}
         onClick={() => setHistory(true)}
       >
@@ -285,7 +285,7 @@ export default function Findings({
           current.data &&
           !chosen && (
             <Empty title="No accepted findings yet">
-              {updateFailed && <p>The report submission failed. Open History for details.</p>}
+              {updateFailed && <p>The report was not published. Open History for details.</p>}
             </Empty>
           )
         ))}

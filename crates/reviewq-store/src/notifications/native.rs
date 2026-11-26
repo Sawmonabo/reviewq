@@ -40,14 +40,20 @@ impl NativeAttentionStore for SqliteStore {
     }
 }
 
+/// One page of tracked Codex sessions: the ones after `after` in key order, continuing from
+/// the first once the end is reached, so a poll observes a page whenever any session is
+/// tracked and no session twice in one page.
 fn tracked(db: &Connection, after: Option<SessionKey>) -> Result<Vec<TrackedNative>, StoreError> {
-    let mut statement = db.prepare_cached(
-        "SELECT s.run_id,s.session_key,f.native_turn_id,s.child_scan_cursor,s.child_scan_archived,x.started_at_ms FROM sessions s JOIN runs x USING(run_id)
+    let idle_decides = crate::ledger::passes::awaits_idle_lead("s.run_id");
+    let mut statement = db.prepare_cached(&format!(
+        "SELECT s.run_id,s.session_key,f.native_turn_id,s.child_scan_cursor,s.child_scan_archived,x.started_at_ms,
+           s.parent_session_key IS NULL AND {idle_decides}
+         FROM sessions s JOIN runs x USING(run_id)
          JOIN reviews r USING(review_id) LEFT JOIN notification_native_failures f USING(session_key)
-         WHERE s.provider='codex' AND r.state='open' AND s.session_key>?1
-           AND EXISTS(SELECT 1 FROM configured_projects p WHERE p.origin=r.origin AND p.project_id=r.project_id)
-         ORDER BY s.session_key LIMIT 8"
-    )?;
+         WHERE s.provider='codex' AND r.state='open'
+           AND EXISTS(SELECT 1 FROM configured_projects c WHERE c.origin=r.origin AND c.project_id=r.project_id)
+         ORDER BY s.session_key>?1 DESC, s.session_key LIMIT 8"
+    ))?;
     let rows = statement.query_map([after.as_ref().map_or("", |id| id.as_str())], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -56,17 +62,19 @@ fn tracked(db: &Connection, after: Option<SessionKey>) -> Result<Vec<TrackedNati
             row.get::<_, Option<String>>(3)?,
             row.get::<_, Option<bool>>(4)?,
             row.get::<_, i64>(5)?,
+            row.get::<_, bool>(6)?,
         ))
     })?;
     let mut output = Vec::new();
     for row in rows {
-        let (run, key, failure, cursor, archived, started_at_ms) = row?;
+        let (run, key, failure, cursor, archived, started_at_ms, idle_decides) = row?;
         let session = history_session(db, &Actor::local_operator(), parse(&run)?, parse(&key)?)?;
         let questions = crate::hosts::questions::active_async(db, &session)?;
         output.push(TrackedNative {
             session,
             questions,
             started_at_ms,
+            idle_decides,
             known_failure: failure.as_deref().map(parse).transpose()?,
             child_cursor: cursor.map(|cursor| NativeChildCursor {
                 cursor,

@@ -68,10 +68,10 @@ CREATE TABLE display_spans (
 ";
 
 impl SqliteStore {
-    /// Builds the display index of a sealed published version from its stored text, under the
+    /// Builds the display index of a published version from its stored text, under the
     /// reader's document budget. A version over the budget is left unindexed, because the
     /// reader answers it with the `document_budget` fallback without consulting the cache.
-    /// `NotFound` unless the version and its sealed artifact exist.
+    /// `NotFound` unless the version exists.
     pub(crate) async fn cache_report_display(
         &self,
         run: RunId,

@@ -47,17 +47,9 @@ export async function reportTurn($, state, event) {
   });
 }
 
-// A reply's `data` becomes the tool result. `error` is a string from `invoke` or the service's
-// error object; refused fields follow one per line so the model can correct the call. A refusal
-// whose errors are all at the root names no field, so its messages stand alone, as the MCP
-// server's tool error writes them.
+// A reply's `data` becomes the tool result. Its `error`, a sentence from `invoke` or the
+// bridge's text for a refused ledger call, becomes a tool error.
 export function toolResult(result) {
   if (!result.error && Object.hasOwn(result, "data")) return { result: JSON.stringify(result.data) };
-  if (Array.isArray(result.fieldErrors)) {
-    const lines = result.fieldErrors.map(({ path, message }) => path ? `${path}: ${message}` : message);
-    if (!lines.length || result.fieldErrors.some(({ path }) => path)) lines.unshift("Invalid tool input. Correct these fields and call again.");
-    return { result: lines.join("\n"), isError: true };
-  }
-  const error = typeof result.error === "string" ? result.error : result.error && JSON.stringify(result.error);
-  return { result: error || "ReviewQ returned no result for this call.", isError: true };
+  return { result: result.error || "ReviewQ returned no result for this call.", isError: true };
 }

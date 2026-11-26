@@ -15,7 +15,7 @@ mod managed;
 pub(crate) mod paths;
 mod retention;
 mod windows;
-use crate::{runtime_settings, service};
+use crate::{native_client, runtime_settings, service};
 use bundle::Bundle;
 pub(crate) use managed::{Managed, StartupPermission};
 use paths::Paths;
@@ -338,12 +338,15 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
             "Codex unavailable. Set codexCommand in runtime.json and retry install to enable its skill."
         );
     }
-    match (next.skill.is_some(), codex_hooks) {
-        (_, Ok(codex_hook::Reconciled::Unreadable(ownership))) => eprintln!(
-            "ReviewQ left the Codex hooks unchanged because it cannot read {}. Remove that file and install again.",
-            ownership.display()
-        ),
-        (true, Ok(codex_hook::Reconciled::Done)) => println!("{CODEX_HOOKS_TRUST}"),
+    let hooks_installed = match (next.skill.is_some(), codex_hooks) {
+        (_, Ok(codex_hook::Reconciled::Unreadable(ownership))) => {
+            eprintln!(
+                "ReviewQ left the Codex hooks unchanged because it cannot read {}. Remove that file and install again.",
+                ownership.display()
+            );
+            false
+        }
+        (has_codex, Ok(codex_hook::Reconciled::Done)) => has_codex,
         (has_codex, Ok(codex_hook::Reconciled::Kept { files, reason })) => {
             for file in files {
                 eprintln!(
@@ -351,15 +354,21 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
                     file.display()
                 );
             }
-            if has_codex {
-                println!("{CODEX_HOOKS_TRUST}");
-            }
+            has_codex
         }
-        (true, Err(error)) => eprintln!(
-            "ReviewQ could not configure its Codex hooks: {error} Reviews still file and close without them."
-        ),
-        (false, Err(error)) => eprintln!("ReviewQ preserved its previous Codex hooks: {error}"),
-        (false, Ok(codex_hook::Reconciled::Done)) => {}
+        (true, Err(error)) => {
+            eprintln!(
+                "ReviewQ could not configure its Codex hooks: {error} Reviews still file and close without them."
+            );
+            false
+        }
+        (false, Err(error)) => {
+            eprintln!("ReviewQ preserved its previous Codex hooks: {error}");
+            false
+        }
+    };
+    if hooks_installed && native_client::codex_hooks_pending(&endpoint).await {
+        println!("{}", native_client::CODEX_HOOKS_PENDING);
     }
     if next.claude.is_none() {
         println!("Claude Code unavailable. Set claudeCommand in runtime.json and retry install.");
@@ -368,9 +377,6 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     }
     Ok(())
 }
-
-/// Printed after the Codex hooks are installed.
-const CODEX_HOOKS_TRUST: &str = "Codex runs the ReviewQ Stop and SessionStart hooks only after you review and trust them in /hooks. Without them a review still files, closes and shows as unfinished when it is not closed; only the end-of-turn reminder and the reminder after compaction are missing.";
 
 fn report_preserved(entries: Vec<PathBuf>) {
     for path in entries {

@@ -226,13 +226,7 @@ async fn link_response(
         }
     };
     let stop_hook_reported = match provider {
-        HostProvider::Codex => Some(
-            entry
-                .store
-                .last_stop_hook_report(HostProvider::Codex)
-                .await?
-                .is_some(),
-        ),
+        HostProvider::Codex => Some(entry.store.codex_stop_hook_reported().await?),
         HostProvider::Claude => None,
     };
     let response = Success {

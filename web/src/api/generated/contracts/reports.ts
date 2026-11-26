@@ -22,18 +22,17 @@ import type {
 
 export type PublicationChoice = "withheld" | "authorized" | "published";
 
+export type FindingIdDto = string;
+
 export type QuoteUnit = "unicode_codepoints";
 
 export type Descriptor =
   | {
       blocking: boolean;
-      category: string;
       details?: FindingDetails | null;
       disposition?: FindingDisposition | null;
       findingId: string;
       kind: "finding";
-      recordRevision: RevisionDto;
-      section: FindingSection;
       severity: Severity;
       source: SourceRange;
       title: string;
@@ -66,8 +65,6 @@ export type Descriptor =
 export type FindingBasisKind = "observed" | "gap";
 
 export type Publication = "withheld" | "authorized" | "published";
-
-export type FindingSection = "functional" | "quality";
 
 export type Severity = "P0" | "P1" | "P2" | "P3";
 
@@ -134,7 +131,7 @@ export type DisplayResult =
 export interface ReportDispositionRequest {
   disposition: DispositionPatch;
   expectedVersion: RevisionDto;
-  findingId: ResourceIdDto;
+  findingId: FindingIdDto;
   receiptId: ResourceIdDto;
   submissionId: SubmissionIdDto;
 }
@@ -196,11 +193,8 @@ export interface ReportReference {
 
 export interface FindingDetails {
   consequence: string;
-  details?: string | null;
   evidence: FindingBasis;
-  issue: string;
   locations: FindingLocation[];
-  proposedComment?: string | null;
   [k: string]: unknown;
 }
 

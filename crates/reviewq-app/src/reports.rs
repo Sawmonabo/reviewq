@@ -102,15 +102,6 @@ pub struct Assessment {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReportAuthority(pub ReportHash);
 
-/// One stored chunk of a report's text, at its byte and scalar offsets.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ArtifactChunk {
-    pub ordinal: u64,
-    pub byte_start: u64,
-    pub scalar_start: u64,
-    pub bytes: Vec<u8>,
-}
-
 /// Counts lines and the longest line, in bytes without a line's trailing CR, as text is
 /// appended.
 #[derive(Default)]
@@ -283,6 +274,15 @@ pub struct FindingDetails {
     pub details: Option<String>,
 }
 
+/// What the Findings panel shows of a finding beside its title and badges. The rest is in
+/// the report text at the descriptor's `source`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FindingPreview {
+    pub locations: Vec<FindingLocation>,
+    pub consequence: String,
+    pub evidence: FindingBasis,
+}
+
 #[derive(Clone)]
 pub struct FindingDisposition {
     pub blocking: Option<bool>,
@@ -297,11 +297,8 @@ pub enum Descriptor {
         title: String,
         severity: Severity,
         blocking: bool,
-        section: FindingSection,
-        category: String,
-        record_revision: Revision,
         source: SourceRange,
-        details: Option<Box<FindingDetails>>,
+        details: Option<Box<FindingPreview>>,
         disposition: Option<Box<FindingDisposition>>,
     },
     Change {

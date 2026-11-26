@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "vite";
 import { verifyFirstReview, verifyReceipt } from "./cases.mjs";
+import { verifyReportLayout } from "./report-layout.mjs";
 
 const [scratch, mode] = process.argv.slice(2);
 const decoderPath = join(scratch, "receipt-decoder.mjs");
@@ -41,9 +42,44 @@ verifyReceipt(decoder, fixture);
 await verifyFirstReview(decoder, fixture);
 console.log("First-review contracts passed in Node.");
 
+// The browser reader recognises every part of the layout the Rust composer writes. An SSR
+// build resolves the Markdown packages' Node variants, which load without a document.
+const readerDir = join(scratch, "report-reader");
+await build({
+  configFile: false,
+  publicDir: false,
+  logLevel: "warn",
+  ssr: { noExternal: true },
+  build: {
+    outDir: readerDir,
+    emptyOutDir: false,
+    ssr: true,
+    rollupOptions: {
+      input: {
+        "parse-markdown": source("components/markdown/parse-markdown.ts"),
+        "report-reader": source("features/review/report/report-reader.ts"),
+      },
+      output: { entryFileNames: "[name].mjs" },
+    },
+  },
+});
+const reader = {
+  ...(await import(pathToFileURL(join(readerDir, "parse-markdown.mjs")).href)),
+  ...(await import(pathToFileURL(join(readerDir, "report-reader.mjs")).href)),
+};
+verifyReportLayout(
+  reader,
+  await readFile(new URL("../../../fixtures/reviews/ledger/worked.md", import.meta.url), "utf8"),
+);
+console.log("The report reader recognises the composed layout.");
+
 if (mode === "--browser") {
   await verifyInBrowser();
   console.log("First-review contracts passed in Chromium.");
+}
+
+function source(path) {
+  return fileURLToPath(new URL(`../../src/${path}`, import.meta.url));
 }
 
 async function readPayloads() {

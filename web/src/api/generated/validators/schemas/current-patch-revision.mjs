@@ -3,7 +3,7 @@ import { func0 } from "../runtime.mjs";
 import { validate116 } from "./review-id-dto.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-function validate395(
+function validate396(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -18,7 +18,7 @@ function validate395(
         ((data.revision === undefined || !func0.call(data, "revision")) &&
           (missing0 = "revision"))
       ) {
-        validate395.errors = [
+        validate396.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -127,7 +127,7 @@ function validate395(
                   vErrors.push(err1);
                 }
                 errors++;
-                validate395.errors = vErrors;
+                validate396.errors = vErrors;
                 return false;
               } else {
                 errors = _errs4;
@@ -147,7 +147,7 @@ function validate395(
         }
       }
     } else {
-      validate395.errors = [
+      validate396.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -158,7 +158,7 @@ function validate395(
       return false;
     }
   }
-  validate395.errors = vErrors;
+  validate396.errors = vErrors;
   return errors === 0;
 }
-export { validate395 };
+export { validate396 };

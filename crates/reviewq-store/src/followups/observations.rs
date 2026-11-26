@@ -414,7 +414,7 @@ pub(super) fn same_enrollment(
         "SELECT t.original_note_id,t.discussion_id,
           (SELECT json_group_array(f.finding_id) FROM (SELECT finding_id
              FROM followup_thread_findings WHERE review_id=t.review_id AND generation=t.generation
-               AND original_note_id=t.original_note_id ORDER BY finding_id) f)
+               AND original_note_id=t.original_note_id ORDER BY length(finding_id), finding_id) f)
          FROM followup_threads t WHERE t.review_id=?1 AND t.generation=?2 AND t.selected=1 LIMIT 501",
     )?;
     let mut rows = statement.query(params![review.as_str(), generation.as_sqlite_integer()])?;

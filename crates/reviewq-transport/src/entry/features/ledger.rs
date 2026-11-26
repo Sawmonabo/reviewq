@@ -29,9 +29,9 @@ use crate::entry::error::ApiBytes;
 use crate::entry::pages::{parse, success};
 use crate::entry::{ApiError, Entry};
 
-/// Largest ledger tool call body: a 128 KiB input with its binding on a tool route, or with
-/// its envelope on the MCP server, which allows this much for every request.
-pub(in crate::entry) const MAX_TOOL_BODY_BYTES: usize = 160 * 1024;
+/// Largest tool route body: a 128 KiB input with its binding. The Claude bridge answers a
+/// larger input itself with the validator's own refusal.
+const MAX_TOOL_BODY_BYTES: usize = 160 * 1024;
 /// Largest `gate` or `readback` body.
 const MAX_HOOK_BODY_BYTES: usize = 4 * 1024;
 

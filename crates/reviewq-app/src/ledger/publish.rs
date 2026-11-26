@@ -12,7 +12,7 @@ use reviewq_domain::ledger::{
     closing_kind, settle as settlement, untouched_findings,
 };
 
-use super::compose::{self, checked_revision, finding_bytes, recorded_outcome, state};
+use super::compose::{self, checked_revision, recorded_outcome, state};
 use super::passes::findings_on_file;
 use super::record::capitalized;
 use super::refusal::{for_agent, root};
@@ -42,11 +42,11 @@ const REPORTED_NOTES: [NoteSection; 5] = [
     NoteSection::Verification,
 ];
 
-const CLOSING_REFUSED: &str = "ReviewQ refused the lead's closing call because this run's workspace, repository grant, settings or follow-up batch changed, or the run's lead changed. The filed findings are kept. Check the run, then ask the lead to call finish_review again.";
-const UPDATE_REFUSED: &str = "ReviewQ could not publish an update because this run's workspace, repository grant, settings or lead changed. The filed findings are kept, and ReviewQ tries again the next time the run settles.";
+const CLOSING_REFUSED: &str = "ReviewQ refused the lead's closing call because this run's workspace, repository grant, settings or follow-up batch changed. The filed findings are kept. Check the run, then ask the lead to call finish_review again.";
+const UPDATE_REFUSED: &str = "ReviewQ could not publish an update because this run's workspace, repository grant or settings changed. The filed findings are kept, and ReviewQ tries again the next time the run settles.";
 const UPDATE_KEPT_CHANGING: &str = "ReviewQ could not publish an update because the findings kept changing while it was composed. They are kept, and ReviewQ tries again the next time the run settles.";
 /// What the lead reads when its closing call is refused; the user reads `CLOSING_REFUSED`.
-const CLOSING_REFUSED_FOR_AGENT: &str = "ReviewQ could not close this review because its workspace, repository access, settings or follow-up batch changed, or the review's lead changed. Every finding and note is kept, and ReviewQ already shows the user why. Stop here and tell the user the review could not be closed; do not call finish_review again until they have looked.";
+const CLOSING_REFUSED_FOR_AGENT: &str = "ReviewQ could not close this review because its workspace, repository access, settings or follow-up batch changed. Every finding and note is kept, and ReviewQ already shows the user why. Stop here and tell the user the review could not be closed; do not call finish_review again until they have looked.";
 /// What the lead reads when the records kept changing through every recompose.
 const KEPT_CHANGING_FOR_AGENT: &str = "Findings or notes kept changing while ReviewQ composed the report, so nothing was published yet, and every record is kept. If subagents are still filing, wait for them to finish, then call finish_review again.";
 
@@ -62,7 +62,7 @@ const KEPT_CHANGING_FOR_AGENT: &str = "Findings or notes kept changing while Rev
 /// than the selected-thread batch's, findings a full review left untouched, assessments that
 /// do not cover the batch, or text over 4 MiB. Every other refusal is also one root field
 /// error worded for the agent: after recording `closing_refused` when the run's workspace,
-/// grant, settings, follow-up binding or lead changed; for a child or an unattributed call,
+/// grant, settings or follow-up binding changed; for a child or an unattributed call,
 /// which records nothing; and when the records kept changing through three recomposes. Calls
 /// for different runs may run at once; a call that loses a race on its own run recomposes.
 pub async fn finish_review(
@@ -172,9 +172,9 @@ async fn settle_run(
     }
 }
 
-/// Publishes the update a settled run owes. A snapshot that shows an open pass or nothing
-/// unpublished means another trigger or the lead got there first, and nothing is written. An
-/// update that cannot publish records `update_failed`.
+/// Publishes the update a settled run owes. A snapshot that shows an open pass, no version or
+/// nothing unpublished means another trigger or the lead got there first, and nothing is
+/// written. An update that cannot publish records `update_failed`.
 async fn publish_update(
     store: &(impl LedgerStore + ?Sized),
     run: RunId,
@@ -189,10 +189,12 @@ async fn publish_update(
             Err(error) => return Err(error),
         };
         sequence = snapshot.guard.sequence;
-        let Some(parent) = &snapshot.parent else {
-            return Ok(());
-        };
-        if snapshot.pass.is_some() || parent.sequence == snapshot.guard.sequence {
+        if snapshot.pass.is_some()
+            || snapshot
+                .parent
+                .as_ref()
+                .is_none_or(|parent| parent.sequence == sequence)
+        {
             return Ok(());
         }
         let facts = update_facts(&snapshot, None, None)?;
@@ -245,7 +247,7 @@ async fn update_failed(
 
 fn unfinished_reason(findings: u32) -> String {
     format!(
-        "The lead ended without finishing the review: it called neither finish_review nor needs_input. {}. What is on file stays unpublished until the lead closes the review.",
+        "The lead's last turn ended without closing the review: in that turn it called neither finish_review nor needs_input. {}. What is on file stays unpublished until the lead closes the review.",
         capitalized(&findings_on_file(findings))
     )
 }
@@ -636,7 +638,7 @@ impl TooLarge {
             .map(|finding| {
                 (
                     finding.record.id.to_string(),
-                    finding_bytes(&finding.record.fields),
+                    finding.record.fields.text_bytes(),
                 )
             });
         let notes = snapshot.notes.iter().map(|note| {

@@ -6,10 +6,10 @@ use reviewq_app::events::ResourceKey;
 use reviewq_app::followups::ResultKind;
 use reviewq_app::ledger::{
     ClosingCommit, CommitKind, FinishReceipt, NewVersion, PublishCommit, PublishOutcome,
-    SnapshotGuard, default_category,
+    SnapshotGuard,
 };
 use reviewq_app::notifications::{Kind, Observation, Source};
-use reviewq_app::reports::{CHUNK_BYTES, FindingSection, RevisionEvidence};
+use reviewq_app::reports::RevisionEvidence;
 use reviewq_domain::identity::{ReceiptId, ReportHash, RunId};
 use reviewq_domain::ledger::Tool;
 use reviewq_domain::session::LeadTarget;
@@ -26,8 +26,8 @@ use crate::followups::completion;
 use crate::followups::work::FrozenManifest;
 use crate::hosts::recovery::complete_turn;
 use crate::notifications::{insert_notification, publish};
-use crate::queue::{identity_for_review, lead_for_run, parse};
-use crate::reports::artifact::{append, seal};
+use crate::queue::{identity_for_review, parse};
+use crate::reports::artifact;
 use crate::reports::authority::for_project;
 use crate::reports::failures;
 use crate::workspace::advance_queue;
@@ -65,11 +65,9 @@ pub(super) fn commit(
     if matches!(kind, CommitKind::Update(_)) && pass_id != guard.pass {
         return Ok(PublishOutcome::Stale);
     }
-    // 3. The lead, the authority, or a closing call's pass or batch changed.
+    // 3. The authority, or a closing call's pass or batch changed.
     let authority = for_project(db, &identity_for_review(db, guard.lead.review_id())?)?;
-    if lead_for_run(db, guard.lead.run_id())?.as_ref() != Some(&guard.lead)
-        || authority.as_ref() != Some(&guard.authority)
-    {
+    if authority.as_ref() != Some(&guard.authority) {
         return Err(AppError::Conflict.into());
     }
     let closing = match kind {
@@ -213,7 +211,7 @@ enum Ready {
     Followup(String),
 }
 
-/// Seals the text, appends the version with its rows, moves the head, binds the disposition
+/// Writes the text, appends the version with its rows, moves the head, binds the disposition
 /// revisions and marks the guarded sequence published.
 fn store_version(
     db: &Connection,
@@ -225,19 +223,13 @@ fn store_version(
     let receipt: ReceiptId = parse(&Uuid::new_v4().to_string())?;
     let artifact = Uuid::new_v4().to_string();
     let composed = &version.composed;
-    db.prepare_cached(
-        "INSERT INTO artifacts(artifact_id, byte_length, total_code_points, line_count, max_line_bytes,
-           sealed, created_at_ms) VALUES(?1, 0, 0, 0, 0, 0, ?2)",
-    )?
-    .execute(params![artifact, time])?;
-    let (mut ordinal, mut bytes, mut scalars) = (0_u64, 0_u64, 0_u64);
-    for chunk in chunks(&composed.text) {
-        append(db, &artifact, ordinal, (bytes, scalars), chunk)?;
-        ordinal += 1;
-        bytes += chunk.len() as u64;
-        scalars += chunk.chars().count() as u64;
-    }
-    seal(db, &artifact, &composed.sha256, &composed.stats)?;
+    artifact::write(
+        db,
+        &artifact,
+        &composed.text,
+        &composed.sha256,
+        &composed.stats,
+    )?;
     let facts = &version.facts;
     let parent_attention: Option<String> = match &guard.head {
         Some(head) => db
@@ -319,40 +311,22 @@ fn rows(db: &Connection, run: &str, receipt: &str, version: &NewVersion) -> Resu
         )
     };
     let mut record = db.prepare_cached(
-        "SELECT c.revision, c.title, c.severity, c.blocking, c.section, c.category
+        "SELECT c.revision, c.title, c.severity, c.blocking
          FROM ledger_findings f JOIN ledger_changes c ON c.run_id=f.run_id AND c.sequence=f.sequence
          WHERE f.run_id=?1 AND f.finding=?2 AND f.active=1",
     )?;
     let mut finding = db.prepare_cached(
         "INSERT INTO report_findings(run_id, receipt_id, finding_id, record_revision, title, severity,
-           blocking, section, category, scalar_offset, scalar_length, evidence_sha256)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+           blocking, scalar_offset, scalar_length, evidence_sha256)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )?;
     for card in &version.composed.cards {
-        let (revision, title, severity, blocking, section, category): (
-            i64,
-            String,
-            String,
-            bool,
-            String,
-            Option<String>,
-        ) = record
+        let (revision, title, severity, blocking): (i64, String, String, bool) = record
             .query_row(params![run, card.id.number()], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                ))
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })
             .optional()?
             .ok_or(AppError::Internal)?;
-        let category = match category {
-            Some(category) => category,
-            None => default_category(parse::<FindingSection>(&section)?).to_owned(),
-        };
         finding.execute(params![
             run,
             receipt,
@@ -361,8 +335,6 @@ fn rows(db: &Connection, run: &str, receipt: &str, version: &NewVersion) -> Resu
             title,
             severity,
             blocking,
-            section,
-            category,
             card.span.scalar_offset as i64,
             card.span.scalar_length as i64,
             evidence(&card.span.bytes)?,
@@ -404,23 +376,6 @@ fn rows(db: &Connection, run: &str, receipt: &str, version: &NewVersion) -> Resu
         }
     }
     Ok(())
-}
-
-/// The composed text in chunks of at most `CHUNK_BYTES`, each ending on a character boundary.
-fn chunks(text: &str) -> impl Iterator<Item = &str> {
-    let mut rest = text;
-    std::iter::from_fn(move || {
-        if rest.is_empty() {
-            return None;
-        }
-        let mut end = rest.len().min(CHUNK_BYTES);
-        while !rest.is_char_boundary(end) {
-            end -= 1;
-        }
-        let (chunk, tail) = rest.split_at(end);
-        rest = tail;
-        Some(chunk)
-    })
 }
 
 /// Resolves earlier failures, raises the ready notification and emits the change events.

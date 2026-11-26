@@ -18,10 +18,9 @@ use reviewq_app::ledger::{
     PublishOutcome, ReadBack, RecordWrite, Recorded, SettleCandidate, WriteRefusal,
 };
 use reviewq_domain::identity::{ReceiptId, Revision, RunId};
-use reviewq_domain::session::HostProvider;
 use rusqlite::{Connection, OptionalExtension};
 
-pub(crate) use rows::details_at;
+pub(crate) use rows::preview_at;
 
 use crate::{SqliteStore, StoreError};
 
@@ -60,6 +59,14 @@ impl LedgerStore for SqliteStore {
 
     fn answer_gate(&self, request: GateRequest) -> AppFuture<'_, GateAnswer> {
         Box::pin(async move {
+            let probe = request.clone();
+            let released = self
+                .read(move |db| passes::released(db, &probe))
+                .await
+                .map_err(StoreError::app)?;
+            if let Some(answer) = released {
+                return Ok(answer);
+            }
             self.write(move |tx| passes::answer(&tx.sql, &request))
                 .await
                 .map_err(StoreError::app)
@@ -122,9 +129,9 @@ impl LedgerStore for SqliteStore {
         })
     }
 
-    fn last_stop_hook_report(&self, provider: HostProvider) -> AppFuture<'_, Option<i64>> {
+    fn codex_stop_hook_reported(&self) -> AppFuture<'_, bool> {
         Box::pin(async move {
-            self.read(move |db| passes::last_stop_hook_report(db, provider))
+            self.read(|db| passes::stop_hook_reported(db))
                 .await
                 .map_err(StoreError::app)
         })

@@ -154,7 +154,7 @@ export function indexedDocument(
       tree,
       text,
       changes,
-      group.sourceOrder === 0 ? undefined : { previousThreads: group.previousThreads },
+      index === 0 ? undefined : { previousThreads: group.previousThreads },
     );
     const block = blocks[0];
     if (
@@ -349,13 +349,12 @@ function planGroups(layout: DisplayLayout, base: string | undefined) {
   });
   let first = 0;
   let previousThreads = false;
-  return pieces.map((group, index): Group => {
+  return pieces.map((group): Group => {
     const last = first + group.items.length - 1;
     if (spans[last]!.byteEnd - spans[first]!.byteStart > MAX_GROUP_BYTES)
       throw new Error("The report section needs full-document formatting.");
     const entry = {
       offset: group.offset,
-      sourceOrder: index,
       first,
       last,
       previousThreads,

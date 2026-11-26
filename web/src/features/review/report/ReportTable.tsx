@@ -95,7 +95,7 @@ export function ReportTable({
     }
     const exact = selectionSource(active, [
       {
-        block: { sourceOrder: 0, offset: 0, end: markdown.length, nodes: [] },
+        block: { offset: 0, end: markdown.length, nodes: [] },
         source: { text: markdown, utf16: 0, scalar: range.scalarStart },
       },
     ]);

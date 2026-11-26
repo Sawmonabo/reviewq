@@ -22,8 +22,9 @@ use crate::workspace::advance_queue;
 /// does not count as working. A lead with no stored activity is unknown, such as a Codex
 /// thread running in another process, and its run is neither settled nor updated. A lead not
 /// yet seen starting a turn for the open pass is not idle either: it has not begun the work
-/// the pass waits for. A child counts as idle unless it shows work, because a child's last
-/// turn can stay unknown long after the child ended.
+/// the pass waits for. A lead's own record write makes a stored idle or failed state unknown,
+/// because the call proves its turn is running. A child counts as idle unless it shows work,
+/// because a child's last turn can stay unknown long after the child ended.
 ///
 /// `candidates` leaves out a run whose unresolved failure of the kind settling would record
 /// (unfinished review for its pass, failed update without one) was recorded at its current
@@ -48,6 +49,7 @@ pub(super) fn candidates(db: &Connection) -> Result<Vec<SettleCandidate>, StoreE
            NOT EXISTS(SELECT 1 FROM review_active_sessions s WHERE s.run_id=x.run_id
              AND s.parent_session_key IS NOT NULL AND {BUSY}),
            EXISTS(SELECT 1 FROM recovery_episodes e WHERE e.run_id=x.run_id AND e.state IN {RECOVERING}),
+           EXISTS(SELECT 1 FROM report_heads h WHERE h.run_id=x.run_id),
            coalesce(l.sequence>l.published_sequence, 0)
          FROM candidates x JOIN runs r ON r.run_id=x.run_id
          JOIN reviews v ON v.review_id=r.review_id AND v.state='open'
@@ -81,7 +83,8 @@ pub(super) fn candidates(db: &Connection) -> Result<Vec<SettleCandidate>, StoreE
                 pass: state
                     .map(|state| PassState::from_label(&state).ok_or(AppError::Internal))
                     .transpose()?,
-                unpublished: row.get(8)?,
+                has_version: row.get(8)?,
+                unpublished: row.get(9)?,
             },
         });
     }

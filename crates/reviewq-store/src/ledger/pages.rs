@@ -234,29 +234,15 @@ fn note_index(
     Ok(notes)
 }
 
-/// The UTF-8 bytes of a finding's text fields, which the page budget counts.
+/// The UTF-8 bytes of a finding's text fields and outcome, which the page budget counts.
 fn finding_bytes(record: &FindingRecord) -> usize {
-    let fields = &record.fields;
-    let body = &fields.body;
-    let outcome = record.outcome.as_ref().map_or(0, |outcome| {
-        outcome.reason.len()
-            + outcome
-                .discussion_ids
-                .iter()
-                .map(String::len)
-                .sum::<usize>()
-    });
-    fields.title.len()
-        + fields.category.as_ref().map_or(0, String::len)
-        + body
-            .locations
-            .iter()
-            .map(|location| location.path.len())
-            .sum::<usize>()
-        + body.issue.len()
-        + body.consequence.len()
-        + body.evidence.text.len()
-        + body.proposed_comment.as_ref().map_or(0, String::len)
-        + body.details.as_ref().map_or(0, String::len)
-        + outcome
+    record.fields.text_bytes()
+        + record.outcome.as_ref().map_or(0, |outcome| {
+            outcome.reason.len()
+                + outcome
+                    .discussion_ids
+                    .iter()
+                    .map(String::len)
+                    .sum::<usize>()
+        })
 }
