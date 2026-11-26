@@ -252,4 +252,18 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
     assert!(unknown().await);
     drop(command);
     assert_eq!(phase(true).await, Some(HostPhase::Idle));
+
+    // A daemon a command launched but gave up waiting for may still resume the saved threads,
+    // so its live process keeps the session unknown. A record from an earlier boot does not.
+    let ticks = reviewq_app::hosts::process::start_time(std::process::id()).unwrap();
+    let boot = reviewq_app::hosts::process::boot_id().unwrap();
+    let record = |boot: &str| {
+        json!({"pid":std::process::id(),"processStartTime":"",
+            "processIdentity":{"bootId":boot,"startTicks":ticks}})
+        .to_string()
+    };
+    fs::write(state.join("daemon.pid"), record(&boot)).unwrap();
+    assert!(unknown().await);
+    fs::write(state.join("daemon.pid"), record("an-earlier-boot")).unwrap();
+    assert_eq!(phase(true).await, Some(HostPhase::Idle));
 }

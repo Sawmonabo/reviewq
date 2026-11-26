@@ -1,12 +1,10 @@
-//! The process hosting a Claude session, as `/proc` names it, and the one proof that it died.
-//! The heartbeat helper names its own parent, the `claude` process that runs the session, and
-//! the service reads that process back. Only the absence of the process proves anything: a
-//! process that exists says nothing about whether the session is there. The service keeps a
-//! host only when it ran on the service's own boot and pid namespace when it was reported
-//! (`is_local`), so a later boot proves that host's kernel, and the host with it, has stopped.
+//! The process hosting a Claude session, and the one proof that it died. The heartbeat helper
+//! names its own parent, the `claude` process that runs the session, and the service reads
+//! that process back through `hosts::process`. The service keeps a host only when it ran on the
+//! service's own boot and pid namespace when it was reported (`is_local`), so a later boot
+//! proves that host's kernel, and the host with it, has stopped.
 
-use std::fs;
-use std::io::ErrorKind;
+use crate::hosts::process;
 
 /// Longest boot ID or pid namespace accepted, in bytes. A boot ID is a 36-byte UUID and a
 /// namespace reads `pid:[<inode>]`.
@@ -33,13 +31,11 @@ impl ClaudeHost {
 
     /// Process `pid` as this process sees it, or `None` when it cannot be read.
     pub fn of(pid: u32) -> Option<Self> {
-        let (_, start_time) = stat(pid).ok()??;
-        let (boot_id, pid_namespace) = here()?;
         Some(Self {
             pid,
-            start_time,
-            boot_id,
-            pid_namespace,
+            start_time: process::start_time(pid)?,
+            boot_id: process::boot_id()?,
+            pid_namespace: process::pid_namespace()?,
         })
     }
 
@@ -54,53 +50,22 @@ impl ClaudeHost {
     /// Whether this process names this service's own boot and pid namespace, read now.
     /// Anything unreadable is not.
     pub fn is_local(&self) -> bool {
-        here().is_some_and(|(boot, namespace)| {
-            boot == self.boot_id && namespace == self.pid_namespace
-        })
+        process::boot_id().is_some_and(|boot| boot == self.boot_id)
+            && process::pid_namespace().is_some_and(|namespace| namespace == self.pid_namespace)
     }
 
     /// Whether this host, which was `is_local` when it was reported, is proven dead: this
-    /// service now runs on another boot, or on the same boot and pid namespace its
-    /// `/proc/<pid>/stat` is missing, names another start time, or shows it a zombie (`Z`) or
-    /// dead (`X`). Anything unreadable or unclear, and another pid namespace on the same boot,
-    /// proves nothing.
+    /// service now runs on another boot, or on the same boot and pid namespace the process
+    /// has ended (`process::ended`). Anything unreadable or unclear, and another pid namespace
+    /// on the same boot, proves nothing.
     pub fn is_dead(&self) -> bool {
-        let Some((boot, namespace)) = here() else {
-            return false;
-        };
-        if boot != self.boot_id {
-            return true;
-        }
-        if namespace != self.pid_namespace {
-            return false;
-        }
-        match stat(self.pid) {
-            Err(error) => error.kind() == ErrorKind::NotFound,
-            Ok(Some((state, start_time))) => {
-                start_time != self.start_time || matches!(state, 'Z' | 'X')
+        match process::boot_id() {
+            None => false,
+            Some(boot) if boot != self.boot_id => true,
+            Some(_) => {
+                process::pid_namespace().is_some_and(|namespace| namespace == self.pid_namespace)
+                    && process::ended(self.pid, Some(self.start_time))
             }
-            Ok(None) => false,
         }
     }
-}
-
-/// This process's boot ID and pid namespace.
-fn here() -> Option<(String, String)> {
-    let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
-    let namespace = fs::read_link("/proc/self/ns/pid").ok()?;
-    Some((boot.trim().to_owned(), namespace.to_str()?.to_owned()))
-}
-
-/// The state and start time in `/proc/<pid>/stat`, read after the last `)` because the command
-/// name before it may hold spaces and parentheses; `None` when the text does not parse.
-fn stat(pid: u32) -> std::io::Result<Option<(char, u64)>> {
-    let text = fs::read_to_string(format!("/proc/{pid}/stat"))?;
-    let Some((_, rest)) = text.rsplit_once(')') else {
-        return Ok(None);
-    };
-    let mut fields = rest.split_whitespace();
-    // Fields 3 to 22: the state, then 18 more up to the start time.
-    let state = fields.next().and_then(|field| field.chars().next());
-    let start = fields.nth(18).and_then(|field| field.parse().ok());
-    Ok(state.zip(start))
 }

@@ -1,12 +1,13 @@
 use std::fs::File;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Read};
 use std::path::Path;
 use std::time::Duration;
 
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::recovery::{NativeFailure, RecoveryKind};
-use reviewq_app::hosts::{HostActivity, HostPhase, NativeSessionMetadata, QuestionStatus};
+use reviewq_app::hosts::{HostActivity, HostPhase, NativeSessionMetadata, QuestionStatus, process};
 use reviewq_app::notifications::{Kind, NativeAttention, NativeOccurrence, TrackedNative};
+use serde::Deserialize;
 use tokio::net::UnixStream;
 use tokio::time::timeout;
 use uuid::Uuid;
@@ -63,7 +64,7 @@ impl Codex {
                     activity = match &latest {
                         Some(turn) => {
                             saved_turn_activity(turn, async {
-                                self.daemon_settled() && self.thread_free(&thread.id, None).await
+                                self.daemon_settled() && self.thread_free(&thread.id).await
                             })
                             .await
                         }
@@ -145,12 +146,14 @@ impl Codex {
 
 impl Codex {
     /// A session whose thread could not be read because no Codex daemon was reached. It is idle
-    /// once three things hold together: no daemon start, restart, update or stop is under way,
-    /// the daemon's socket is missing or refuses connections, and no process holds the thread.
-    /// The lifecycle lock stays held from the first check to the last, so no daemon can start
-    /// and resume the thread in between. A daemon that a command restarts takes the threads its
-    /// predecessor saved before it answers, and the command holds the lock until it answers, so
-    /// threads saved while the lock is free are not being resumed. A socket that accepts the
+    /// once four things hold together: no daemon start, restart, update or stop is under way,
+    /// the daemon's socket is missing or refuses connections, no daemon process Codex launched
+    /// is alive, and no process holds the thread. The lifecycle lock stays held from the first
+    /// check to the last, so no command can launch a daemon in between. A daemon that a command
+    /// restarts resumes the threads its predecessor saved, with any turn it interrupted, and
+    /// takes them before it answers. The command holds the lock until the daemon answers or it
+    /// gives up waiting; a daemon it gave up on is still alive, so threads saved while the lock
+    /// is free and no daemon lives are ones nothing resumes. A socket that accepts the
     /// connection belongs to a daemon that runs, even one too busy to answer discovery in time.
     /// The observation carries no thread data, so the stored name, status and start time stay.
     /// Otherwise the read fails and nothing is stored.
@@ -175,7 +178,16 @@ impl Codex {
             timeout(PROBE_LIMIT, UnixStream::connect(socket)).await,
             Ok(Err(error)) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused)
         );
-        if !no_listener || !self.thread_free(thread, lifecycle).await {
+        let (profile, owned) = (self.profile.as_path().to_owned(), thread.to_owned());
+        let free = no_listener
+            && tokio::task::spawn_blocking(move || {
+                let free = !daemon_alive(&profile) && writer_gone(&profile, &owned);
+                drop(lifecycle);
+                free
+            })
+            .await
+            .unwrap_or(false);
+        if !free {
             return Err(AppError::Unavailable);
         }
         let async_questions = super::super::history::observe_async_questions(
@@ -207,17 +219,12 @@ impl Codex {
             if bound.elapsed() >= self.restore_grace)
     }
 
-    /// Whether no process holds the thread, probed off the async runtime. A lifecycle lock
-    /// passed in is released there once the probe is done.
-    async fn thread_free(&self, thread: &str, lifecycle: Option<SharedLock>) -> bool {
+    /// Whether no process holds the thread, probed off the async runtime.
+    async fn thread_free(&self, thread: &str) -> bool {
         let (profile, thread) = (self.profile.as_path().to_owned(), thread.to_owned());
-        tokio::task::spawn_blocking(move || {
-            let free = writer_gone(&profile, &thread);
-            drop(lifecycle);
-            free
-        })
-        .await
-        .unwrap_or(false)
+        tokio::task::spawn_blocking(move || writer_gone(&profile, &thread))
+            .await
+            .unwrap_or(false)
     }
 }
 
@@ -247,6 +254,54 @@ fn lifecycle_paused(profile: &Path) -> Option<Option<SharedLock>> {
         Err(error) if error.kind() == ErrorKind::NotFound => Some(None),
         Err(_) => None,
     }
+}
+
+/// Whether a daemon process Codex launched may still be alive, even one that has not bound
+/// its socket yet. Codex records each daemon it launches in `app-server-daemon/daemon.pid`, or
+/// `app-server.pid` for an older installation, with the boot and the start time in clock ticks
+/// that identify the process, so a record left from an earlier boot or a process that ended
+/// does not match. Codex records no pid namespace; it runs beside ReviewQ, so the pid is read
+/// in ReviewQ's own. An empty or missing record names no process; anything unclear counts as
+/// alive.
+fn daemon_alive(profile: &Path) -> bool {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Record {
+        pid: u32,
+        process_identity: Option<Identity>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Identity {
+        boot_id: String,
+        start_ticks: u64,
+    }
+    let alive = |name: &str| {
+        let mut text = String::new();
+        match File::open(profile.join("app-server-daemon").join(name)) {
+            Ok(file) => {
+                if file.take(4096).read_to_string(&mut text).is_err() {
+                    return true;
+                }
+            }
+            Err(error) => return error.kind() != ErrorKind::NotFound,
+        }
+        if text.trim().is_empty() {
+            return false;
+        }
+        let Ok(record) = serde_json::from_str::<Record>(&text) else {
+            return true;
+        };
+        let ended = match record.process_identity {
+            Some(identity) => {
+                process::boot_id().is_some_and(|boot| boot != identity.boot_id)
+                    || process::ended(record.pid, Some(identity.start_ticks))
+            }
+            None => process::ended(record.pid, None),
+        };
+        !ended
+    };
+    alive("daemon.pid") || alive("app-server.pid")
 }
 
 /// The activity of a thread this connection has not loaded, from its latest saved turn: failed

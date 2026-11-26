@@ -17,6 +17,7 @@ use crate::workspace::WorkspaceStore;
 
 mod claude;
 mod messages;
+pub mod process;
 mod questions;
 mod registration;
 pub use registration::{authorize_registration, register_proven};

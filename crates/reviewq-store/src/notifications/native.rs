@@ -1,6 +1,7 @@
 use reviewq_app::access::{Actor, AppError, AppFuture};
 use reviewq_app::events::ResourceKey;
 use reviewq_app::history::HistorySession;
+use reviewq_app::hosts::NativeSessionMetadata;
 use reviewq_app::notifications::{
     Kind, NativeAttention, NativeAttentionStore, NativeChildCursor, NativeOccurrence, Observation,
     Source, TrackedNative,
@@ -110,7 +111,21 @@ fn record(
     if !configured {
         return Err(AppError::StaleRevision.into());
     }
-    let (phase, questions) = crate::hosts::activity_columns(observed.activity);
+    let (mut phase, questions) = crate::hosts::activity_columns(observed.activity);
+    // Only an observation that read no thread carries no metadata: a thread read always
+    // reports its status. Such an observation finds the session idle because no process can
+    // be running it, which says nothing of how its last turn ended, so a stored failure stays.
+    // An idle read from the thread itself, as after a later turn completed, replaces it.
+    if phase == Some("idle") && observed.metadata == NativeSessionMetadata::default() {
+        let stored: Option<String> = db.query_row(
+            "SELECT host_activity FROM sessions WHERE session_key=?1",
+            [target.session_key().as_str()],
+            |row| row.get(0),
+        )?;
+        if stored.as_deref() == Some("failed") {
+            phase = Some("failed");
+        }
+    }
     let changed =
         crate::hosts::record_activity(db, target.session_key().as_str(), phase, questions)?;
     let metadata = crate::hosts::metadata::record(
