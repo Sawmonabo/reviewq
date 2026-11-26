@@ -3,7 +3,7 @@
 
 use reviewq_app::access::AppError;
 use reviewq_app::events::ResourceKey;
-use reviewq_app::ledger::{FailureRecord, PassId, SettleCandidate};
+use reviewq_app::ledger::{FailureRecord, PassId, SettleCandidate, SilentSessions};
 use reviewq_domain::identity::Revision;
 use reviewq_domain::ledger::{FailureKind, PassState, SettleFacts};
 use rusqlite::Connection;
@@ -24,7 +24,9 @@ use crate::workspace::advance_queue;
 /// yet seen starting a turn for the open pass is not idle either: it has not begun the work
 /// the pass waits for. A lead's own record write makes a stored idle or failed state unknown,
 /// because the call proves its turn is running. A child counts as idle unless it shows work,
-/// because a child's last turn can stay unknown long after the child ended.
+/// because a child's last turn can stay unknown long after the child ended. With
+/// `SilentSessions::Unknown` the missing companion proves nothing, and a session stored as
+/// busy holds its run back whether or not its companion is live.
 ///
 /// `candidates` leaves out a run whose unresolved failure of the kind settling would record
 /// (unfinished review for its pass, failed update without one) was recorded at its current
@@ -34,7 +36,20 @@ const BUSY: &str = "(s.host_activity IN ('working','blocked') OR s.host_question
 /// Recovery states that keep a run from settling.
 const RECOVERING: &str = "('waiting','queued','started','uncertain')";
 
-pub(super) fn candidates(db: &Connection) -> Result<Vec<SettleCandidate>, StoreError> {
+/// Whether a stored busy state holds the run back without a live companion: the family's
+/// sessions of the given kind, `IS NULL` for the lead and `IS NOT NULL` for children.
+fn stored_busy(parent: &str) -> String {
+    format!(
+        "(?1 OR NOT EXISTS(SELECT 1 FROM sessions s WHERE s.run_id=x.run_id
+           AND s.parent_session_key {parent} AND {BUSY}))"
+    )
+}
+
+pub(super) fn candidates(
+    db: &Connection,
+    silent: SilentSessions,
+) -> Result<Vec<SettleCandidate>, StoreError> {
+    let (lead_stored, children_stored) = (stored_busy("IS NULL"), stored_busy("IS NOT NULL"));
     let sql = format!(
         "WITH candidates(run_id) AS (
            SELECT run_id FROM ledger_runs WHERE sequence>published_sequence
@@ -45,9 +60,11 @@ pub(super) fn candidates(db: &Connection) -> Result<Vec<SettleCandidate>, StoreE
              AND EXISTS(SELECT 1 FROM sessions s WHERE s.session_key=r.lead_session_key
                AND s.host_activity IS NOT NULL)
              AND NOT EXISTS(SELECT 1 FROM review_active_sessions s WHERE s.run_id=x.run_id
-               AND s.parent_session_key IS NULL AND {BUSY}),
+               AND s.parent_session_key IS NULL AND {BUSY})
+             AND {lead_stored},
            NOT EXISTS(SELECT 1 FROM review_active_sessions s WHERE s.run_id=x.run_id
-             AND s.parent_session_key IS NOT NULL AND {BUSY}),
+             AND s.parent_session_key IS NOT NULL AND {BUSY})
+             AND {children_stored},
            EXISTS(SELECT 1 FROM recovery_episodes e WHERE e.run_id=x.run_id AND e.state IN {RECOVERING}),
            EXISTS(SELECT 1 FROM report_heads h WHERE h.run_id=x.run_id),
            coalesce(l.sequence>l.published_sequence, 0)
@@ -62,7 +79,7 @@ pub(super) fn candidates(db: &Connection) -> Result<Vec<SettleCandidate>, StoreE
          ORDER BY x.run_id"
     );
     let mut statement = db.prepare_cached(&sql)?;
-    let mut rows = statement.query([])?;
+    let mut rows = statement.query([silent == SilentSessions::Ended])?;
     let mut candidates = Vec::new();
     while let Some(row) = rows.next()? {
         let pass: Option<i64> = row.get(2)?;

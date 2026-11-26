@@ -598,6 +598,18 @@ pub struct ReadBack {
     pub findings: Vec<FindingLine>,
 }
 
+/// What a Claude session that stopped reporting tells a settle read. A live session reports
+/// every 5 seconds and counts as ended after 30 seconds of silence, but only silence that
+/// ReviewQ was running to hear says anything.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SilentSessions {
+    /// ReviewQ has watched long enough without a break for a live session to have reported.
+    Ended,
+    /// ReviewQ started, or the machine slept or its clock was set, too recently to tell. A
+    /// session last stored as working, blocked or asking still is.
+    Unknown,
+}
+
 /// A run that may need settling, with the facts `settle` decides from and what a failure it
 /// finds records.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -709,8 +721,9 @@ pub trait LedgerStore: Send + Sync {
     /// stored session state, in one indexed read. Leaves out a run whose unresolved failure of
     /// the kind settling would record (`unfinished_review` for its open pass, `update_failed`
     /// when it has none) was recorded at its current ledger sequence, so it is not reworked
-    /// until a record write or closing call changes it.
-    fn runs_to_settle(&self) -> AppFuture<'_, Vec<SettleCandidate>>;
+    /// until a record write or closing call changes it. `silent` says what a Claude session
+    /// that stopped reporting counts as.
+    fn runs_to_settle(&self, silent: SilentSessions) -> AppFuture<'_, Vec<SettleCandidate>>;
 
     /// Records a failure with one notification when first seen for its run, pass and kind.
     /// A repeat updates the reason and sequence in place and raises nothing. A failure for a

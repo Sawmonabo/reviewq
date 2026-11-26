@@ -7,8 +7,8 @@ use reviewq_app::ledger::{
     CallBinding, CardSpan, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
     Composed, FailureRecord, FindingFields, FindingPatch, HostSession, LedgerEntries, LedgerRead,
     LedgerSelection, LedgerStore, NewVersion, NoteKey, NoteSection, NoteWrite, PublishCommit,
-    PublishOutcome, RecordField, RecordReceipt, RecordWrite, ReportLinks, SectionSpan, Span,
-    VersionFacts, WriteRefusal,
+    PublishOutcome, RecordField, RecordReceipt, RecordWrite, ReportLinks, SectionSpan,
+    SilentSessions, Span, VersionFacts, WriteRefusal,
 };
 use reviewq_app::reports::{
     ArtifactStats, Assessment, Collection, ContextRequest, Coverage, Descriptor, DispositionEdit,
@@ -258,9 +258,19 @@ fn publish_is_conditional() {
         // The idle lead has not started the delivered batch, so the run does not settle yet.
         select_thread(&store, receipt.as_str()).await;
         assert_eq!(lead_idle(&store).await, [false]);
+        // A working lead with no live companion has ended, unless ReviewQ was not running to
+        // hear it report.
         activity(&store, "working").await;
-        activity(&store, "idle").await;
         assert_eq!(lead_idle(&store).await, [true]);
+        assert_eq!(
+            lead_idle_when(&store, SilentSessions::Unknown).await,
+            [false]
+        );
+        activity(&store, "idle").await;
+        assert_eq!(
+            lead_idle_when(&store, SilentSessions::Unknown).await,
+            [true]
+        );
         let selected = closing(&store, "finish-thread").await;
         assert_eq!(
             selected.snapshot.pass.as_ref().map(|pass| pass.kind),
@@ -576,13 +586,18 @@ fn span(text: &str, start: usize) -> Span {
 
 /// The settle read's `lead_idle` for each candidate run.
 async fn lead_idle(store: &SqliteStore) -> Vec<bool> {
-    let candidates = store.runs_to_settle().await.unwrap();
+    lead_idle_when(store, SilentSessions::Ended).await
+}
+
+/// The same, for what a silent Claude session counts as.
+async fn lead_idle_when(store: &SqliteStore, silent: SilentSessions) -> Vec<bool> {
+    let candidates = store.runs_to_settle(silent).await.unwrap();
     candidates.iter().map(|run| run.facts.lead_idle).collect()
 }
 
 /// What settling does for each candidate run.
 async fn settlements(store: &SqliteStore) -> Vec<Settlement> {
-    let candidates = store.runs_to_settle().await.unwrap();
+    let candidates = store.runs_to_settle(SilentSessions::Ended).await.unwrap();
     candidates.iter().map(|run| settle(run.facts)).collect()
 }
 

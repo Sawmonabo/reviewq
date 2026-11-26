@@ -15,7 +15,7 @@ use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::ledger::{
     CallBinding, ClosingRead, FailureRecord, GateAnswer, GateRequest, HoldReceipt, HookSession,
     HostSession, LedgerPage, LedgerRead, LedgerSnapshot, LedgerStore, PublishCommit,
-    PublishOutcome, ReadBack, RecordWrite, Recorded, SettleCandidate, WriteRefusal,
+    PublishOutcome, ReadBack, RecordWrite, Recorded, SettleCandidate, SilentSessions, WriteRefusal,
 };
 use reviewq_domain::identity::{ReceiptId, Revision, RunId};
 use rusqlite::{Connection, OptionalExtension};
@@ -105,9 +105,9 @@ impl LedgerStore for SqliteStore {
         })
     }
 
-    fn runs_to_settle(&self) -> AppFuture<'_, Vec<SettleCandidate>> {
+    fn runs_to_settle(&self, silent: SilentSessions) -> AppFuture<'_, Vec<SettleCandidate>> {
         Box::pin(async move {
-            self.read(|db| settle::candidates(db))
+            self.read(move |db| settle::candidates(db, silent))
                 .await
                 .map_err(StoreError::app)
         })

@@ -19,7 +19,7 @@ use super::refusal::{for_agent, root};
 use super::{
     CallBinding, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
     FailureRecord, FinishReceipt, FinishReview, LedgerSnapshot, LedgerStore, NewVersion,
-    NoteSection, PublishCommit, PublishOutcome, SettleCandidate, VersionFacts,
+    NoteSection, PublishCommit, PublishOutcome, SettleCandidate, SilentSessions, VersionFacts,
 };
 use crate::access::{AppError, FieldError};
 use crate::followups::ResultKind;
@@ -137,12 +137,16 @@ async fn close(
 
 /// Settles every run that may need it from its stored state: publishes the update a run owes,
 /// or records `unfinished_review` for an open pass its idle lead left, or does nothing. Runs at
-/// startup and on the periodic tick. A run already handled costs one read and no write, so
-/// calls may overlap. One run's error does not stop the others; the first is returned after
-/// all were tried.
-pub async fn settle_due(store: &(impl LedgerStore + ?Sized)) -> Result<(), AppError> {
+/// startup and on the periodic tick, where `silent` says whether ReviewQ has watched long
+/// enough to take a silent Claude session as ended. A run already handled costs one read and
+/// no write, so calls may overlap. One run's error does not stop the others; the first is
+/// returned after all were tried.
+pub async fn settle_due(
+    store: &(impl LedgerStore + ?Sized),
+    silent: SilentSessions,
+) -> Result<(), AppError> {
     let mut first = None;
-    for candidate in store.runs_to_settle().await? {
+    for candidate in store.runs_to_settle(silent).await? {
         if let Err(error) = settle_run(store, candidate).await {
             first.get_or_insert(error);
         }

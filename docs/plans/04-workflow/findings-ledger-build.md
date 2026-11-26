@@ -230,7 +230,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 
 - `compose::compose(&LedgerSnapshot) -> Composed` with the text, its SHA-256, the line statistics, and one span (scalar offset and length) per card and section.
 - `publish::finish_review(store, caller, input) -> Result<FinishReceipt, AppError>`: the closing-call checks, compose, commit, at most 3 recomposes on a stale snapshot, then the display index call after commit. `Invalid` from the commit returns its field errors to the caller.
-- `publish::settle_due(store)`: apply the domain's `settle` decision to every run that is due. Publish an update, or record `unfinished_review` once. An update that cannot publish records `update_failed`.
+- `publish::settle_due(store, silent)`: apply the domain's `settle` decision to every run that is due. `silent` is `SilentSessions::Ended` once ReviewQ has watched for 35 seconds without a break, and `Unknown` before that, when a session stored as busy holds its run back without a live companion. Publish an update, or record `unfinished_review` once. An update that cannot publish records `update_failed`.
 
 **Steps**
 
@@ -327,7 +327,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 - [ ] Make `claude-hook` print what the hook route answers: the block reply for `Stop`, and the read-back text for a `SessionStart` whose source is `compact`. Send the hook input's `stop_hook_active`. Keep ignoring subagent hooks.
 - [ ] Add `codex-hook`: read the hook JSON from stdin, send `Stop` to `gate` and a `compact` `SessionStart` to `readback`, print the replies in the same form through the same printing function `claude-hook` uses, and exit 0 on every failure so a session is never broken.
 - [ ] Rewrite the installer to own two entries in `$CODEX_HOME/hooks.json`, `Stop` and `SessionStart` with matcher `^compact$`, each recorded with its event, with no output redirect. Retarget `install/codex_hook/json.rs` from `PreToolUse` to the two events and restore the `reconcile` calls on install and on both uninstall paths, which C1 removed. Never write trust state. The installer and `reviewq link` say so while the stop hook has never reported on this installation. Rewrite the one installer test for the two entries, and remove the `#[expect(dead_code)]` C1 left.
-- [ ] Wire settling in `runtime/workflow.rs`: call `publish::settle_due` in the existing 10-second loop, before the branch that skips a tick when sources are unavailable, and once at startup. Add no new timer. The Claude turn signal and a ledger write settle their own run through E1 and K1.
+- [ ] Wire settling in `runtime/workflow.rs`: call `publish::settle_due` in the existing 10-second loop, before the branch that skips a tick when sources are unavailable, and once at startup. Add no new timer. Keep the watch in the loop: it starts with the loop and starts again when the wall clock and elapsed time move more than 5 seconds apart between two settle reads. The Claude turn signal and a ledger write settle their own run through E1 and K1.
 - [ ] Return the rule from the terminal link as text the model reads. Add `ledger.js` and `ledger-schema.js` to the plugin file list in `install/bundle.rs`.
 - [ ] Run `make rust-check`.
 
