@@ -38,7 +38,8 @@ def finish(head, verdict="request_changes", **extra):
 
 def worked(head):
     """The record set `crates/reviewq-app/src/ledger/compose/tests.rs` builds, filed as a full
-    review and then an update that changes F-01, settles F-01 and F-03 and adds F-04."""
+    review and then a second full review that changes F-01, assesses F-01, F-02 and F-03,
+    settles F-03 and adds F-04. A full review must assess every finding it does not change."""
     first = [
         call("record_finding", finding(
             "Retry writes the same invoice twice", "P1", True, "functional",
@@ -83,6 +84,8 @@ def worked(head):
                        "Vec<u8> until the write commits.\n\n"}),
         call("assess_finding", {"id": "F-01", "expectedRevision": 2, "outcome": "still_present",
                                 "reason": "The retry path still builds a new key.", "discussionIds": ["D9"]}),
+        call("assess_finding", {"id": "F-02", "expectedRevision": 1, "outcome": "still_present",
+                                "reason": "`retry_key` is still called inside the loop."}),
         call("assess_finding", {"id": "F-03", "expectedRevision": 1, "outcome": "fixed",
                                 "reason": "Both paths now share one key | verified by replay.",
                                 "discussionIds": ["D7"], "checkedSha": FIXED_AT}),
@@ -91,7 +94,7 @@ def worked(head):
             "The delay between attempts is a constant.", "Operators cannot slow retries during an outage.",
             "The production retry settings were not available to check.", kind="gap")),
         call("record_note", note("threads", "The author replied on D7 that the shared key landed in the second commit.")),
-        finish(head),
+        finish(head, fullReview=True),
     ]
     disposition = {"finding": "F-02", "blocking": False, "publication": "withheld",
                    "reason": "Agreed with the author\nto fix after the release."}
@@ -158,15 +161,26 @@ def specimens(head):
     depth_over = [call("record_finding", finding(
         "A deeply nested quote", "P3", False, "quality", "The quote nests deeply.", "The tree is deep.",
         "The quote below nests 130 levels.", details="> " * 130 + "deep"))]
-    def cards(count):
+    # The windowed reader needs the display index inside 512 blocks, about six per card, so the
+    # windowed specimens reach their size with few long cards. `specimen-blocks` keeps 200 short
+    # cards, which cross the block budget and open in the full reader.
+    blocks_over = [call("record_finding", finding(
+        f"Short finding {i:03d}", "P3", False, "quality",
+        f"Finding {i} reads a short paragraph about the parser's handling of one input. " * 2,
+        "A reader checks that every card is reachable.", f"Observed while reading input {i}.",
+        locations=[{"path": f"src/parser/input_{i:03d}.rs", "line": i + 1}])) for i in range(200)]
+    def long_cards(count):
+        def prose(i, sentence):
+            return " ".join(sentence.format(i=i, step=step) for step in range(1, 11))
         return [call("record_finding", finding(
-            f"Windowed finding {i:03d}", "P3", False, "quality",
-            f"Finding {i} reads a short paragraph about the parser's handling of one input. " * 2,
-            "A reader checks that every card is reachable.", f"Observed while reading input {i}."))
-            for i in range(count)]
+            f"Windowed finding {i:02d}", "P3", False, "quality",
+            prose(i, "Step {step} of input {i} passes through the tokenizer, the parser and the checker."),
+            prose(i, "A reader of card {i} scrolls past step {step} and expects the next card to load."),
+            prose(i, "Reading input {i} at step {step} returned the same tokens on every replay."),
+            locations=[{"path": f"src/parser/input_{i:02d}.rs", "line": i + 1}])) for i in range(count)]
     # Below 64 KiB a version opens windowed only when it changes findings: a first version
-    # of 100 cards stays whole, and the update that settles one card crosses 24 KiB with a change.
-    changes = closing(head, "REPORT-CHANGES-TAIL", cards(100))
+    # of 12 cards stays whole, and the update that settles one card crosses 24 KiB with a change.
+    changes = closing(head, "REPORT-CHANGES-TAIL", long_cards(12))
     changes.append({"turn": [call("assess_finding", {"id": "F-01", "expectedRevision": 1, "outcome": "fixed",
                                                      "reason": "The first card's input is now handled."}),
                              finish(head)]})
@@ -178,8 +192,9 @@ def specimens(head):
         "specimen-characters": closing(head, "REPORT-CHARACTERS-TAIL", characters_over),
         "specimen-nodes": closing(head, "REPORT-NODES-TAIL", nodes_over),
         "specimen-depth": closing(head, "REPORT-DEPTH-TAIL", depth_over),
-        "specimen-windowed": closing(head, "REPORT-WINDOWED-TAIL", cards(200)),
+        "specimen-windowed": closing(head, "REPORT-WINDOWED-TAIL", long_cards(28)),
         "specimen-changes": changes,
+        "specimen-blocks": closing(head, "REPORT-BLOCKS-TAIL", blocks_over),
     }
 
 
@@ -220,7 +235,7 @@ def ledger_plans(reviews, sessions):
 LEDGER_VERSIONS = {
     "quiet": [
         {"bytes": 2353, "lines": 91, "max_line_bytes": 104, "code_points": 2338, "findings": 3},
-        {"bytes": 3238, "lines": 107, "max_line_bytes": 183, "code_points": 3216, "findings": 3},
+        {"bytes": 3448, "lines": 108, "max_line_bytes": 204, "code_points": 3424, "findings": 3},
     ],
     "reader-report": [
         {"bytes": 1218, "lines": 64, "max_line_bytes": 92, "code_points": 1206, "findings": 1,
@@ -256,13 +271,17 @@ LEDGER_VERSIONS = {
          "marker": {"text": "REPORT-DEPTH-TAIL", "scalar": 1121, "byte": 1130}},
     ],
     "specimen-windowed": [
-        {"bytes": 71266, "lines": 2045, "max_line_bytes": 167, "code_points": 70660, "findings": 200,
-         "marker": {"text": "REPORT-WINDOWED-TAIL", "scalar": 70639, "byte": 71245}},
+        {"bytes": 66800, "lines": 381, "max_line_bytes": 781, "code_points": 66710, "findings": 28,
+         "marker": {"text": "REPORT-WINDOWED-TAIL", "scalar": 66689, "byte": 66779}},
     ],
     "specimen-changes": [
-        {"bytes": 35765, "lines": 1045, "max_line_bytes": 165, "code_points": 35459, "findings": 100,
-         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 35439, "byte": 35745}},
-        {"bytes": 35642, "lines": 1037, "max_line_bytes": 171, "code_points": 35337, "findings": 99,
-         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 35317, "byte": 35622}},
+        {"bytes": 28847, "lines": 189, "max_line_bytes": 781, "code_points": 28805, "findings": 12,
+         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 28785, "byte": 28827}},
+        {"bytes": 26732, "lines": 179, "max_line_bytes": 781, "code_points": 26691, "findings": 11,
+         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 26671, "byte": 26712}},
+    ],
+    "specimen-blocks": [
+        {"bytes": 79556, "lines": 2445, "max_line_bytes": 167, "code_points": 78950, "findings": 200,
+         "marker": {"text": "REPORT-BLOCKS-TAIL", "scalar": 78931, "byte": 79537}},
     ],
 }
