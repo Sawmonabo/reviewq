@@ -23,8 +23,8 @@ const REPLY_LIMIT: usize = 64 * 1024;
 /// The answer a forwarded hook expects from ReviewQ.
 #[derive(Clone, Copy)]
 pub(super) enum Answer {
-    /// A `Stop` hook: a `GateReply` that may keep the turn open.
-    Gate,
+    /// A `Stop` hook: a `GateReply` that may keep the turn open, in the host's form.
+    Gate(GateHost),
     /// A `SessionStart` hook after compaction: a `ReadbackReply` for the model's context.
     Readback,
 }
@@ -63,20 +63,38 @@ pub(super) async fn forward(
     Ok(())
 }
 
+/// The host whose `Stop` hook the gate answers. Each keeps the turn open in its own form.
+#[derive(Clone, Copy)]
+pub(super) enum GateHost {
+    /// `{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"…"}}`, which
+    /// Claude Code 2.1.163 and later shows as hook feedback. `{"decision":"block"}` works
+    /// there too, but is shown to the user as a hook error on every block.
+    Claude,
+    /// `{"decision":"block","reason":"…"}`.
+    Codex,
+}
+
 impl Answer {
-    /// What the host acts on, in the formats both hosts honour: for a block with a reason,
-    /// one line `{"decision":"block","reason":"…"}`; for a read-back, its text. `None` when
-    /// the reply allows the turn to end or carries no text. Fails when `reply` is not the
-    /// expected envelope.
+    /// What the host acts on, as one line: for a block with a reason, the host's form of it;
+    /// for a read-back, its text. `None` when the reply allows the turn to end or carries no
+    /// text. Fails when `reply` is not the expected envelope.
     fn output(self, reply: &[u8]) -> Result<Option<String>, Failure> {
         Ok(match self {
-            Self::Gate => match serde_json::from_slice::<Envelope<GateReply>>(reply)?.data {
+            Self::Gate(host) => match serde_json::from_slice::<Envelope<GateReply>>(reply)?.data {
                 GateReply {
                     block: true,
                     reason: Some(reason),
-                } if !reason.is_empty() => {
-                    Some(serde_json::json!({"decision": "block", "reason": reason}).to_string())
-                }
+                } if !reason.is_empty() => Some(
+                    match host {
+                        GateHost::Claude => serde_json::json!({"hookSpecificOutput": {
+                            "hookEventName": "Stop", "additionalContext": reason,
+                        }}),
+                        GateHost::Codex => {
+                            serde_json::json!({"decision": "block", "reason": reason})
+                        }
+                    }
+                    .to_string(),
+                ),
                 GateReply { .. } => None,
             },
             Self::Readback => {

@@ -11,7 +11,7 @@ use reviewq_protocol::{HistoryTurnIdDto, ResourceIdDto, SessionKeyDto};
 use reviewq_transport::{field_error_text, ledger_refusal_text};
 use serde::Deserialize;
 
-use super::hook::{Answer, INPUT_LIMIT, forward};
+use super::hook::{Answer, GateHost, INPUT_LIMIT, forward};
 use super::{Failure, bounded, bridge, client, client_with_timeout, read_input, read_within};
 use crate::runtime;
 
@@ -200,7 +200,7 @@ struct ClassicInput {
 }
 
 /// Forwards one Claude hook of the linked session's own agent to the hook route. For `Stop`
-/// it prints the gate's block, and for a `SessionStart` after compaction the read-back text,
+/// it prints the gate's hold as hook feedback, and for a `SessionStart` after compaction the read-back text,
 /// through `hook::forward`; other events print nothing. Hooks fired inside a subagent, other
 /// `SessionStart` sources and unlisted events are not forwarded. Fails on unreadable input or
 /// when ReviewQ does not answer; the caller ignores the failure so the session is never broken
@@ -236,7 +236,7 @@ pub(crate) async fn claude_hook(profile: &Path) -> Result<(), Failure> {
                 "kind": "stopping",
                 "stopHookActive": hook.stop_hook_active.unwrap_or(false),
             }),
-            Some(Answer::Gate),
+            Some(Answer::Gate(GateHost::Claude)),
         ),
         "SessionStart" if hook.source.as_deref() == Some("compact") => (
             serde_json::json!({"kind": "compacted"}),

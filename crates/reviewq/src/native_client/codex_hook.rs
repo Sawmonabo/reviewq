@@ -6,7 +6,7 @@ use reviewq_protocol::ledger::{GateRequest, ReadbackRequest};
 use reviewq_protocol::{HistoryTurnIdDto, ResourceIdDto};
 use serde::Deserialize;
 
-use super::hook::{Answer, INPUT_LIMIT, forward};
+use super::hook::{Answer, GateHost, INPUT_LIMIT, forward};
 use super::{Failure, read_input};
 
 /// The fields ReviewQ reads from a Codex hook input; Codex sends more.
@@ -35,7 +35,7 @@ pub(crate) async fn codex_hook(profile: &Path) -> Result<(), Failure> {
                 turn_id: input.turn_id.and_then(HistoryTurnIdDto::new),
                 stop_hook_active: input.stop_hook_active,
             })?,
-            Answer::Gate,
+            Answer::Gate(GateHost::Codex),
         ),
         ("SessionStart", Some("compact")) => (
             "/api/v1/native/ledger/readback",

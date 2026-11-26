@@ -77,7 +77,7 @@ Tasks use these names exactly. F1 and F2 give them their Rust types. Later tasks
 | Gate and read-back bodies | Codex hooks only. Gate: `{threadId,turnId?,stopHookActive}` returning `{block:false}` or `{block:true,reason}`. Read-back: `{threadId}` returning `{text}`. Claude's hook route returns the same two replies. |
 | Claude bridge action | `reviewq internal claude-bridge ledger <id>`, with the tool, the call's identity and the input as one JSON object on stdin, and the route's reply on stdout |
 | Hook helpers | `reviewq internal claude-hook` (existing, now also answers `Stop` and `SessionStart`), `reviewq internal codex-hook` (new, replaces `codex-report-witness`) |
-| Hook replies | Stop block: `{"decision":"block","reason":"…"}` on stdout. Read-back: the text on stdout. Nothing on stdout means no effect. |
+| Hook replies | Stop hold, on stdout: Codex `{"decision":"block","reason":"…"}`; Claude `{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"…"}}`, which Claude Code shows as hook feedback and not as a hook error. Read-back: the text on stdout. Nothing on stdout means no effect. |
 | Generated contract files | `contracts/ledger-tools.schema.json`, `fixtures/contracts/ledger-tools.json`, `hosts/claude/plugin/hooks/ledger-schema.js` |
 | Schema export flags | `--ledger-tools-schema`, `--ledger-tools-example`, `--claude-ledger-tools` |
 | Tables | `ledger_findings`, `ledger_notes`, `ledger_changes`, `review_passes`, `ledger_calls`, `report_delivery_failures`, `codex_stop_hook_reported` |
