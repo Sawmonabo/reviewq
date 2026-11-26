@@ -108,7 +108,7 @@ check-cached:
 	$(MAKE) check CARGO_DRIVER=mbx
 
 test-package:
-	$(RUST_COMMAND) nextest run --locked -p $(PACKAGE) --build-jobs $(BUILD_JOBS) --test-threads $(TEST_THREADS)
+	$(RUST_COMMAND) nextest run --locked -p $(PACKAGE) --no-tests=pass --build-jobs $(BUILD_JOBS) --test-threads $(TEST_THREADS)
 
 fmt:
 	cargo fmt --all
