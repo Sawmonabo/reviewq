@@ -5,9 +5,14 @@
 //!   wall clock. Live needs no watch.
 //! - Gone: it is stored as ended, or ReviewQ has watched for 35 seconds without a break and
 //!   it is not live.
-//! - Unknown: anything else. A stopped service, a sleeping machine and a clock step all look
-//!   like silence from a companion that is still running, so silence counts only once the
-//!   watch has run 35 seconds unbroken, and unknown lasts at most that long.
+//! - Unknown: anything else. A stopped service, a stopped or sleeping machine and a clock step
+//!   all look like silence from a companion that is still running, so silence counts only once
+//!   the watch has run 35 seconds unbroken, and unknown lasts at most that long.
+//!
+//! The watch breaks when the wall clock and elapsed time move apart, as across a suspend,
+//! which `Instant` (`CLOCK_MONOTONIC` on Linux) does not count, or a clock step; and when two
+//! readings lie further apart than the tick that reads it, as across a stopped ReviewQ
+//! process, which both clocks count.
 //!
 //! Once the watch has run that long, live and gone are exact opposites. A reader that acts
 //! on presence asks `reviewq_companion_live(seen_at_ms)`, one that acts on absence asks
@@ -28,6 +33,9 @@ const WATCH_BEFORE_SILENCE_COUNTS: Duration = Duration::from_secs(35);
 /// How far the wall clock may move apart from elapsed time between two reads. More means the
 /// machine slept or the clock was set, and stored report times say nothing yet.
 const CLOCK_TOLERANCE: Duration = Duration::from_secs(5);
+/// How often ReviewQ reads the watch at least, from its periodic tick. Readings further apart
+/// than this and the tolerance mean ReviewQ was not running.
+pub const WATCH_TICK: Duration = Duration::from_secs(10);
 
 /// Since when ReviewQ has watched companions without a break. One per open store.
 pub(crate) struct CompanionWatch(Mutex<Watch>);
@@ -49,8 +57,8 @@ impl CompanionWatch {
 
     /// The wall-clock time in Unix milliseconds, and whether the watch has run long enough
     /// for silence to count. Starts the watch again when the wall clock and elapsed time moved
-    /// apart since the last read.
-    fn now(&self) -> (i64, bool) {
+    /// apart since the last read, or when that read is longer ago than a tick allows.
+    pub(crate) fn now(&self) -> (i64, bool) {
         let now = (Instant::now(), SystemTime::now());
         let mut watch = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let elapsed = now.0.duration_since(watch.read.0);
@@ -58,7 +66,7 @@ impl CompanionWatch {
             Ok(wall) => wall.abs_diff(elapsed),
             Err(backwards) => backwards.duration() + elapsed,
         };
-        if apart > CLOCK_TOLERANCE {
+        if apart > CLOCK_TOLERANCE || elapsed > WATCH_TICK + CLOCK_TOLERANCE {
             watch.since = now.0;
         }
         watch.read = now;
@@ -87,6 +95,14 @@ impl CompanionWatch {
             .checked_sub(WATCH_BEFORE_SILENCE_COUNTS)
             .unwrap_or(watch.since);
         watch.read = (now, SystemTime::now());
+    }
+
+    /// As if ReviewQ had been stopped for `gap` since the last reading, which moves both clocks.
+    #[cfg(test)]
+    pub(crate) fn stopped_for(&self, gap: Duration) {
+        let mut watch = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let (elapsed, wall) = watch.read;
+        watch.read = (elapsed.checked_sub(gap).unwrap_or(elapsed), wall - gap);
     }
 }
 

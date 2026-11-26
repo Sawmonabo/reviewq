@@ -37,7 +37,6 @@ struct Workers {
 }
 
 pub struct SqliteStore {
-    #[cfg(test)]
     pub(crate) companions: Arc<CompanionWatch>,
     display_builds: Arc<display_cache::Builds>,
     search_indexes: Arc<search_index::Indexes>,
@@ -73,7 +72,6 @@ impl SqliteStore {
             let search_indexes = Arc::new(search_index::Indexes::new(&profile));
             let writer = Worker::start(writer, profile, true)?;
             Ok(Self {
-                #[cfg(test)]
                 companions,
                 display_builds: Arc::new(display_cache::Builds::default()),
                 search_indexes,

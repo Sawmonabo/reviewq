@@ -48,7 +48,7 @@ pub(super) fn commit(
     {
         return Ok(PublishOutcome::Stale);
     }
-    // 1. A record, a disposition or the head moved.
+    // 1. A record, a disposition, the head or the lead's last closing call moved.
     let head: Option<(String, i64)> = db
         .prepare_cached("SELECT receipt_id, disposition_version FROM report_heads WHERE run_id=?1")?
         .query_row([run], |row| Ok((row.get(0)?, row.get(1)?)))
@@ -57,6 +57,7 @@ pub(super) fn commit(
     if sequence(db, run)? != guard.sequence
         || disposition != guard.disposition_revision.as_sqlite_integer()
         || head.as_ref().map(|head| head.0.as_str()) != guard.head.as_ref().map(ReceiptId::as_str)
+        || calls::last_closing_ordinal(db, run)? != guard.closing
     {
         return Ok(PublishOutcome::Stale);
     }

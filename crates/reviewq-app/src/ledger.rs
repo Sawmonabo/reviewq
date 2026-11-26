@@ -685,9 +685,9 @@ pub trait LedgerStore: Send + Sync {
     /// stored is `Stale`, so the next snapshot replays its acknowledgement. Otherwise the first
     /// rule that applies decides, and each but the last writes nothing:
     ///
-    /// 1. A changed ledger sequence, disposition revision or head is `Stale`, even when the
-    ///    pass or batch changed too, so a closing call that lost a race recomposes instead of
-    ///    being refused.
+    /// 1. A changed ledger sequence, disposition revision, head or last closing call is
+    ///    `Stale`, even when the pass or batch changed too, so a closing call that lost a race
+    ///    recomposes instead of being refused.
     /// 2. For an update, a pass opened after the snapshot is `Stale`: the next snapshot shows
     ///    the pass, and settling then publishes nothing.
     /// 3. A changed authority, or for a closing call a changed pass or frozen batch, is

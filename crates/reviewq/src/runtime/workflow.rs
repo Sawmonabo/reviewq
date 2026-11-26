@@ -8,17 +8,42 @@ use reviewq_app::ledger::publish::settle_due;
 use reviewq_app::notifications::poll_native_attention;
 use reviewq_app::settings::RuntimeSources;
 use reviewq_app::workflow::NativeWorkflowProof;
-use reviewq_store::SqliteStore;
+use reviewq_store::{SqliteStore, WATCH_TICK};
 use tokio::sync::watch;
+use tokio::time::MissedTickBehavior;
 
-/// Every 10 seconds until shutdown: reads native attention, stores each Claude companion that
-/// went silent as ended, settles the ledger runs that are due, which it also does once on
-/// start, then polls the configured sources and runs the due follow-ups, recoveries and
-/// publications. With `settle_only`, as in validation, each tick only ends silent companions
-/// and settles, which read stored state alone and ask no provider. A step's error skips that
+/// Until shutdown, two ticks. Every `WATCH_TICK`, on its own so a slow step never delays it,
+/// the store reads its companion watch and stores each Claude companion that went silent as
+/// ended. Every 10 seconds: reads native attention, settles the ledger runs that are due, which
+/// it also does once on start, then polls the configured sources and runs the due follow-ups,
+/// recoveries and publications. With `settle_only`, as in validation, the second tick only
+/// settles, which reads stored state alone and asks no provider. A step's error skips that
 /// step for the tick, as a settle error does. Every step that reads whether a Claude session
 /// is live or gone asks the store's one companion watch.
 pub(super) async fn run(
+    store: Arc<SqliteStore>,
+    sources: Arc<RuntimeSources>,
+    native: Arc<dyn NativeWorkflowProof>,
+    settle_only: bool,
+    shutdown: watch::Receiver<bool>,
+) {
+    tokio::select! {
+        () = watch_companions(&store) => {},
+        () = work(Arc::clone(&store), sources, native, settle_only, shutdown) => {},
+    }
+}
+
+/// Ends silent companions every `WATCH_TICK`, which also reads the watch each time.
+async fn watch_companions(store: &SqliteStore) {
+    let mut tick = tokio::time::interval(WATCH_TICK);
+    tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    loop {
+        tick.tick().await;
+        let _ = store.end_silent_companions().await;
+    }
+}
+
+async fn work(
     store: Arc<SqliteStore>,
     sources: Arc<RuntimeSources>,
     native: Arc<dyn NativeWorkflowProof>,
@@ -51,10 +76,7 @@ pub(super) async fn run(
         }
         tokio::select! {
             _ = shutdown.changed() => break,
-            _ = async {
-                let _ = store.end_silent_companions().await;
-                settle_due(store.as_ref()).await
-            } => {},
+            _ = settle_due(store.as_ref()) => {},
         }
         if settle_only {
             continue;

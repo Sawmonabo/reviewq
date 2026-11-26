@@ -3,7 +3,9 @@ use std::time::Duration;
 
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::followups::{NextAction, ResultKind};
-use reviewq_app::hosts::{ClaudeClassicEvent, ClaudeStore, ClaudeWorkflowStore};
+use reviewq_app::hosts::{
+    ClaudeClassicEvent, ClaudeHeartbeat, ClaudeStore, ClaudeWorkflowStore, HostActivity, HostPhase,
+};
 use reviewq_app::ledger::publish::{finish_review, settle_due};
 use reviewq_app::ledger::{
     CallBinding, CardSpan, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
@@ -127,17 +129,9 @@ fn publish_is_conditional() {
         let store = open(path).await;
         let actor = Actor::local_operator();
         let run_id: RunId = "run".parse().unwrap();
-        store
-            .write_record(call("file"), RecordWrite::CreateFinding(Box::new(fields())))
-            .await
-            .unwrap()
-            .unwrap();
-        let pass = store
-            .read_ledger(lead(), short())
-            .await
-            .unwrap()
-            .pass
-            .unwrap();
+        file(&store, "file", &fields().title).await;
+        let ledger = store.read_ledger(lead(), short());
+        let pass = ledger.await.unwrap().pass.unwrap();
         store
             .record_failure(FailureRecord {
                 run: run_id.clone(),
@@ -158,20 +152,12 @@ fn publish_is_conditional() {
             body: "Retries reuse the first key.".into(),
             expected_revision: None,
         };
-        store
-            .write_record(call("summary"), RecordWrite::WriteNote(note))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            store.commit_publish(full_review(early)).await.unwrap(),
-            PublishOutcome::Stale
-        );
-        let view = store
-            .read_report(actor.clone(), run_id.clone(), None, false)
-            .await
-            .unwrap()
-            .value;
+        let write = store.write_record(call("summary"), RecordWrite::WriteNote(note));
+        write.await.unwrap().unwrap();
+        let outcome = store.commit_publish(full_review(early)).await;
+        assert_eq!(outcome.unwrap(), PublishOutcome::Stale);
+        let view = store.read_report(actor.clone(), run_id.clone(), None, false);
+        let view = view.await.unwrap().value;
         assert!(view.report.is_none());
         assert_eq!(view.delivery.unwrap().state, ReportDeliveryState::Failed);
 
@@ -184,25 +170,14 @@ fn publish_is_conditional() {
             panic!("a current snapshot publishes");
         };
         assert_eq!(inbox(&store).await, [Kind::ReportReady]);
-        let view = store
-            .read_report(actor.clone(), run_id.clone(), None, false)
-            .await
-            .unwrap()
-            .value;
+        let view = store.read_report(actor.clone(), run_id.clone(), None, false);
+        let view = view.await.unwrap().value;
         assert_eq!(view.report.unwrap().reference.receipt_id, receipt);
         assert_eq!(view.delivery.unwrap().state, ReportDeliveryState::Saved);
-        assert!(
-            store
-                .read_ledger(lead(), short())
-                .await
-                .unwrap()
-                .pass
-                .is_none()
-        );
-        let history = store
-            .read_report_history(actor.clone(), run_id.clone(), None, 10)
-            .await
-            .unwrap();
+        let ledger = store.read_ledger(lead(), short());
+        assert!(ledger.await.unwrap().pass.is_none());
+        let history = store.read_report_history(actor.clone(), run_id.clone(), None, 10);
+        let history = history.await.unwrap();
         assert_eq!(history.value.items.len(), 1);
         assert_eq!(history.value.items[0].verdict, Verdict::RequestChanges);
         let context = store
@@ -252,15 +227,10 @@ fn publish_is_conditional() {
             )
             .await
             .unwrap();
-        assert_eq!(
-            store.commit_publish(full_review(raced)).await.unwrap(),
-            PublishOutcome::Stale
-        );
-        let history = store
-            .read_report_history(actor.clone(), run_id.clone(), None, 10)
-            .await
-            .unwrap();
-        assert_eq!(history.value.items.len(), 1);
+        let outcome = store.commit_publish(full_review(raced)).await;
+        assert_eq!(outcome.unwrap(), PublishOutcome::Stale);
+        let history = store.read_report_history(actor.clone(), run_id.clone(), None, 10);
+        assert_eq!(history.await.unwrap().value.items.len(), 1);
 
         // A selected-thread close that changed nothing completes the batch as unchanged.
         // The idle lead has not started the delivered batch, so the run does not settle yet.
@@ -270,10 +240,8 @@ fn publish_is_conditional() {
         // dispatch nor settled, whatever it last reported, until the watch lets it be gone.
         let companion = "INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,
             turn_id,latest_prompt_manual) VALUES('claude:lead',printf('%032d',0),1,1000,'turn-1',0)";
-        store
-            .write(|tx| Ok(tx.sql.execute(companion, [])?))
-            .await
-            .unwrap();
+        let inserted = store.write(|tx| Ok(tx.sql.execute(companion, [])?));
+        inserted.await.unwrap();
         let lead = store.read(|db| Ok(lead_for_run(db, &"run".parse().unwrap())?.unwrap()));
         let lead = lead.await.unwrap();
         let live = async || {
@@ -291,27 +259,55 @@ fn publish_is_conditional() {
         activity(&store, "idle").await;
         assert_eq!(lead_idle(&store).await, [false]);
         assert_eq!(live().await, (false, false));
+        // The prompt binds to the turn and step of the companion's next report, with one alert.
+        let phase = HostPhase::Working;
+        let report = ClaudeHeartbeat {
+            generation: "0".repeat(32),
+            sequence: 2,
+            activity: Some(HostActivity {
+                phase,
+                has_questions: false,
+            }),
+            turn: Some("turn-2".parse().unwrap()),
+            step: Some(3),
+            question_id: None,
+            latest_prompt: None,
+            latest_prompt_turn: None,
+            latest_prompt_manual: false,
+            model: None,
+            effort: None,
+        };
+        store
+            .record_claude_heartbeat(lead.clone(), report)
+            .await
+            .unwrap();
+        let shown = store.read(|db| {
+            let sql = "SELECT host_activity, (SELECT group_concat(event_ref) FROM notifications
+                WHERE kind='agent_permission') FROM sessions WHERE session_key='claude:lead'";
+            Ok(db.query_row(sql, [], |row| Ok((row.get(0)?, row.get(1)?)))?)
+        });
+        let shown: (String, Option<String>) = shown.await.unwrap();
+        assert_eq!(shown, ("blocked".into(), Some("turn-2".into())));
+        let silent = "UPDATE claude_companions SET seen_at_ms=1000";
+        let silenced = store.write(|tx| Ok(tx.sql.execute(silent, [])?));
+        silenced.await.unwrap();
+        // A ReviewQ stopped for a minute has not watched it: the companion is still unknown.
+        store.companions.watched_long_enough();
+        store.companions.stopped_for(Duration::from_secs(60));
+        store.end_silent_companions().await.unwrap();
+        assert_eq!(lead_idle(&store).await, [false]);
         store.companions.watched_long_enough();
         store.end_silent_companions().await.unwrap();
         assert_eq!(lead_idle(&store).await, [true]);
         let selected = closing(&store, "finish-thread").await;
-        assert_eq!(
-            selected.snapshot.pass.as_ref().map(|pass| pass.kind),
-            Some(PassKind::SelectedThreads)
-        );
+        let kind = selected.snapshot.pass.as_ref().map(|pass| pass.kind);
+        assert_eq!(kind, Some(PassKind::SelectedThreads));
         // The cover carries the review's Jira link, its ticket and the note its monitored
         // discussion resolves to.
         let cover = &selected.snapshot.cover;
-        assert_eq!(
-            cover.links,
-            ReportLinks::new(
-                "https://git.example",
-                "billing/api",
-                cover.iid,
-                Some("https://example.atlassian.net")
-            )
-            .unwrap()
-        );
+        let jira = Some("https://example.atlassian.net");
+        let links = ReportLinks::new("https://git.example", "billing/api", cover.iid, jira);
+        assert_eq!(cover.links, links.unwrap());
         assert_eq!(
             (cover.tickets.as_slice(), cover.thread_notes.get("D1")),
             (["RQ-41".parse().unwrap()].as_slice(), Some(&"9001".into()))
@@ -374,8 +370,9 @@ fn publish_is_conditional() {
             ["full_review", "update", "full_review", "full_review"]
         );
         // A closing call answered with the current version still moves where the next full
-        // review starts.
+        // review starts, also for a full review whose snapshot was read before it.
         assess(&store, "assess-1-equal", 2).await;
+        let racing = closing(&store, "close-racing").await;
         let input = FinishReview {
             verdict: None,
             revision: None,
@@ -384,11 +381,11 @@ fn publish_is_conditional() {
         };
         let answered = finish_review(&store, call("close-answered"), input).await;
         assert_eq!(answered.unwrap().receipt, closed.receipt);
+        let raced = store.commit_publish(full_review(racing)).await;
+        assert_eq!(raced.unwrap(), PublishOutcome::Stale);
         reseverity(&store, "reseverity-2-again", 2, Severity::P1).await;
-        assert_eq!(
-            untouched(&store, "close-after-answer").await,
-            ["F-01", "F-03"]
-        );
+        let refused = untouched(&store, "close-after-answer").await;
+        assert_eq!(refused, ["F-01", "F-03"]);
         store.close(Duration::from_secs(1)).await.unwrap();
     });
 }

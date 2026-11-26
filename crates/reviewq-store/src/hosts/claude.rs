@@ -7,7 +7,7 @@ use reviewq_app::hosts::{
     ClaudeHeartbeat, ClaudeHeartbeatResult, ClaudeQuestionAddress, ClaudeStore,
 };
 use reviewq_domain::session::{HostProvider, LeadTarget, SessionTarget};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use super::{activity_columns, allow_target};
 use crate::connection::WriteTx;
@@ -25,8 +25,11 @@ mod workflow;
 impl SqliteStore {
     /// Stores each Claude companion that counts as gone by silence as ended, as a companion
     /// that reports disconnecting is, and announces each change. Reads first, and opens a
-    /// write only when one timed out. The runtime calls it on its periodic tick.
+    /// write only when one timed out. The runtime calls it every `WATCH_TICK`, and it reads
+    /// the watch each time even with no companion stored, so a longer gap between readings
+    /// means ReviewQ was not running.
     pub async fn end_silent_companions(&self) -> Result<(), AppError> {
+        self.companions.now();
         let silent = self
             .read(|db| {
                 let mut statement = db.prepare_cached(
@@ -118,10 +121,11 @@ impl ClaudeStore for SqliteStore {
                 if lead.binding().identity().provider() != HostProvider::Claude {
                     return Ok(None);
                 }
+                // It tells the model the session is there, so it needs a live companion.
                 let fresh = db
                     .prepare_cached(
                         "SELECT EXISTS(SELECT 1 FROM claude_companions WHERE session_key=?1
-                       AND NOT reviewq_companion_gone(seen_at_ms))",
+                       AND reviewq_companion_live(seen_at_ms))",
                     )?
                     .query_row([target.session_key().as_str()], |row| row.get(0))?;
                 Ok(Some(fresh))
@@ -286,20 +290,31 @@ fn heartbeat(
     allow_target(db, &Actor::native_session(native.clone()), &lead)?;
     let key = lead.session_key().as_str();
     let now = now_ms()?;
-    let was_connected: bool = db
+    // Whether the queue showed the companion, and whether this report binds a permission
+    // prompt that arrived while the companion was unknown.
+    let (was_connected, binds): (bool, bool) = db
         .prepare_cached(
-            "SELECT EXISTS(SELECT 1 FROM claude_companions WHERE session_key=?1
-               AND NOT reviewq_companion_gone(seen_at_ms))",
+            "SELECT NOT reviewq_companion_gone(seen_at_ms), permission_unbound=1 AND generation=?2
+             FROM claude_companions WHERE session_key=?1",
         )?
-        .query_row([key], |row| row.get(0))?;
+        .query_row(params![key, observation.generation], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .optional()?
+        .unwrap_or((false, false));
     let recorded = db.execute(
         "INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,turn_id,latest_prompt_id,model,effort,latest_prompt_turn_id,latest_prompt_manual,turn_step)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
          ON CONFLICT(session_key) DO UPDATE SET
             generation=excluded.generation, sequence=excluded.sequence, seen_at_ms=excluded.seen_at_ms,
-            permission_turn_id=CASE WHEN generation=excluded.generation AND turn_id IS excluded.turn_id
-              AND coalesce(excluded.turn_step,-1)<=coalesce(permission_step,-1)
+            permission_turn_id=CASE
+              WHEN generation=excluded.generation AND permission_unbound=1 THEN excluded.turn_id
+              WHEN generation=excluded.generation AND turn_id IS excluded.turn_id
+                AND coalesce(excluded.turn_step,-1)<=coalesce(permission_step,-1)
               THEN permission_turn_id ELSE NULL END,
+            permission_step=CASE WHEN generation=excluded.generation AND permission_unbound=1
+              THEN excluded.turn_step ELSE permission_step END,
+            permission_unbound=0,
             turn_step=excluded.turn_step,
             turn_id=excluded.turn_id, latest_prompt_id=excluded.latest_prompt_id,
             model=excluded.model,effort=excluded.effort,
@@ -318,6 +333,9 @@ fn heartbeat(
     }
     let mut visible = !was_connected;
     let mut attention = Vec::new();
+    if binds && let Some(turn) = &observation.turn {
+        attention.extend(classic::permission_alert(db, &lead, turn.to_string())?);
+    }
     if let Some(activity) = observation.activity {
         let permission: bool = db.query_row(
             "SELECT coalesce(permission_turn_id=turn_id,0) FROM claude_companions WHERE session_key=?1",

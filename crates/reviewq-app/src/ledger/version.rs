@@ -129,6 +129,10 @@ pub struct SnapshotGuard {
     pub pass: Option<PassId>,
     /// The frozen batch of a selected-thread pass.
     pub batch: Option<String>,
+    /// The ordinal of the lead's last accepted closing call, or 0 before its first. A closing
+    /// call answered without a new version moves only this, and it moves where a full review
+    /// starts, so a commit after it is stale.
+    pub closing: i64,
 }
 
 /// ReviewQ's own facts for the first line, the cover lines and the report's links.

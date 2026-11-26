@@ -500,7 +500,7 @@ pub(super) fn answer(db: &Connection, request: &GateRequest) -> Result<GateAnswe
         .prepare_cached(
             "SELECT s.host_questions=1 OR s.host_activity IS 'blocked'
                OR EXISTS(SELECT 1 FROM claude_companions c WHERE c.session_key=s.session_key
-                    AND c.permission_turn_id IS NOT NULL)
+                    AND (c.permission_turn_id IS NOT NULL OR c.permission_unbound=1))
                OR EXISTS(SELECT 1 FROM native_async_questions q WHERE q.session_key=s.session_key
                     AND q.state IN ('pending','submitting','uncertain'))
              FROM sessions s WHERE s.session_key=?1",

@@ -7,6 +7,9 @@ CREATE TABLE claude_companions (
     permission_turn_id TEXT,
     turn_step INTEGER CHECK(turn_step>=0),
     permission_step INTEGER,
+    -- A permission prompt that arrived while the companion was neither live nor gone, which its
+    -- next report binds to the turn and step that report names.
+    permission_unbound INTEGER NOT NULL DEFAULT 0 CHECK (permission_unbound IN (0,1)),
     latest_prompt_id TEXT,
     latest_prompt_turn_id TEXT,
     latest_prompt_manual INTEGER NOT NULL CHECK (latest_prompt_manual IN (0,1)),

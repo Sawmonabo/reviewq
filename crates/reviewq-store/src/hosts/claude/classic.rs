@@ -1,9 +1,9 @@
 use reviewq_app::access::AppError;
 use reviewq_app::events::ResourceKey;
 use reviewq_app::hosts::ClaudeClassicEvent;
-use reviewq_domain::identity::{RunId, SessionKey};
+use reviewq_domain::identity::{NotificationId, RunId, SessionKey};
 use reviewq_domain::session::LeadTarget;
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use super::workflow::ensure_lead;
 use crate::StoreError;
@@ -23,44 +23,51 @@ pub(super) fn record(
         store_ended(tx, lead.run_id(), lead.session_key(), &generation, false)?;
         return Ok(());
     }
-    // Claude runs this hook inside the session's own process, so the event itself shows the
-    // session present, and a hook that fails is not sent again. It is refused only once the
-    // companion counts as gone, when its stored turn no longer says which turn is running.
-    let active: Option<String> = db
+    // Claude runs this hook as a command from the running session, and a hook that fails is
+    // not sent again, so the event shows the session present and is accepted until the
+    // companion counts as gone. While the companion is live, its stored turn is the one
+    // running; while it is unknown, that turn may be out of date.
+    let companion: Option<(bool, Option<String>)> = db
         .query_row(
-            "SELECT c.turn_id FROM claude_companions c JOIN sessions s USING(session_key)
-         WHERE c.session_key=?1 AND NOT reviewq_companion_gone(c.seen_at_ms) AND c.turn_id IS NOT NULL
-           AND s.host_activity IN ('working','blocked')",
+            "SELECT reviewq_companion_live(c.seen_at_ms),
+               CASE WHEN s.host_activity IN ('working','blocked') THEN c.turn_id END
+             FROM claude_companions c JOIN sessions s USING(session_key)
+             WHERE c.session_key=?1 AND NOT reviewq_companion_gone(c.seen_at_ms)",
             [key],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
+    let Some((live, active)) = companion else {
+        return Err(AppError::Unavailable.into());
+    };
+    if !live && matches!(event, ClaudeClassicEvent::PermissionPending) {
+        // Stored unbound and shown as blocked now; the companion's next report binds it to the
+        // turn and step it names and raises the alert for that turn.
+        let changed = db.execute(
+            "UPDATE claude_companions SET permission_unbound=1 WHERE session_key=?1 AND permission_unbound=0",
+            [key],
+        )?;
+        if changed != 0 {
+            crate::hosts::record_activity(db, key, Some("blocked"), true)?;
+            affected(tx, &lead)?;
+        }
+        return Ok(());
+    }
     let Some(active) = active else {
         return Err(AppError::Unavailable.into());
     };
     match event {
         ClaudeClassicEvent::PermissionPending => {
             let changed = db.execute(
-                "UPDATE claude_companions SET permission_turn_id=?2,permission_step=turn_step
+                "UPDATE claude_companions SET permission_turn_id=?2,permission_step=turn_step,
+                   permission_unbound=0
                  WHERE session_key=?1 AND permission_turn_id IS NOT ?2
                    AND NOT EXISTS(SELECT 1 FROM claude_turns WHERE session_key=?1 AND turn_id=?2)",
                 params![key, active],
             )?;
             if changed != 0 {
                 crate::hosts::record_activity(db, key, Some("blocked"), true)?;
-                let occurrence = reviewq_app::notifications::NativeOccurrence {
-                    kind: reviewq_app::notifications::Kind::AgentPermission,
-                    native_ref: active,
-                    at_ms: Some(now_ms()?),
-                    desktop_episode: None,
-                };
-                let event = crate::notifications::native::insert(
-                    db,
-                    reviewq_domain::session::HostProvider::Claude,
-                    lead.target(),
-                    occurrence,
-                )?;
-                if let Some(event) = event {
+                if let Some(event) = permission_alert(db, &lead, active)? {
                     crate::notifications::publish(tx, &[event])?;
                 }
                 affected(tx, &lead)?;
@@ -90,6 +97,26 @@ pub(super) fn record(
         _ => return Err(AppError::Conflict.into()),
     }
     Ok(())
+}
+
+/// Raises the alert that `lead`'s session waits on permission in `turn`, once per turn.
+pub(super) fn permission_alert(
+    db: &Connection,
+    lead: &LeadTarget,
+    turn: String,
+) -> Result<Option<NotificationId>, StoreError> {
+    let occurrence = reviewq_app::notifications::NativeOccurrence {
+        kind: reviewq_app::notifications::Kind::AgentPermission,
+        native_ref: turn,
+        at_ms: Some(now_ms()?),
+        desktop_episode: None,
+    };
+    crate::notifications::native::insert(
+        db,
+        reviewq_domain::session::HostProvider::Claude,
+        lead.target(),
+        occurrence,
+    )
 }
 
 /// Stores `generation` of the companion of `session` as ended, which counts as gone at once,

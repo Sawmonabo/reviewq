@@ -19,3 +19,4 @@ mod workspace;
 
 pub use connection::{SqliteStore, StoreIdentity};
 pub use error::StoreError;
+pub use hosts::claude::watch::WATCH_TICK;

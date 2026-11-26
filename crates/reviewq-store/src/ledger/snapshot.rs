@@ -132,7 +132,8 @@ fn read(db: &Connection, lead: LeadTarget) -> Result<Option<LedgerSnapshot>, Sto
     let since = parent
         .as_ref()
         .map_or(0, |parent| parent.sequence.as_sqlite_integer());
-    let touched = Touched::began(db, run, row.as_ref())?;
+    let closing = calls::last_closing(db, run)?.map(|(_, sequence, ordinal)| (sequence, ordinal));
+    let touched = Touched::began(row.as_ref(), closing);
     let findings = findings(
         db,
         &lead,
@@ -157,6 +158,7 @@ fn read(db: &Connection, lead: LeadTarget) -> Result<Option<LedgerSnapshot>, Sto
             head,
             pass: row.as_ref().map(|row| row.id),
             batch: row.and_then(|row| row.batch),
+            closing: closing.map_or(0, |(_, ordinal)| ordinal),
         },
         cover,
         parent,
@@ -258,19 +260,19 @@ impl Touched {
     /// The open pass's opening; with no pass, the lead's last accepted closing call, or the
     /// run's start when it has none. A version that settling published by itself is no
     /// closing call, so it does not move the start: what the lead did before it still counts.
-    fn began(db: &Connection, run: &str, pass: Option<&PassRow>) -> Result<Self, StoreError> {
+    /// `closing` is that call's sequence and ordinal.
+    fn began(pass: Option<&PassRow>, closing: Option<(i64, i64)>) -> Self {
         if let Some(pass) = pass {
-            return Ok(Self {
+            return Self {
                 after_sequence: pass.opened_sequence,
                 after_call: pass.opened_call,
-            });
+            };
         }
-        let (after_sequence, after_call) = calls::last_closing(db, run)?
-            .map_or((0, 0), |(_, sequence, ordinal)| (sequence, ordinal));
-        Ok(Self {
+        let (after_sequence, after_call) = closing.unwrap_or((0, 0));
+        Self {
             after_sequence,
             after_call,
-        })
+        }
     }
 }
 
