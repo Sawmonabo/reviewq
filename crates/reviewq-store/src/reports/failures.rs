@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::StoreError;
 use crate::notifications::insert_notification;
+use crate::queue::{parse, text};
 
 /// What recording a failure did.
 pub(crate) enum Noted {
@@ -98,18 +99,21 @@ pub(crate) fn note(
 }
 
 /// Resolves every unresolved failure on `run` with the receipt a publish just recorded or
-/// kept. The failure rows are kept.
+/// kept, and returns the notifications those failures raised. The failure rows are kept.
 pub(crate) fn resolve(
     db: &Connection,
     run: &str,
     receipt: &str,
     time: i64,
-) -> Result<bool, StoreError> {
-    let changed = db
-        .prepare_cached(
-            "UPDATE report_delivery_failures SET resolved_at_ms=?3, resolved_by_receipt_id=?2
-             WHERE run_id=?1 AND resolved_at_ms IS NULL",
-        )?
-        .execute(params![run, receipt, time])?;
-    Ok(changed != 0)
+) -> Result<Vec<NotificationId>, StoreError> {
+    let mut statement = db.prepare_cached(
+        "UPDATE report_delivery_failures SET resolved_at_ms=?3, resolved_by_receipt_id=?2
+         WHERE run_id=?1 AND resolved_at_ms IS NULL RETURNING notification_id",
+    )?;
+    let mut rows = statement.query(params![run, receipt, time])?;
+    let mut raised = Vec::new();
+    while let Some(row) = rows.next()? {
+        raised.push(parse(text(row, 0)?)?);
+    }
+    Ok(raised)
 }

@@ -25,7 +25,7 @@ use crate::events::now_ms;
 use crate::followups::completion;
 use crate::followups::work::FrozenManifest;
 use crate::hosts::recovery::complete_turn;
-use crate::notifications::{insert_notification, publish};
+use crate::notifications::{insert_notification, publish, withdraw};
 use crate::queue::{identity_for_review, parse};
 use crate::reports::artifact;
 use crate::reports::authority::for_project;
@@ -378,7 +378,8 @@ fn rows(db: &Connection, run: &str, receipt: &str, version: &NewVersion) -> Resu
     Ok(())
 }
 
-/// Resolves earlier failures, raises the ready notification and emits the change events.
+/// Resolves earlier failures and withdraws their notifications, raises the ready notification
+/// and emits the change events.
 fn finish(
     tx: &mut WriteTx<'_>,
     lead: &LeadTarget,
@@ -386,7 +387,8 @@ fn finish(
     time: i64,
     ready: Option<Ready>,
 ) -> Result<(), StoreError> {
-    failures::resolve(&tx.sql, lead.run_id().as_str(), receipt, time)?;
+    let resolved = failures::resolve(&tx.sql, lead.run_id().as_str(), receipt, time)?;
+    let mut changed = withdraw(&tx.sql, resolved)?;
     let notification = match ready {
         Some(ready) => {
             let (kind, label, occurrence) = match ready {
@@ -415,7 +417,8 @@ fn finish(
         }
         None => None,
     };
-    publish(tx, notification.as_slice())?;
+    changed.extend(notification);
+    publish(tx, &changed)?;
     advance_queue(&tx.sql)?;
     tx.emit(&[
         ResourceKey::Queue,

@@ -64,9 +64,7 @@ impl InboxStore for SqliteStore {
                 .into_iter()
                 .filter(|id| deduplicated.insert(id.clone()))
                 .collect();
-            let selection =
-                serde_json::to_string(&ids.iter().map(|id| id.as_str()).collect::<Vec<_>>())
-                    .map_err(|_| AppError::Internal)?;
+            let selection = selection(&ids)?;
             self.write(move |tx| {
                 let (scope_code, scope_id) = define_scope(scope(&tx.sql, &actor)?);
                 let authorized_sql = format!(
@@ -74,18 +72,19 @@ impl InboxStore for SqliteStore {
                      JOIN notifications n ON n.notification_id=selected.value
                      JOIN reviews r ON r.review_id=n.review_id WHERE {SCOPE_PREDICATE}"
                 );
-                let approved: i64 = tx.sql.prepare_cached(&authorized_sql)?
+                let approved: i64 = tx
+                    .sql
+                    .prepare_cached(&authorized_sql)?
                     .query_row(params![scope_code, scope_id, selection], |row| row.get(0))?;
                 if approved != ids.len() as i64 {
                     return Err(AppError::NotFound.into());
                 }
-                let (affected,stage_changed) = assign(&tx.sql, action, ids, &selection)?;
+                let (affected, stage_changed) = assign(&tx.sql, action, ids, &selection)?;
                 if !affected.is_empty() {
-                    tx.sql.execute(
-                        "UPDATE service_state SET inbox_revision=inbox_revision+1 WHERE singleton=1", [],
-                    )?;
                     let mut keys = if affected.len() <= 31 {
-                        affected.iter().map(|id| ResourceKey::Notification(Some(id.clone())))
+                        affected
+                            .iter()
+                            .map(|id| ResourceKey::Notification(Some(id.clone())))
                             .collect::<Vec<_>>()
                     } else {
                         vec![ResourceKey::Notification(None)]
@@ -98,7 +97,9 @@ impl InboxStore for SqliteStore {
                 }
                 let counts = counts(&tx.sql, scope_code, &scope_id, i64::MAX)?;
                 snapshot(&tx.sql, InboxChange { affected, counts })
-            }).await.map_err(StoreError::app)
+            })
+            .await
+            .map_err(StoreError::app)
         })
     }
 }
@@ -139,6 +140,27 @@ fn inbox_item(db: &Connection, actor: Actor, id: NotificationId) -> Result<Inbox
     })
 }
 
+/// The JSON array of `ids` that the inbox statements select from.
+fn selection(ids: &[NotificationId]) -> Result<String, AppError> {
+    serde_json::to_string(&ids.iter().map(|id| id.as_str()).collect::<Vec<_>>())
+        .map_err(|_| AppError::Internal)
+}
+
+/// Dismisses notifications whose cause is over, as the reviewer's own dismissal does, and
+/// returns those it changed for the caller to announce.
+pub(crate) fn withdraw(
+    db: &Connection,
+    ids: Vec<NotificationId>,
+) -> Result<Vec<NotificationId>, StoreError> {
+    if ids.is_empty() {
+        return Ok(ids);
+    }
+    let selection = selection(&ids)?;
+    Ok(assign(db, NotificationAction::Dismiss, ids, &selection)?.0)
+}
+
+/// Applies `action` to the selected notifications that it changes. A change moves the inbox
+/// revision, which every stored page position is checked against.
 fn assign(
     db: &Connection,
     action: NotificationAction,
@@ -165,6 +187,13 @@ fn assign(
     while let Some(row) = rows.next()? {
         updates.insert(parse(text(row, 0)?)?);
         stage_changed |= row.get::<_, bool>(1)?;
+    }
+    drop(rows);
+    if !updates.is_empty() {
+        db.prepare_cached(
+            "UPDATE service_state SET inbox_revision=inbox_revision+1 WHERE singleton=1",
+        )?
+        .execute([])?;
     }
     Ok((
         ids.into_iter().filter(|id| updates.contains(id)).collect(),
@@ -381,7 +410,7 @@ fn counts(
     })
 }
 
-/// Saves one stable occurrence in the transaction that observed it.
+/// Announces the notifications a transaction added or dismissed.
 pub(crate) fn publish(
     tx: &mut crate::connection::WriteTx<'_>,
     ids: &[NotificationId],

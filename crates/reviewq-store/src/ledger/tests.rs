@@ -10,6 +10,7 @@ use reviewq_app::ledger::{
     PublishOutcome, RecordField, RecordReceipt, RecordWrite, ReportLinks, SectionSpan,
     SilentSessions, Span, VersionFacts, WriteRefusal,
 };
+use reviewq_app::notifications::{InboxStore, InboxView, Kind};
 use reviewq_app::reports::{
     ArtifactStats, Assessment, Collection, ContextRequest, Coverage, Descriptor, DispositionEdit,
     FindingBasis, FindingBasisKind, FindingConclusion, FindingDetails, FindingLocation,
@@ -144,6 +145,7 @@ fn publish_is_conditional() {
             })
             .await
             .unwrap();
+        assert_eq!(inbox(&store).await, [Kind::ReportFailed]);
 
         // A record filed after the snapshot makes the commit stale.
         let early = closing(&store, "finish").await;
@@ -169,13 +171,15 @@ fn publish_is_conditional() {
         assert!(view.report.is_none());
         assert_eq!(view.delivery.unwrap().state, ReportDeliveryState::Failed);
 
-        // A current snapshot publishes, closes the pass and resolves the failure.
+        // A current snapshot publishes, closes the pass, resolves the failure and takes its
+        // notification out of the inbox.
         let current = closing(&store, "finish").await;
         let PublishOutcome::Published(receipt) =
             store.commit_publish(full_review(current)).await.unwrap()
         else {
             panic!("a current snapshot publishes");
         };
+        assert_eq!(inbox(&store).await, [Kind::ReportReady]);
         let view = store
             .read_report(actor.clone(), run_id.clone(), None, false)
             .await
@@ -582,6 +586,15 @@ fn span(text: &str, start: usize) -> Span {
         scalar_offset: start as u64,
         scalar_length: (text.len() - start) as u64,
     }
+}
+
+/// The kinds of the notifications the inbox lists, read or unread.
+async fn inbox(store: &SqliteStore) -> Vec<Kind> {
+    let page = store
+        .read_inbox(Actor::local_operator(), InboxView::All, None, 10)
+        .await
+        .unwrap();
+    page.value.items.iter().map(|item| item.kind).collect()
 }
 
 /// The settle read's `lead_idle` for each candidate run.
