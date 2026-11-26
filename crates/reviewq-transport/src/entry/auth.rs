@@ -174,6 +174,7 @@ mod tests {
             "[::1]:8767".parse().unwrap(),
             ServiceIdentity {
                 build_digest: String::new(),
+                executable_file: String::new(),
                 profile_id: String::new(),
                 store_id: String::new(),
                 store_application_id: 0,

@@ -51,6 +51,9 @@ pub struct ServiceIdentity {
     pub profile_id: String,
     pub store_id: String,
     pub store_application_id: i64,
+    /// The running executable's file, as `device:inode:size:mtime:ctime` with nanosecond
+    /// times, so a helper that runs the same file can skip hashing itself.
+    pub executable_file: String,
     pub store_schema: i64,
 }
 

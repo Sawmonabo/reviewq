@@ -140,6 +140,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         native,
         ServiceIdentity {
             build_digest,
+            executable_file: executable_file()?,
             profile_id: profile_id(&profile),
             store_id: store_id.clone(),
             store_application_id: identity.application_id,
@@ -626,8 +627,20 @@ fn validate_profile(path: &Path) -> Result<(), Failure> {
     Ok(())
 }
 
+/// The running service's endpoint, when the service runs this same build. A helper that runs
+/// the service's own executable file proves that without reading it: while the service runs
+/// the file, the kernel refuses to open it for writing (`ETXTBSY`), an upgrade replaces it by
+/// rename, which gives a new inode, and any change to the file moves its change time. Any
+/// other helper hashes itself as the service did at startup.
 pub(crate) fn read_endpoint(profile: &Path) -> Result<ServiceEndpoint, Failure> {
-    read_endpoint_with_build(profile, &executable_digest()?)
+    let endpoint = read_descriptor(profile)?;
+    let identity = endpoint.identity();
+    if executable_file().ok().as_ref() != Some(&identity.executable_file)
+        && executable_digest()? != identity.build_digest
+    {
+        return Err(MISMATCH.into());
+    }
+    Ok(endpoint)
 }
 
 pub(crate) fn read_native_endpoint(profile: &Path) -> Result<ServiceEndpoint, Failure> {
@@ -636,10 +649,22 @@ pub(crate) fn read_native_endpoint(profile: &Path) -> Result<ServiceEndpoint, Fa
     Ok(endpoint)
 }
 
+/// The running service's endpoint, when the service runs the build whose digest is `digest`.
 pub(crate) fn read_endpoint_with_build(
     profile: &Path,
     digest: &str,
 ) -> Result<ServiceEndpoint, Failure> {
+    let endpoint = read_descriptor(profile)?;
+    if endpoint.identity().build_digest != digest {
+        return Err(MISMATCH.into());
+    }
+    Ok(endpoint)
+}
+
+const MISMATCH: &str = "service endpoint does not match this build and profile";
+
+/// The service descriptor in `profile`, when it is valid and names this profile.
+fn read_descriptor(profile: &Path) -> Result<ServiceEndpoint, Failure> {
     validate_profile(profile)?;
     let file = private_file(&profile.join(RUNTIME))?;
     let mut data = Vec::new();
@@ -648,18 +673,29 @@ pub(crate) fn read_endpoint_with_build(
         return Err("service descriptor exceeds limit".into());
     }
     let endpoint: ServiceEndpoint = serde_json::from_slice(&data)?;
-    let identity = endpoint.identity();
-    if !endpoint.is_valid()
-        || identity.profile_id != profile_id(profile)
-        || identity.build_digest != digest
-    {
-        return Err("service endpoint does not match this build and profile".into());
+    if !endpoint.is_valid() || endpoint.identity().profile_id != profile_id(profile) {
+        return Err(MISMATCH.into());
     }
     Ok(endpoint)
 }
 
 pub(crate) fn profile_id(path: &Path) -> String {
     hex(&Sha256::digest(path.as_os_str().as_bytes()))
+}
+
+/// The running executable's file: device, inode, size, and modification and change times.
+fn executable_file() -> Result<String, Failure> {
+    let file = fs::metadata("/proc/self/exe")?;
+    Ok(format!(
+        "{}:{}:{}:{}.{:09}:{}.{:09}",
+        file.dev(),
+        file.ino(),
+        file.size(),
+        file.mtime(),
+        file.mtime_nsec(),
+        file.ctime(),
+        file.ctime_nsec()
+    ))
 }
 
 fn executable_digest() -> Result<String, Failure> {
