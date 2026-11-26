@@ -23,10 +23,13 @@ pub(super) fn record(
         store_ended(tx, lead.run_id(), lead.session_key(), &generation, false)?;
         return Ok(());
     }
+    // Claude runs this hook inside the session's own process, so the event itself shows the
+    // session present, and a hook that fails is not sent again. It is refused only once the
+    // companion counts as gone, when its stored turn no longer says which turn is running.
     let active: Option<String> = db
         .query_row(
             "SELECT c.turn_id FROM claude_companions c JOIN sessions s USING(session_key)
-         WHERE c.session_key=?1 AND reviewq_companion_live(c.seen_at_ms) AND c.turn_id IS NOT NULL
+         WHERE c.session_key=?1 AND NOT reviewq_companion_gone(c.seen_at_ms) AND c.turn_id IS NOT NULL
            AND s.host_activity IN ('working','blocked')",
             [key],
             |row| row.get(0),

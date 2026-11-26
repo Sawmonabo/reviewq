@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::followups::{NextAction, ResultKind};
-use reviewq_app::hosts::ClaudeWorkflowStore;
+use reviewq_app::hosts::{ClaudeClassicEvent, ClaudeStore, ClaudeWorkflowStore};
 use reviewq_app::ledger::publish::{finish_review, settle_due};
 use reviewq_app::ledger::{
     CallBinding, CardSpan, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
@@ -28,6 +28,7 @@ use reviewq_domain::session::AbsolutePath;
 use sha2::{Digest, Sha256};
 
 use crate::SqliteStore;
+use crate::queue::lead_for_run;
 
 const SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -267,29 +268,26 @@ fn publish_is_conditional() {
         assert_eq!(lead_idle(&store).await, [false]);
         // After a restart a companion that has not reported yet is unknown: neither idle for
         // dispatch nor settled, whatever it last reported, until the watch lets it be gone.
+        let companion = "INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,
+            turn_id,latest_prompt_manual) VALUES('claude:lead',printf('%032d',0),1,1000,'turn-1',0)";
         store
-            .write(|tx| {
-                tx.sql.execute(
-                    "INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,
-                       turn_id,latest_prompt_manual)
-                     VALUES('claude:lead',printf('%032d',0),1,1000,'turn-1',0)",
-                    [],
-                )?;
-                Ok(())
-            })
+            .write(|tx| Ok(tx.sql.execute(companion, [])?))
             .await
             .unwrap();
+        let lead = store.read(|db| Ok(lead_for_run(db, &"run".parse().unwrap())?.unwrap()));
+        let lead = lead.await.unwrap();
         let live = async || {
-            let lead = store
-                .read(|db| Ok(crate::queue::lead_for_run(db, &"run".parse().unwrap())?.unwrap()))
-                .await
-                .unwrap();
-            let context = store.claude_workflow_context(lead, None).await.unwrap();
+            let context = store.claude_workflow_context(lead.clone(), None);
+            let context = context.await.unwrap();
             (context.active_turn.is_some(), context.idle)
         };
         activity(&store, "working").await;
         assert_eq!(lead_idle(&store).await, [false]);
         assert_eq!(live().await, (false, false));
+        // A permission prompt from Claude's own hook shows the session present, and is kept.
+        let prompt =
+            store.record_claude_classic(lead.clone(), ClaudeClassicEvent::PermissionPending);
+        prompt.await.unwrap();
         activity(&store, "idle").await;
         assert_eq!(lead_idle(&store).await, [false]);
         assert_eq!(live().await, (false, false));
