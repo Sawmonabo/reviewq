@@ -29,6 +29,7 @@ pub struct Codex {
     turn_settings: Option<(String, String)>,
     turn_lookups: turn_lookup::TurnLookups,
     document: std::sync::Arc<tokio::sync::Mutex<Option<history_reads::PreparedDocument>>>,
+    restore_grace: std::time::Duration,
 }
 
 impl Codex {
@@ -68,6 +69,7 @@ impl Codex {
             turn_settings,
             turn_lookups: turn_lookup::TurnLookups::default(),
             document: Default::default(),
+            restore_grace: attention::RESTORE_GRACE,
         })
     }
 }

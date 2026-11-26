@@ -3,7 +3,7 @@ use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use futures_util::{SinkExt, StreamExt};
 use reviewq_app::access::AppError;
@@ -36,6 +36,18 @@ pub(super) struct Connection {
     sender: mpsc::Sender<CommandRequest>,
     questions: Arc<Mutex<Questions>>,
     pub(super) live: Arc<Live>,
+    reach: Arc<Mutex<Reach>>,
+}
+
+/// What the latest attempt to connect learned about the profile's Codex daemon.
+#[derive(Clone, Copy, Default)]
+pub(super) enum Reach {
+    #[default]
+    Unknown,
+    /// No daemon answered: discovery found none, or its socket refused the connection.
+    Absent,
+    /// A daemon accepted the connection on a socket bound at this time.
+    Bound(Option<SystemTime>),
 }
 
 enum CommandRequest {
@@ -151,12 +163,18 @@ impl Connection {
         };
         let questions = Arc::new(Mutex::new(Questions::default()));
         let live = Arc::new(Live::default());
-        tokio::spawn(daemon.run(commands, questions.clone(), live.clone()));
+        let reach = Arc::new(Mutex::new(Reach::Unknown));
+        tokio::spawn(daemon.run(commands, questions.clone(), live.clone(), reach.clone()));
         Self {
             sender,
             questions,
             live,
+            reach,
         }
+    }
+
+    pub(super) fn reach(&self) -> Reach {
+        self.reach.lock().map_or(Reach::Unknown, |reach| *reach)
     }
 
     pub(super) fn questions(
@@ -275,6 +293,7 @@ impl Daemon {
         mut commands: mpsc::Receiver<CommandRequest>,
         questions: Arc<Mutex<Questions>>,
         live: Arc<Live>,
+        reach: Arc<Mutex<Reach>>,
     ) {
         let mut id = 1_u64;
         while let Some(first) = commands.recv().await {
@@ -288,7 +307,21 @@ impl Daemon {
             if request.reply.is_closed() {
                 continue;
             }
-            let Ok(Ok(mut socket)) = timeout(DEADLINE, self.connect()).await else {
+            let connected = timeout(DEADLINE, async {
+                let (stream, bound) = self.open().await?;
+                Ok((self.handshake(stream).await, bound))
+            })
+            .await;
+            let (reached, connected) = match connected {
+                Ok(Ok((socket, bound))) => (Reach::Bound(bound), socket),
+                Ok(Err(None)) => (Reach::Absent, Err(AppError::Unavailable)),
+                Ok(Err(Some(error))) => (Reach::Unknown, Err(error)),
+                Err(_) => (Reach::Unknown, Err(AppError::Unavailable)),
+            };
+            if let Ok(mut current) = reach.lock() {
+                *current = reached;
+            }
+            let Ok(mut socket) = connected else {
                 let _ = request
                     .reply
                     .send(Err(CallError::BeforeSend(AppError::Unavailable)));
@@ -311,12 +344,27 @@ impl Daemon {
         }
     }
 
-    async fn connect(&self) -> Result<Socket, AppError> {
-        let discovery = self.discover().await?;
-        let socket_path = self.verified_socket(&discovery.socket_path).await?;
-        let stream = UnixStream::connect(socket_path)
+    /// Connects to the profile's daemon socket and reads when it was bound. `None` means no
+    /// daemon answered; any other refusal carries its error.
+    async fn open(&self) -> Result<(UnixStream, Option<SystemTime>), Option<AppError>> {
+        let absent = |error| match error {
+            AppError::Unavailable => None,
+            error => Some(error),
+        };
+        let discovery = self.discover().await.map_err(absent)?;
+        let socket_path = self
+            .verified_socket(&discovery.socket_path)
             .await
-            .map_err(|_| AppError::Unavailable)?;
+            .map_err(absent)?;
+        let bound = tokio::fs::metadata(&socket_path)
+            .await
+            .ok()
+            .and_then(|socket| socket.modified().ok());
+        let stream = UnixStream::connect(socket_path).await.map_err(|_| None)?;
+        Ok((stream, bound))
+    }
+
+    async fn handshake(&self, stream: UnixStream) -> Result<Socket, AppError> {
         if stream.peer_cred().map_err(|_| AppError::Unavailable)?.uid() != self.owner {
             return Err(AppError::Forbidden);
         }

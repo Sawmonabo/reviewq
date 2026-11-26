@@ -104,7 +104,10 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
             .unwrap();
         }
     });
-    let codex = Arc::new(Codex::new(executable, profile.clone(), None).unwrap());
+    let mut codex = Codex::new(executable, profile.clone(), None).unwrap();
+    // The synthetic daemon has just started; it restores nothing.
+    codex.restore_grace = std::time::Duration::ZERO;
+    let codex = Arc::new(codex);
     let readers = crate::workflow::Workflows::new(Some(codex.clone()));
     let profile = AbsolutePath::from_canonical(profile).unwrap();
     let lead = LeadTarget::new(

@@ -31,6 +31,9 @@ pub(crate) fn from_row(row: &Row<'_>, index: usize) -> rusqlite::Result<NativeSe
     })
 }
 
+/// Stores the observed facts. A full update replaces name, status and start time, clearing
+/// any the session no longer reports; an update that carries no fact at all came without
+/// thread data and keeps every stored one. Model and effort keep their stored values.
 pub(crate) fn record(
     db: &Connection,
     session: &str,
@@ -67,7 +70,7 @@ pub(crate) fn record(
             observed.2,
             observed.3,
             observed.4,
-            matches!(update, MetadataUpdate::Full)
+            matches!(update, MetadataUpdate::Full) && *value != NativeSessionMetadata::default()
         ],
     )?;
     Ok(changed != 0)

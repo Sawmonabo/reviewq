@@ -1,23 +1,32 @@
 use std::fs::File;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Read};
 use std::path::Path;
+use std::time::Duration;
 
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::recovery::{NativeFailure, RecoveryKind};
-use reviewq_app::hosts::{HostActivity, HostPhase, QuestionStatus};
+use reviewq_app::hosts::{HostActivity, HostPhase, NativeSessionMetadata, QuestionStatus};
 use reviewq_app::notifications::{Kind, NativeAttention, NativeOccurrence, TrackedNative};
 use uuid::Uuid;
 
 use super::Codex;
+use super::connection::Reach;
 use super::history::Turn;
 use super::session::ThreadStatus;
+
+/// How long after a daemon starts a thread it has not loaded may still be one it is restoring.
+pub(super) const RESTORE_GRACE: Duration = Duration::from_secs(120);
 
 impl Codex {
     pub(crate) async fn attention(
         &self,
         target: TrackedNative,
     ) -> Result<Option<NativeAttention>, AppError> {
-        let thread = self.bound_history_thread(&target.session).await?;
+        let thread = match self.bound_history_thread(&target.session).await {
+            Ok(thread) => thread,
+            Err(AppError::Unavailable) => return self.without_daemon(target).await,
+            Err(error) => return Err(error),
+        };
         let mut activity = thread.status.activity();
         let mut metadata = thread.metadata();
         let mut events = Vec::new();
@@ -51,7 +60,7 @@ impl Codex {
                     let latest = read.ok().and_then(|page| page.data.into_iter().next());
                     activity = latest.as_ref().and_then(|turn| {
                         saved_turn_activity(turn, || {
-                            writer_gone(self.profile.as_path(), &thread.id)
+                            self.daemon_settled() && writer_gone(self.profile.as_path(), &thread.id)
                         })
                     });
                     latest
@@ -126,6 +135,74 @@ impl Codex {
             async_questions,
         }))
     }
+}
+
+impl Codex {
+    /// A session whose thread could not be read because no Codex daemon answered. Once no
+    /// process holds the thread and no daemon shutdown saved it to be restored, no turn runs in
+    /// it and it is idle. The observation carries no thread data, so the stored name, status and
+    /// start time stay. Otherwise the read fails and nothing is stored.
+    async fn without_daemon(
+        &self,
+        target: TrackedNative,
+    ) -> Result<Option<NativeAttention>, AppError> {
+        let thread = target.session.binding.identity().native_id().as_str();
+        if !matches!(self.connection.reach(), Reach::Absent)
+            || restore_pending(self.profile.as_path(), thread)
+            || !writer_gone(self.profile.as_path(), thread)
+        {
+            return Err(AppError::Unavailable);
+        }
+        let async_questions = super::super::history::observe_async_questions(
+            target.session,
+            target.started_at_ms,
+            target.questions,
+        )
+        .await
+        .unwrap_or_default();
+        Ok(Some(NativeAttention {
+            activity: Some(HostActivity {
+                phase: HostPhase::Idle,
+                has_questions: false,
+            }),
+            metadata: NativeSessionMetadata::default(),
+            children: None,
+            terminal_failure: None,
+            recoverable: None,
+            events: Vec::new(),
+            async_questions,
+        }))
+    }
+
+    /// Whether the daemon that answered has run long enough to have restored the threads a
+    /// previous daemon saved at shutdown. Until then, a thread it has not loaded may be one it
+    /// is about to resume and continue.
+    fn daemon_settled(&self) -> bool {
+        matches!(self.connection.reach(), Reach::Bound(Some(bound))
+            if bound.elapsed().is_ok_and(|age| age >= self.restore_grace))
+    }
+}
+
+/// Whether a managed daemon that shut down saved the thread to resume when it starts again,
+/// with any turn it interrupted. A saved file that cannot be read counts as saving it.
+fn restore_pending(profile: &Path, thread: &str) -> bool {
+    const LIMIT: u64 = 1024 * 1024;
+    let Ok(thread) = Uuid::parse_str(thread) else {
+        return true;
+    };
+    let mut saved = Vec::new();
+    match File::open(profile.join("app-server-daemon/loaded-threads.json")) {
+        Ok(file) => {
+            if file.take(LIMIT + 1).read_to_end(&mut saved).is_err() || saved.len() as u64 > LIMIT {
+                return true;
+            }
+        }
+        Err(error) => return error.kind() != ErrorKind::NotFound,
+    }
+    let thread = thread.hyphenated().to_string();
+    saved
+        .windows(thread.len())
+        .any(|part| part == thread.as_bytes())
 }
 
 /// The activity of a thread this connection has not loaded, from its latest saved turn: failed
