@@ -216,7 +216,7 @@ pub(crate) fn open_for_batch(
     Ok(())
 }
 
-/// Ends every pass of a review that is no longer open. Inside the refresh that archived it.
+/// Ends every pass of a review that is no longer open. Inside the refresh that saw it end.
 pub(crate) fn end_for_review(
     db: &Connection,
     review: &ReviewId,

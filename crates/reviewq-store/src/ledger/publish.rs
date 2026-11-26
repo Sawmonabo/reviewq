@@ -378,8 +378,8 @@ fn rows(db: &Connection, run: &str, receipt: &str, version: &NewVersion) -> Resu
     Ok(())
 }
 
-/// Resolves earlier failures and withdraws their notifications, raises the ready notification
-/// and emits the change events.
+/// Resolves the run's failures and withdraws their notifications and those of earlier runs'
+/// failures, raises the ready notification and emits the change events.
 fn finish(
     tx: &mut WriteTx<'_>,
     lead: &LeadTarget,
@@ -387,8 +387,14 @@ fn finish(
     time: i64,
     ready: Option<Ready>,
 ) -> Result<(), StoreError> {
-    let resolved = failures::resolve(&tx.sql, lead.run_id().as_str(), receipt, time)?;
-    let mut changed = withdraw(&tx.sql, resolved)?;
+    let run = lead.run_id().as_str();
+    let mut alerts = failures::resolve(&tx.sql, run, receipt, time)?;
+    alerts.extend(failures::unresolved_alerts(
+        &tx.sql,
+        lead.review_id(),
+        Some(run),
+    )?);
+    let mut changed = withdraw(&tx.sql, alerts)?;
     let notification = match ready {
         Some(ready) => {
             let (kind, label, occurrence) = match ready {

@@ -3,7 +3,7 @@
 
 use reviewq_app::ledger::FailureRecord;
 use reviewq_app::notifications::{Kind, Observation, Source};
-use reviewq_domain::identity::NotificationId;
+use reviewq_domain::identity::{NotificationId, ReviewId};
 use reviewq_domain::session::LeadTarget;
 use rusqlite::{Connection, params};
 use uuid::Uuid;
@@ -116,4 +116,25 @@ pub(crate) fn resolve(
         raised.push(parse(text(row, 0)?)?);
     }
     Ok(raised)
+}
+
+/// The notifications raised by unresolved failures on `review`'s runs: on every run, or with
+/// `before`, on the runs that started before that run.
+pub(crate) fn unresolved_alerts(
+    db: &Connection,
+    review: &ReviewId,
+    before: Option<&str>,
+) -> Result<Vec<NotificationId>, StoreError> {
+    let mut statement = db.prepare_cached(
+        "SELECT f.notification_id FROM report_delivery_failures f JOIN runs r USING(run_id)
+         WHERE r.review_id=?1 AND f.resolved_at_ms IS NULL AND f.notification_id IS NOT NULL
+           AND (?2 IS NULL OR (r.started_at_ms, r.run_id)
+                < (SELECT b.started_at_ms, b.run_id FROM runs b WHERE b.run_id=?2))",
+    )?;
+    let mut rows = statement.query(params![review.as_str(), before])?;
+    let mut alerts = Vec::new();
+    while let Some(row) = rows.next()? {
+        alerts.push(parse(text(row, 0)?)?);
+    }
+    Ok(alerts)
 }

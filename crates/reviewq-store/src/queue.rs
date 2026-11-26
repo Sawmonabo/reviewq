@@ -197,6 +197,13 @@ pub(crate) fn save_observations(
     let mut inbox = Vec::new();
     for item in source {
         let (id, written) = save_review(&tx.sql, item, true)?;
+        if written && item.state != MergeRequestState::Open {
+            // The review is over: its passes end and its report failures no longer need the
+            // reviewer.
+            crate::ledger::passes::end_for_review(&tx.sql, &id, crate::events::now_ms()?)?;
+            let alerts = crate::reports::failures::unresolved_alerts(&tx.sql, &id, None)?;
+            inbox.extend(crate::notifications::withdraw(&tx.sql, alerts)?);
+        }
         if written {
             if let Some(id) = crate::notifications::gitlab::observe_head(
                 &tx.sql,
@@ -503,8 +510,8 @@ pub(crate) fn save_review(
         .as_ref()
         .map(|author| author.username.as_str());
     if let Some(review_id) = id {
-        let changed = if refresh {
-            let changed = connection.execute(
+        let changed = refresh
+            && connection.execute(
                 "UPDATE reviews SET project_path=?2, title=?3, head_sha=?4, state=?5, updated_at_ms=?6,
                  author_id=?7,author_username=?8,draft=?9,observation_cursor=(SELECT event_head+1 FROM service_state WHERE singleton=1)
                  WHERE review_id=?1 AND updated_at_ms<=?6
@@ -513,17 +520,6 @@ pub(crate) fn save_review(
                 params![review_id.as_str(), source.project_path, source.title, source.head_sha.as_str(),
                         state_label(source.state), source.updated_at_ms,author_id,author_name,source.draft],
             )? == 1;
-            if changed && source.state != MergeRequestState::Open {
-                crate::ledger::passes::end_for_review(
-                    connection,
-                    &review_id,
-                    crate::events::now_ms()?,
-                )?;
-            }
-            changed
-        } else {
-            false
-        };
         return Ok((review_id, changed));
     }
     let review_id: ReviewId = parse(&Uuid::new_v4().to_string())?;
