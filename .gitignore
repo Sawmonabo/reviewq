@@ -6,3 +6,6 @@
 **/playwright-report/
 **/test-results/
 *.tsbuildinfo
+# Claude Code writes this beside a plugin it loads from a folder; it extends the engine's own
+# ignored types folder.
+/hosts/claude/plugin/tsconfig.json
