@@ -37,10 +37,10 @@ contracts contracts-check:
 			scratch=$$(mktemp -d); \
 		fi; \
 		trap 'find "$$scratch" -depth -delete' EXIT; \
-		cargo run --locked --quiet -p reviewq-protocol --features schema --bin export-schema > "$$scratch/v1.schema.json"; \
-		cargo run --locked --quiet -p reviewq-protocol --features schema --bin export-schema -- --ledger-tools-schema > "$$scratch/ledger-tools.schema.json"; \
-		cargo run --locked --quiet -p reviewq-protocol --features schema --bin export-schema -- --ledger-tools-example > "$$scratch/ledger-tools.json"; \
-		cargo run --locked --quiet -p reviewq-protocol --features schema --bin export-schema -- --claude-ledger-tools > "$$scratch/ledger-schema.js"; \
+		$(RUST_COMMAND) run --locked --quiet -p reviewq-protocol --features schema --bin export-schema > "$$scratch/v1.schema.json"; \
+		$(RUST_COMMAND) run --locked --quiet -p reviewq-protocol --features schema --bin export-schema -- --ledger-tools-schema > "$$scratch/ledger-tools.schema.json"; \
+		$(RUST_COMMAND) run --locked --quiet -p reviewq-protocol --features schema --bin export-schema -- --ledger-tools-example > "$$scratch/ledger-tools.json"; \
+		$(RUST_COMMAND) run --locked --quiet -p reviewq-protocol --features schema --bin export-schema -- --claude-ledger-tools > "$$scratch/ledger-schema.js"; \
 		node web/tools/generate-contracts.mjs --schema "$$scratch/v1.schema.json" --out "$$scratch/generated"; \
 		if [ "$@" = contracts-check ]; then \
 			diff -u "$(CONTRACT_SCHEMA)" "$$scratch/v1.schema.json"; \
@@ -71,8 +71,8 @@ contracts contracts-check:
 contracts-verify contracts-verify-browser:
 	@set -eu; \
 		scratch=$$(mktemp -d); trap 'find "$$scratch" -depth -delete' EXIT; \
-		cargo run --locked --quiet -p reviewq-protocol --example delivery-receipt > "$$scratch/receipt.ndjson"; \
-		cargo run --locked --quiet -p reviewq-protocol --example first-review-contracts -- "$$scratch/fixtures"; \
+		$(RUST_COMMAND) run --locked --quiet -p reviewq-protocol --example delivery-receipt > "$$scratch/receipt.ndjson"; \
+		$(RUST_COMMAND) run --locked --quiet -p reviewq-protocol --example first-review-contracts -- "$$scratch/fixtures"; \
 		node web/tools/contracts/verify.mjs "$$scratch" $(if $(filter contracts-verify-browser,$@),--browser)
 
 crate-deps:
