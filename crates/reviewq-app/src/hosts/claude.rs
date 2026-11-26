@@ -47,6 +47,7 @@ impl ClaudeHeartbeat {
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
             || self.sequence == 0
             || self.sequence > 9_007_199_254_740_991
+            || (self.latest_prompt_manual && self.latest_prompt_turn.is_none())
             || self
                 .model
                 .as_ref()
@@ -164,13 +165,8 @@ pub struct ProvenClaudeChild {
 
 pub enum ClaudeClassicEvent {
     PermissionPending,
-    /// A chunk of a message Claude displayed, in the companion's running turn: the hook's own
-    /// turn ID is not the one the companion reports.
-    Display {
-        message: NativeInputId,
-        index: u64,
-        final_chunk: bool,
-    },
+    /// Claude began or finished displaying a message, which the session's history shows.
+    Display,
     Disconnected {
         generation: String,
     },
@@ -238,12 +234,14 @@ pub trait ClaudeStore: Send + Sync {
 
     /// Admits a request of the Claude plugin for `session` when `proof`, the SHA-256 of the
     /// proof it carried, is the one the session's companion registered. A session ReviewQ does
-    /// not store is admitted, so the call gets its own answer for that. Fails with
-    /// `Unauthorized` otherwise, a stored session with no companion included.
+    /// not store is admitted, so the call gets its own answer for that. With `admit_gone`, so is
+    /// a session whose companion is gone or was never stored. Fails with `Unauthorized`
+    /// otherwise, a stored session with no companion included.
     fn prove_claude_companion(
         &self,
         session: SessionKey,
         proof: Option<[u8; 32]>,
+        admit_gone: bool,
     ) -> AppFuture<'_, ()>;
 }
 

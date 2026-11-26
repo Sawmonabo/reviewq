@@ -12,6 +12,17 @@ pub enum HostProvider {
     Claude,
 }
 
+impl HostProvider {
+    /// ReviewQ's key for this host's session `native`: the native ID, under `claude:` for a
+    /// Claude session.
+    pub fn session_key(self, native: &NativeSessionId) -> Result<SessionKey, InvalidIdentity> {
+        match self {
+            Self::Codex => native.as_str().parse(),
+            Self::Claude => format!("claude:{native}").parse(),
+        }
+    }
+}
+
 /// A local path resolved to its canonical absolute form by a trusted adapter.
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct AbsolutePath(PathBuf);

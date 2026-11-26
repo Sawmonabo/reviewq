@@ -1,5 +1,6 @@
 import { invoke } from "./bridge.js";
 import { currentSettings } from "./settings.js";
+import { claimDelivery } from "./companion.js";
 
 const PLUGIN = "reviewq";
 
@@ -57,6 +58,8 @@ export async function deliver($, state, offer) {
     return;
   }
   if (!offer || offer.generation !== state.generation) return;
+  // Another copy of this module works the offer; it or ReviewQ settles it.
+  if (!await claimDelivery($, state, offer)) return;
   const attempt = {
     offer,
     revision: state.inputRevision,

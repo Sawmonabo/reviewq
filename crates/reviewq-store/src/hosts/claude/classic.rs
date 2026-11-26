@@ -53,6 +53,11 @@ pub(super) fn record(
         }
         return Ok(());
     }
+    if matches!(event, ClaudeClassicEvent::Display) {
+        // A message Claude began or finished displaying shows in the session's history.
+        tx.emit(&[ResourceKey::History(Some(lead.session_key().clone()))])?;
+        return Ok(());
+    }
     let Some(active) = active else {
         return Err(AppError::Unavailable.into());
     };
@@ -71,26 +76,6 @@ pub(super) fn record(
                     crate::notifications::publish(tx, &[event])?;
                 }
                 affected(tx, &lead)?;
-            }
-        }
-        ClaudeClassicEvent::Display {
-            message,
-            index,
-            final_chunk,
-        } => {
-            if index != 0 && !final_chunk {
-                return Ok(());
-            }
-            let changed = db.execute(
-                "INSERT INTO claude_display_events(session_key,turn_id,display_id,first_seen,final_seen)
-                 VALUES(?1,?2,?3,?4,?5)
-                 ON CONFLICT(session_key,turn_id,display_id) DO UPDATE SET
-                    first_seen=max(first_seen,excluded.first_seen), final_seen=max(final_seen,excluded.final_seen)
-                 WHERE first_seen<excluded.first_seen OR final_seen<excluded.final_seen",
-                params![key,active,message.as_str(),index==0,final_chunk],
-            )?;
-            if changed != 0 {
-                tx.emit(&[ResourceKey::History(Some(lead.session_key().clone()))])?;
             }
         }
         _ => return Err(AppError::Conflict.into()),

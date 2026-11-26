@@ -4,13 +4,15 @@ import { refusal, registerWorkflowTools, reportTurn, stageAction } from "./workf
 import { callLedger, ledgerToolIds, registerLedgerTools } from "./ledger.js";
 import { reconcileChildren } from "./children.js";
 import { currentSettings } from "./settings.js";
-import { answerQuestion, observeQuestion } from "./questions.js";
+import { observeQuestion } from "./questions.js";
+import { keepCounters, openCompanion } from "./companion.js";
 
 const HEARTBEAT_MS = 5000;
 const OFFLINE_MS = 30000;
 const REGISTRATION_RETRY_MS = 400;
 const REGISTRATION_DEADLINE_MS = 12000;
 let session;
+let opening;
 let timer;
 let checking = false;
 let recheck = false;
@@ -21,28 +23,25 @@ function reset() {
   session = undefined;
 }
 
-function randomHex(bytes) {
-  return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), byte => byte.toString(16).padStart(2, "0")).join("");
-}
-
 async function current($) {
   const id = await $.session.id();
   if (session?.id !== id) {
-    reset();
-    session = {
-      id,
-      generation: randomHex(16),
-      // Proves this module's requests to ReviewQ, which keeps only its hash; see `invoke`.
-      proof: randomHex(32),
-      sequence: 0,
-      inputRevision: 0,
-      childSequence: 0,
-      questionCalls: new Map(),
-      linked: false,
-      lastSeen: 0,
-      label: undefined,
-    };
-    $.ui.invalidate("ui.render");
+    // One read of the kept companion per session, however many hooks ask at once.
+    if (opening?.id !== id) opening = { id, companion: openCompanion($, id) };
+    const companion = await opening.companion;
+    if (session?.id !== id) {
+      reset();
+      session = {
+        // `proof` proves this module's requests to ReviewQ, which keeps only its hash; see `invoke`.
+        ...companion,
+        inputRevision: 0,
+        questionCalls: new Map(),
+        linked: false,
+        lastSeen: 0,
+        label: undefined,
+      };
+      $.ui.invalidate("ui.render");
+    }
   }
   return session;
 }
@@ -81,7 +80,7 @@ async function heartbeat($, state, allowDelivery = true) {
   const settings = await currentSettings($, state);
   const result = await invoke($, "heartbeat", state, {
     generation: state.generation,
-    sequence: ++state.sequence,
+    sequence: await keepCounters($, state, "sequence"),
     phase: state.question ? "blocked" : state.working || state.activeTurn || state.pendingPrompt ? "working" : state.phase ?? null,
     hasQuestions: !!state.question,
     questionId: state.question ?? null,
@@ -152,8 +151,13 @@ export function register(on) {
   on("prompt.submit", async ($, event, next) => {
     const state = await current($);
     state.pendingPrompt = true;
-    // Every prompt Claude Code takes, typed mid-turn and queued included; see `stageAction`.
-    state.submitted = (state.submitted ?? 0) + 1;
+    // Every new input the person sees as typed, mid-turn and queued included; see `stageAction`.
+    // A slash command, a prompt the person does not see as typed, and Claude Code's own notice
+    // that a background task finished, which carries no such mark, are none: only a visible
+    // prompt's row catches up below.
+    if (!event.command && !event.isMeta && event.origin?.kind !== "task-notification") {
+      await keepCounters($, state, "submitted");
+    }
     const owned = state.delivery?.started && reviewqOrigin(event.origin);
     if (!owned) state.inputRevision += 1;
     try {
@@ -230,12 +234,14 @@ export function register(on) {
     const result = await next(event);
     if (!event.agentId && result.uuid === event.uuid && session?.linked
       && !event.message.isMeta && event.message.role === "user") {
-      session.lastPrompt = result.uuid;
-      session.lastPromptTurn = undefined;
-      session.lastPromptManual = event.origin?.kind === "composer" || event.origin?.kind === "bridge";
-      session.inputRevision += 1;
-      session.promptSubmitted = session.submitted;
-      observeInput(session, event, result.uuid);
+      const state = session;
+      state.lastPrompt = result.uuid;
+      state.lastPromptTurn = undefined;
+      state.lastPromptManual = event.origin?.kind === "composer" || event.origin?.kind === "bridge";
+      state.inputRevision += 1;
+      state.promptSubmitted = state.submitted;
+      observeInput(state, event, result.uuid);
+      await keepCounters($, state);
     }
     return result;
   });
@@ -253,15 +259,27 @@ export function register(on) {
     on("tool.call", { tool }, async ($, event) => callLedger($, event.agentId ? session : await workflowLead($), event));
   }
 
+  // A main-loop call that asks the person reports at once, without holding the check. ReviewQ
+  // stores a permission request that arrives while it cannot tell whether this companion still
+  // runs, and binds it to the step the next report names, so that report lands while the dialog
+  // is up. A subagent's permission request is not reported, so its calls are left alone.
+  on("tool.check", async ($, event, next) => {
+    const verdict = await next(event);
+    const state = session;
+    if (verdict?.decision === "ask" && !event.agentId && state?.linked) {
+      void heartbeat($, state, false).catch(() => {});
+    }
+    return verdict;
+  });
+
   on("tool.call", { tool: "AskUserQuestion" }, async ($, event, next) => {
     if (event.agentId || !session?.linked) return next(event);
     const state = session;
-    return observeQuestion($, state, event, next, () => { if (state === session) schedule($); });
-  });
-
-  on("classic.PermissionRequest", { tool_name: "AskUserQuestion" }, async ($, event, next) => {
-    const state = session;
-    return answerQuestion($, state, event, next, () => heartbeat($, state, false), () => state === session);
+    return observeQuestion($, state, event, next, {
+      refresh: () => { if (state === session) schedule($); },
+      heartbeat: () => heartbeat($, state, false),
+      current: () => state === session,
+    });
   });
 
   on("session.end", async ($, event, next) => {

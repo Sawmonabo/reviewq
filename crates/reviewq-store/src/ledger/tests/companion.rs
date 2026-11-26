@@ -1,6 +1,6 @@
 //! The restarted Claude companion of `publish_is_conditional`'s run: unknown after a restart,
 //! a permission prompt stored unbound and when a report binds it, and when the process
-//! hosting the companion is proven dead.
+//! hosting the companion is proven dead, and when a link needs the companion's proof.
 
 use std::time::Duration;
 
@@ -78,9 +78,17 @@ pub(super) async fn restarted_companion(store: &SqliteStore) {
     store.companions.stopped_for(Duration::from_secs(60));
     store.end_companions().await.unwrap();
     assert_eq!(lead_idle(store).await, [false]);
+    // A link of the session needs the companion's proof while the companion is unknown, and
+    // none once it is gone.
+    let link = async |proof| {
+        let session = "claude:lead".parse().unwrap();
+        store.prove_claude_companion(session, proof, true).await
+    };
+    assert!(matches!(link(None).await, Err(AppError::Unauthorized)));
     sql(store, "UPDATE claude_companions SET host_pid=4294967295").await;
     store.end_companions().await.unwrap();
     assert_eq!(lead_idle(store).await, [true]);
+    link(None).await.unwrap();
     let late = heartbeat(store, &lead, report(&one, 2, HostPhase::Working, "turn-3")).await;
     assert!(matches!(late, Err(AppError::StaleRevision)));
     assert_eq!(lead_idle(store).await, [true]);

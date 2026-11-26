@@ -9,7 +9,12 @@ function signature(questions) {
   return encoded.length <= 42 * 1024 ? encoded : undefined;
 }
 
-export async function observeQuestion($, state, event, next, refresh) {
+// Watches the main loop's AskUserQuestion call. While Claude Code shows its dialog, ReviewQ's
+// dashboard may answer the same question: the first answer stands, and an answer from the
+// dashboard settles the call in the dialog's place, which closes it. This runs at `tool.call`,
+// which reaches the module. A plugin seated above, as Claude Code's built-in security plugin can
+// be, may pass classic events, the permission request among them, on past a user plugin's module.
+export async function observeQuestion($, state, event, next, { refresh, heartbeat, current }) {
   const callId = event.tool_use_id;
   const prior = state.questionCalls.get(callId);
   if (prior) {
@@ -22,6 +27,7 @@ export async function observeQuestion($, state, event, next, refresh) {
   refresh();
   let status = "closed";
   let nativeAnswers;
+  const stop = new AbortController();
   try {
     const turnId = state.activeTurn;
     if (turnId && question.signature && !event.answers && !event.annotations) {
@@ -37,13 +43,27 @@ export async function observeQuestion($, state, event, next, refresh) {
         // The native question still runs when its transcript is unavailable.
       }
     }
-    const result = await next(event);
+    const active = () => current() && !question.ambiguous && !next.signal.aborted && !stop.signal.aborted &&
+      state.activeTurn === question.address.turnId && state.questionCalls.get(callId) === question;
+    const native = next(event).then(result => ({ result }));
+    // A dialog closed by the dashboard's answer may still reject after the hook returned.
+    native.catch(() => {});
+    const answered = question.address ? remoteAnswer($, state, question, event.questions, active, heartbeat, stop.signal) : undefined;
+    const first = answered ? await Promise.race([native, answered]) : await native;
+    if (first.answers && active()) {
+      status = "answered";
+      nativeAnswers = first.answers;
+      return { result: { questions: event.questions, answers: first.answers } };
+    }
+    stop.abort();
+    const { result } = first.result ? first : await native;
     if (!result.deny && !result.isError) {
       nativeAnswers = result.result?.answers;
       status = Object.keys(nativeAnswers ?? {}).length || result.result?.response ? "answered" : "unavailable";
     }
     return result;
   } finally {
+    stop.abort();
     state.questionCalls.delete(callId);
     if (state.question === callId) state.question = state.questionCalls.keys().next().value;
     if (question.waiting) await invoke($, "question-finished", state, { address: question.address, status, nativeAnswers });
@@ -51,30 +71,15 @@ export async function observeQuestion($, state, event, next, refresh) {
   }
 }
 
-export async function answerQuestion($, state, event, next, heartbeat, current) {
-  const input = event.tool_input;
-  if (event.tool_name !== "AskUserQuestion" || !state?.linked || event.session_id !== state.id ||
-      event.agent_id || input?.answers || input?.annotations) {
-    return next(event);
-  }
-  const encoded = signature(input?.questions);
-  if (!encoded) return next(event);
-  // The classic callback omits the tool-use ID. Bind it only to a unique open
-  // tool call with this unchanged input and the exact native assistant opening.
-  const matching = () => [...state.questionCalls.values()].filter(question => question.signature === encoded);
-  const [question, ...otherCalls] = matching();
-  if (!question?.address || question.ambiguous || otherCalls.length || question.waiting) return next(event);
-  const active = () => current() && !question.ambiguous && !next.signal.aborted && state.activeTurn === question.address.turnId &&
-    matching().length === 1 && state.questionCalls.get(question.address.callId) === question;
+// The dashboard's answers to `question`, or nothing once it cannot answer: the dialog then
+// stays the only way to answer.
+async function remoteAnswer($, state, question, questions, active, heartbeat, signal) {
   question.waiting = true;
   try {
     await heartbeat();
-    if (active()) {
-      const answers = await waitForQuestion($, state, question.address, input.questions);
-      if (answers && active()) return { decision: { behavior: "allow", updatedInput: { ...input, answers } } };
-    }
+    if (!active()) return {};
+    return { answers: await waitForQuestion($, state, question.address, questions, signal) };
   } catch {
-    // The terminal permission flow stays available through disconnect and timeout.
+    return {};
   }
-  return next(event);
 }

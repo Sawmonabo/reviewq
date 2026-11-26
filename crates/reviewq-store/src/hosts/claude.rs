@@ -274,18 +274,23 @@ impl ClaudeStore for SqliteStore {
         &self,
         session: reviewq_domain::identity::SessionKey,
         proof: Option<[u8; 32]>,
+        admit_gone: bool,
     ) -> AppFuture<'_, ()> {
         Box::pin(async move {
             self.read(move |db| {
-                let (stored, known): (Option<Vec<u8>>, bool) = db
+                let (stored, gone, known): (Option<Vec<u8>>, Option<bool>, bool) = db
                     .prepare_cached(
                         "SELECT (SELECT proof_sha256 FROM claude_companions WHERE session_key=?1),
+                           (SELECT reviewq_companion_gone(seen_at_ms) FROM claude_companions WHERE session_key=?1),
                            EXISTS(SELECT 1 FROM sessions WHERE session_key=?1)",
                     )?
-                    .query_row([session.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))?;
+                    .query_row([session.as_str()], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                    })?;
                 match stored {
                     Some(stored) if proof.is_some_and(|proof| stored == proof) => Ok(()),
-                    None if !known => Ok(()),
+                    Some(_) if admit_gone && gone == Some(true) => Ok(()),
+                    None if admit_gone || !known => Ok(()),
                     _ => Err(AppError::Unauthorized.into()),
                 }
             })

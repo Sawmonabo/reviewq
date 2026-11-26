@@ -1,4 +1,5 @@
 import { invoke } from "./bridge.js";
+import { keepCounters } from "./companion.js";
 
 const MAX_TRACKED = 2_048;
 const MAX_INSPECTED = 64;
@@ -61,7 +62,7 @@ function needsAttempt(previous, signature) {
 
 async function observe($, state, metadata, signature, previous) {
   const same = previous?.signature === signature;
-  const sequence = same ? previous.sequence : ++state.childSequence;
+  const sequence = same ? previous.sequence : await keepCounters($, state, "childSequence");
   const result = await invoke($, "hook", state, {
     ...metadata,
     generation: state.generation,

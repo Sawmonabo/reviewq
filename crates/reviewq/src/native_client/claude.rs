@@ -3,6 +3,7 @@ use std::path::Path;
 
 use reviewq_app::hosts::{ClaudeHost, ClaudeQuestionAnswers, claude_answer_digest};
 use reviewq_domain::identity::NativeSessionId;
+use reviewq_domain::session::HostProvider;
 use reviewq_protocol::deadlines::tool_deadline;
 use reviewq_protocol::ledger::{
     LedgerBinding, LedgerRequest, LedgerTool, MAX_LEDGER_RESULT_BYTES, MAX_TOOL_INPUT_BYTES,
@@ -75,7 +76,7 @@ pub(crate) async fn claude_bridge(
     }
     match operation {
         ClaudeBridgeOperation::Action | ClaudeBridgeOperation::ActionStatus => {
-            fields.insert("sessionKey".into(), session_key(&native).into());
+            fields.insert("sessionKey".into(), session_key(&native)?.into());
         }
         _ => {
             fields.insert(
@@ -234,8 +235,8 @@ fn action_refusal(declare: bool, reply: &[u8]) -> &'static str {
 }
 
 /// ReviewQ's key for a linked Claude session.
-fn session_key(native: &NativeSessionId) -> String {
-    format!("claude:{native}")
+fn session_key(native: &NativeSessionId) -> Result<String, Failure> {
+    Ok(HostProvider::Claude.session_key(native)?.to_string())
 }
 
 /// One ledger tool call as the plugin writes it on stdin.
@@ -267,7 +268,7 @@ async fn ledger(profile: &Path, native: &NativeSessionId) -> Result<(), Failure>
     let tool = LedgerTool::from_name(&call.tool).ok_or("Unknown ReviewQ ledger tool.")?;
     let body = serde_json::to_vec(&LedgerRequest {
         binding: LedgerBinding {
-            session_key: SessionKeyDto::new(session_key(native))
+            session_key: SessionKeyDto::new(session_key(native)?)
                 .ok_or("Invalid Claude session.")?,
             call_id: call.call_id,
             turn_id: call.turn_id,
@@ -317,7 +318,6 @@ struct ClassicInput {
     agent_id: Option<String>,
     notification_type: Option<String>,
     tool_name: Option<String>,
-    message_id: Option<String>,
     index: Option<u64>,
     #[serde(rename = "final")]
     final_chunk: Option<bool>,
@@ -347,15 +347,9 @@ pub(crate) async fn claude_hook(profile: &Path) -> Result<(), Failure> {
         "Notification" if hook.notification_type.as_deref() == Some("permission_prompt") => {
             (serde_json::json!({"kind": "permission_pending"}), None)
         }
-        "MessageDisplay" if hook.index == Some(0) || hook.final_chunk == Some(true) => (
-            serde_json::json!({
-                "kind": "display",
-                "messageId": hook.message_id.ok_or("Missing native display message.")?,
-                "index": hook.index.ok_or("Missing native display sequence.")?,
-                "finalChunk": hook.final_chunk.unwrap_or(false),
-            }),
-            None,
-        ),
+        "MessageDisplay" if hook.index == Some(0) || hook.final_chunk == Some(true) => {
+            (serde_json::json!({"kind": "display"}), None)
+        }
         "Stop" => (
             serde_json::json!({
                 "kind": "stopping",

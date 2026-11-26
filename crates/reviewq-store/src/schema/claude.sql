@@ -64,12 +64,3 @@ CREATE TABLE claude_children (
     companion_generation TEXT NOT NULL CHECK (length(companion_generation)=32),
     sequence INTEGER NOT NULL CHECK (sequence>0)
 ) STRICT, WITHOUT ROWID;
-
-CREATE TABLE claude_display_events (
-    session_key TEXT NOT NULL REFERENCES claude_companions(session_key),
-    turn_id TEXT NOT NULL,
-    display_id TEXT NOT NULL,
-    first_seen INTEGER NOT NULL DEFAULT 0 CHECK (first_seen IN (0,1)),
-    final_seen INTEGER NOT NULL DEFAULT 0 CHECK (final_seen IN (0,1)),
-    PRIMARY KEY (session_key,turn_id,display_id)
-) STRICT, WITHOUT ROWID;

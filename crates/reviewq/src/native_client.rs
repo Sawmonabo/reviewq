@@ -120,8 +120,19 @@ pub(crate) async fn claude(
     profile: &Path,
     session_id: String,
     target: Option<String>,
+    proof_stdin: bool,
 ) -> Result<(), Failure> {
     let native: NativeSessionId = session_id.parse()?;
+    let proof = if proof_stdin {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Proof {
+            proof: String,
+        }
+        Some(serde_json::from_slice::<Proof>(&read_input(1024)?)?.proof)
+    } else {
+        None
+    };
     let endpoint = runtime::read_native_endpoint(profile)?;
     let client = client()?;
     let cwd = std::env::current_dir()?.canonicalize()?;
@@ -134,9 +145,22 @@ pub(crate) async fn claude(
         "target": target,
     }))?;
     let (linked, pending_launch, message, rule) = if target.is_some() {
-        let linked =
-            link_result(bridge(&client, &endpoint, "/api/v1/native/claude/link", body).await?)
-                .await?;
+        // A link of a session whose companion is live must carry that companion's proof.
+        let headers = match &proof {
+            Some(proof) => endpoint.companion_headers(proof)?,
+            None => endpoint.bridge_headers()?,
+        };
+        let linked = link_result(
+            bridge_as(
+                &client,
+                &endpoint,
+                "/api/v1/native/claude/link",
+                body,
+                headers,
+            )
+            .await?,
+        )
+        .await?;
         (
             true,
             false,
@@ -233,6 +257,7 @@ async fn link_result(response: reqwest::Response) -> Result<Linked, Failure> {
     let bytes = bounded(response, 16 * 1024).await?;
     if !status.is_success() {
         let message = match status.as_u16() {
+            401 => "ReviewQ did not accept the credential for this link.",
             404 => "The native conversation or requested review could not be verified.",
             409 => {
                 if let Ok(ambiguity) = serde_json::from_slice::<AmbiguousTarget>(&bytes) {

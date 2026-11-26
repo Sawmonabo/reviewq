@@ -101,6 +101,9 @@ enum Internal {
         session_id: String,
         #[arg(long, allow_hyphen_values = true)]
         target: Option<String>,
+        /// Read the plugin's companion proof from standard input as `{"proof": ...}`.
+        #[arg(long)]
+        proof_stdin: bool,
     },
 }
 
@@ -287,8 +290,18 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
             native_client::claude_bridge(&runtime::profile(options.profile)?, operation, session_id)
                 .await
         }
-        Some(Command::Internal(Internal::ClaudeCompanion { session_id, target })) => {
-            native_client::claude(&runtime::profile(options.profile)?, session_id, target).await
+        Some(Command::Internal(Internal::ClaudeCompanion {
+            session_id,
+            target,
+            proof_stdin,
+        })) => {
+            native_client::claude(
+                &runtime::profile(options.profile)?,
+                session_id,
+                target,
+                proof_stdin,
+            )
+            .await
         }
         Some(Command::Open(open)) => service::open(options.profile, open).await,
         None => service::open(options.profile, Open::default()).await,

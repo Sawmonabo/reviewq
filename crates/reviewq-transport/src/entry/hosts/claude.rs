@@ -145,8 +145,8 @@ async fn heartbeat(
 
 /// Admits a request that only the Claude plugin's module can make for `session`: one carrying
 /// the proof its companion's generation registered with its first heartbeat. Every request of
-/// the module passes here but the registration and the heartbeat, which registers and matches
-/// the proof itself. The plugin's command hooks run outside the module and carry none.
+/// the module passes here but the registration, the link and the heartbeat, which registers and
+/// matches the proof itself. The plugin's command hooks run outside the module and carry none.
 pub(in crate::entry) async fn require_companion(
     entry: &Entry,
     headers: &HeaderMap,
@@ -155,7 +155,26 @@ pub(in crate::entry) async fn require_companion(
     let proof = companion_proof(headers)?;
     entry
         .store
-        .prove_claude_companion(session.clone(), proof)
+        .prove_claude_companion(session.clone(), proof, false)
+        .await
+}
+
+/// Admits a link of the session `binding` names: while its companion is live or unknown, only a
+/// link carrying that companion's proof, so another process cannot move the session to another
+/// review. A session whose companion is gone, or that has none yet, links as it is.
+pub(in crate::entry) async fn require_companion_to_link(
+    entry: &Entry,
+    headers: &HeaderMap,
+    binding: &NativeBinding,
+) -> Result<(), AppError> {
+    let identity = binding.identity();
+    let session = identity
+        .provider()
+        .session_key(identity.native_id())
+        .map_err(|_| AppError::InvalidRequest)?;
+    entry
+        .store
+        .prove_claude_companion(session, companion_proof(headers)?, true)
         .await
 }
 

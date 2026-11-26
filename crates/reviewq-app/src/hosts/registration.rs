@@ -1,5 +1,5 @@
 use reviewq_domain::identity::{MrIdentity, ReviewId, Revision};
-use reviewq_domain::session::{HostProvider, LeadTarget};
+use reviewq_domain::session::LeadTarget;
 
 use crate::access::{Actor, AppError};
 use crate::events::Snapshot;
@@ -37,12 +37,10 @@ pub async fn register_proven(
     expected_settings: Revision,
 ) -> Result<Snapshot<LeadTarget>, AppError> {
     let identity = proof.binding.identity();
-    let session_key = match identity.provider() {
-        HostProvider::Codex => identity.native_id().as_str().to_owned(),
-        HostProvider::Claude => format!("claude:{}", identity.native_id()),
-    }
-    .parse()
-    .map_err(|_| AppError::InvalidRequest)?;
+    let session_key = identity
+        .provider()
+        .session_key(identity.native_id())
+        .map_err(|_| AppError::InvalidRequest)?;
     store
         .register_lead(
             Actor::native_session(identity.clone()),

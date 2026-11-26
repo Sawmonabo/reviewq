@@ -398,10 +398,10 @@ fn register_bound(
     }
     let native = proof.binding.identity();
     let source = source_for_review(&tx.sql, &bound.review)?;
-    let session_key = match native.provider() {
-        HostProvider::Codex => parse(native.native_id().as_str())?,
-        HostProvider::Claude => parse(&format!("claude:{}", native.native_id()))?,
-    };
+    let session_key = native
+        .provider()
+        .session_key(native.native_id())
+        .map_err(|_| AppError::Internal)?;
     let registered = crate::hosts::register(
         tx,
         actor,

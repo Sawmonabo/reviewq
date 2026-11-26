@@ -59,8 +59,9 @@ pub(crate) struct ClaudeOpening {
 /// is a conflict, and so is a newer input after the entry: one the user typed while the turn ran
 /// and Claude still holds (`queue-operation` enqueue) or has handed the model mid-turn (a
 /// `queued_command` attachment). Claude Code's own task notifications travel the same queue
-/// and are no input: a queued one carries no origin and the `task-notification` mode, and its
-/// text is one `<task-notification>` element.
+/// and are no input: a queued one carries the `task-notification` mode with no origin or a
+/// `task-notification` one, and its text is one `<task-notification>` element. A queued slash
+/// command is no input either: its queue entry holds no text.
 pub(crate) fn claude_workflow_opening(
     session: &HistorySession,
     call_id: &str,
@@ -104,11 +105,13 @@ fn scan(source: &Source, call_id: &str, cancelled: &AtomicBool) -> Result<Claude
                     .any(|record| record["tool_name"] != ACTION_TOOL),
                 "attachment" => row.attachment.as_ref().is_some_and(|a| {
                     a["type"] == "queued_command"
-                        && !(a["commandMode"] == "task-notification" && a["origin"].is_null())
+                        && !(a["commandMode"] == "task-notification"
+                            && (a["origin"].is_null()
+                                || a["origin"]["kind"] == "task-notification"))
                 }),
                 "queue-operation" if row.operation.as_deref() == Some("enqueue") => {
                     match dequeued.iter().position(|text| *text == row.content) {
-                        _ if host_notice(&row.content) => false,
+                        _ if host_notice(&row.content) || row.content.is_null() => false,
                         Some(index) => {
                             dequeued.swap_remove(index);
                             false
@@ -212,7 +215,8 @@ mod tests {
 
     /// The rows Claude Code 2.1.332 writes in a typed turn while `review_action` runs: the
     /// prompt, a finished ToolSearch call, and the running calls named only in
-    /// `data-flow-records`; then a message the user types while the turn still runs.
+    /// `data-flow-records`; then a background task's notice and a queued slash command, which
+    /// change nothing, and a message the user types while the turn still runs.
     #[test]
     fn the_scan_admits_only_a_running_action_call_under_the_latest_input() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -254,6 +258,24 @@ mod tests {
                 Err(AppError::Conflict)
             ));
         }
+        // A background task's notice handed to the running turn, and a slash command the user
+        // queued, are no input.
+        let notice = "<task-notification>\n<task-id>b39f5cubq</task-id>\n<status>completed</status>\n</task-notification>";
+        for row in [
+            json!({"type":"queue-operation","operation":"enqueue","sessionId":"session",
+                   "timestamp":"2026-11-26T08:53:32.485Z","content":notice}),
+            json!({"type":"attachment","uuid":"notice","sessionId":"session","isSidechain":false,
+                   "attachment":{"type":"queued_command","prompt":notice,"commandMode":"task-notification",
+                                 "origin":{"kind":"task-notification","producer":"session-task"}}}),
+            json!({"type":"queue-operation","operation":"enqueue","sessionId":"session",
+                   "timestamp":"2026-11-26T08:53:41.740Z"}),
+        ] {
+            writeln!(file, "{row}").unwrap();
+        }
+        assert_eq!(
+            scan(&source, "toolu_action", &cancelled).unwrap().position,
+            prompt_end
+        );
         let queued = json!({"type":"queue-operation","operation":"enqueue","sessionId":"session",
                             "timestamp":"2026-11-26T08:54:03.487Z","content":"Wait, do not approve it."});
         writeln!(file, "{queued}").unwrap();

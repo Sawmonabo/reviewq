@@ -232,13 +232,8 @@ struct ClassicHook {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Classic {
     PermissionPending,
-    Display {
-        #[serde(rename = "messageId")]
-        message_id: String,
-        index: u64,
-        #[serde(rename = "finalChunk")]
-        final_chunk: bool,
-    },
+    /// Claude's `MessageDisplay` hook, for the first or the last chunk of a message.
+    Display,
     /// Claude's `Stop` hook. Answered with the gate's reply; `stopHookActive` is the hook
     /// input's `stop_hook_active`, true when this stop follows a block.
     Stopping {
@@ -309,15 +304,7 @@ pub(super) async fn hook(
                 Classic::Disconnected { generation } => {
                     ClaudeClassicEvent::Disconnected { generation }
                 }
-                Classic::Display {
-                    message_id,
-                    index,
-                    final_chunk,
-                } => ClaudeClassicEvent::Display {
-                    message: parse(&message_id)?,
-                    index,
-                    final_chunk,
-                },
+                Classic::Display => ClaudeClassicEvent::Display,
             };
             let (lead, _) = verified_context(&entry, call.context).await?;
             // Claude Code runs the plugin's command hooks as processes that cannot hold the
