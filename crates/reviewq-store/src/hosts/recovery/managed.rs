@@ -7,7 +7,6 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::StoreError;
 use crate::connection::{WriteTx, read_head};
 use crate::events::now_ms;
-use crate::hosts::claude::COMPANION_FRESH_MS;
 use crate::queue::{lead_for_run, parse};
 
 use super::{cancel_interrupted, emit};
@@ -175,15 +174,12 @@ fn fresh_claude_turn(
     let turn: Option<String> = db
         .query_row(
             "SELECT c.turn_id FROM claude_companions c JOIN sessions s USING(session_key)
-         WHERE s.run_id=?1 AND c.session_key=?2 AND c.turn_id IS NOT NULL AND c.seen_at_ms>?3
+         WHERE s.run_id=?1 AND c.session_key=?2 AND c.turn_id IS NOT NULL
+           AND reviewq_companion_live(c.seen_at_ms)
            AND s.host_activity IN ('working','blocked')
            AND NOT EXISTS(SELECT 1 FROM claude_turns t
              WHERE t.session_key=c.session_key AND t.turn_id=c.turn_id)",
-            params![
-                target.run_id().as_str(),
-                target.session_key().as_str(),
-                now_ms()?.saturating_sub(COMPANION_FRESH_MS)
-            ],
+            params![target.run_id().as_str(), target.session_key().as_str()],
             |row| row.get(0),
         )
         .optional()?;

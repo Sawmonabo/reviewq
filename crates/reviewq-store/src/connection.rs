@@ -11,6 +11,7 @@ use rusqlite::{Connection, Transaction, TransactionBehavior};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::StoreError;
+use crate::hosts::claude::watch::CompanionWatch;
 
 mod database;
 mod display_cache;
@@ -36,6 +37,8 @@ struct Workers {
 }
 
 pub struct SqliteStore {
+    #[cfg(test)]
+    pub(crate) companions: Arc<CompanionWatch>,
     display_builds: Arc<display_cache::Builds>,
     search_indexes: Arc<search_index::Indexes>,
     identity: StoreIdentity,
@@ -58,7 +61,8 @@ impl SqliteStore {
     /// Creates or verifies and opens a private profile under its exclusive lock.
     pub async fn open(path: AbsolutePath) -> Result<Self, StoreError> {
         tokio::task::spawn_blocking(move || {
-            let (profile, identity, reader, writer) = database::open_profile(&path)?;
+            let companions = Arc::new(CompanionWatch::start());
+            let (profile, identity, reader, writer) = database::open_profile(&path, &companions)?;
             let head = read_head(&reader)?;
             let (wakeup, _) = watch::channel(head);
             let (delivery_wakeup, _) = watch::channel(());
@@ -69,6 +73,8 @@ impl SqliteStore {
             let search_indexes = Arc::new(search_index::Indexes::new(&profile));
             let writer = Worker::start(writer, profile, true)?;
             Ok(Self {
+                #[cfg(test)]
+                companions,
                 display_builds: Arc::new(display_cache::Builds::default()),
                 search_indexes,
                 identity,

@@ -1,5 +1,6 @@
 //! `commit_publish`: one immediate transaction, conditional on the snapshot's guard, that
-//! stores a composed version or an unchanged batch result; and the display index after it.
+//! stores a composed version or a closing call answered with the current version; and the
+//! display index after it.
 
 use reviewq_app::access::AppError;
 use reviewq_app::events::ResourceKey;
@@ -179,7 +180,6 @@ fn close(
         RUN_TARGET,
         guard.sequence,
         &finish_json(&ack, &assessments),
-        time,
     )?;
     if let Some(manifest) = manifest {
         let kind = if version.is_some() {

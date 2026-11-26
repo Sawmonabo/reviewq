@@ -2,9 +2,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::StoreError;
 use crate::events::now_ms;
+use crate::hosts::claude::watch::SILENCE;
 use crate::workspace::queue_revision;
-
-const SESSION_FRESH_MS: i64 = 30_000;
 const COLUMNS: &str = "review_id,run_id,focus_run,focus_session,own,personal_approval,our_comments,
   unread_replies,has_questions,stage_reason,queue_state,full_mr_reviewed_sha,coverage,last_activity,hide_reviewed";
 
@@ -47,9 +46,12 @@ fn rebuild(db: &Connection, revision: i64, now: i64, exists: bool) -> Result<(),
         "INSERT INTO queue_projection SELECT {COLUMNS} FROM review_activity"
     ))?
     .execute([])?;
+    // The projection lasts until the first companion it shows would fall silent. One already
+    // silent while silence does not count yet is unknown and shown as stored, so until the
+    // watch has run long enough the projection is rebuilt at each read.
     let expires: Option<i64> = db.query_row(
-        "SELECT min(seen_at_ms+?1) FROM claude_companions WHERE seen_at_ms>?2",
-        params![SESSION_FRESH_MS, now.saturating_sub(SESSION_FRESH_MS)],
+        "SELECT min(seen_at_ms+?1) FROM claude_companions WHERE NOT reviewq_companion_gone(seen_at_ms)",
+        [SILENCE.as_millis() as i64],
         |row| row.get(0),
     )?;
     db.prepare_cached("INSERT INTO queue_projection_stamp VALUES (?1,?2,?3)")?

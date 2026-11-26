@@ -1,14 +1,17 @@
 use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
-use reviewq_app::access::Actor;
+use reviewq_app::access::{Actor, AppError};
 use reviewq_app::followups::{NextAction, ResultKind};
+use reviewq_app::hosts::ClaudeWorkflowStore;
+use reviewq_app::ledger::publish::{finish_review, settle_due};
 use reviewq_app::ledger::{
     CallBinding, CardSpan, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
-    Composed, FailureRecord, FindingFields, FindingPatch, HostSession, LedgerEntries, LedgerRead,
-    LedgerSelection, LedgerStore, NewVersion, NoteKey, NoteSection, NoteWrite, PublishCommit,
-    PublishOutcome, RecordField, RecordReceipt, RecordWrite, ReportLinks, SectionSpan,
-    SilentSessions, Span, VersionFacts, WriteRefusal,
+    Composed, FailureRecord, FindingAssessment, FindingFields, FindingOutcome, FindingPatch,
+    FinishReceipt, FinishReview, HostSession, LedgerEntries, LedgerRead, LedgerSelection,
+    LedgerStore, NewVersion, NoteKey, NoteSection, NoteWrite, PublishCommit, PublishOutcome,
+    RecordField, RecordReceipt, RecordWrite, ReportLinks, SectionSpan, Span, VersionFacts,
+    WriteRefusal,
 };
 use reviewq_app::notifications::{InboxStore, InboxView, Kind};
 use reviewq_app::reports::{
@@ -262,19 +265,37 @@ fn publish_is_conditional() {
         // The idle lead has not started the delivered batch, so the run does not settle yet.
         select_thread(&store, receipt.as_str()).await;
         assert_eq!(lead_idle(&store).await, [false]);
-        // A working lead with no live companion has ended, unless ReviewQ was not running to
-        // hear it report.
+        // After a restart a companion that has not reported yet is unknown: neither idle for
+        // dispatch nor settled, whatever it last reported, until the watch lets it be gone.
+        store
+            .write(|tx| {
+                tx.sql.execute(
+                    "INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,
+                       turn_id,latest_prompt_manual)
+                     VALUES('claude:lead',printf('%032d',0),1,1000,'turn-1',0)",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let live = async || {
+            let lead = store
+                .read(|db| Ok(crate::queue::lead_for_run(db, &"run".parse().unwrap())?.unwrap()))
+                .await
+                .unwrap();
+            let context = store.claude_workflow_context(lead, None).await.unwrap();
+            (context.active_turn.is_some(), context.idle)
+        };
         activity(&store, "working").await;
-        assert_eq!(lead_idle(&store).await, [true]);
-        assert_eq!(
-            lead_idle_when(&store, SilentSessions::Unknown).await,
-            [false]
-        );
+        assert_eq!(lead_idle(&store).await, [false]);
+        assert_eq!(live().await, (false, false));
         activity(&store, "idle").await;
-        assert_eq!(
-            lead_idle_when(&store, SilentSessions::Unknown).await,
-            [true]
-        );
+        assert_eq!(lead_idle(&store).await, [false]);
+        assert_eq!(live().await, (false, false));
+        store.companions.watched_long_enough();
+        store.end_silent_companions().await.unwrap();
+        assert_eq!(lead_idle(&store).await, [true]);
         let selected = closing(&store, "finish-thread").await;
         assert_eq!(
             selected.snapshot.pass.as_ref().map(|pass| pass.kind),
@@ -333,6 +354,43 @@ fn publish_is_conditional() {
             .await
             .unwrap();
         assert_eq!(completed, ("completed".into(), "unchanged".into()));
+
+        // A full review covers what the lead did since it last closed, even when settling
+        // published an update in between.
+        assess(&store, "assess-1", 1).await;
+        file(&store, "file-2", "Refund skips the ledger lock").await;
+        activity(&store, "idle").await;
+        settle_due(&store).await.unwrap();
+        assert_eq!(versions(&store).await, ["full_review", "update"]);
+        finish_full_review(&store, "close-full").await.unwrap();
+        // A finding on the current version that the lead neither changed nor assessed since
+        // that close still refuses one. An assessment equal to the stored one counts.
+        file(&store, "file-3", "Export drops the currency").await;
+        assert_eq!(untouched(&store, "close-skipped").await, ["F-01", "F-02"]);
+        assess(&store, "assess-1-again", 2).await;
+        assert_eq!(untouched(&store, "close-one-left").await, ["F-02"]);
+        reseverity(&store, "reseverity-2", 1, Severity::P2).await;
+        let closed = finish_full_review(&store, "close-all").await.unwrap();
+        assert_eq!(
+            versions(&store).await,
+            ["full_review", "update", "full_review", "full_review"]
+        );
+        // A closing call answered with the current version still moves where the next full
+        // review starts.
+        assess(&store, "assess-1-equal", 2).await;
+        let input = FinishReview {
+            verdict: None,
+            revision: None,
+            full_review: false,
+            assessments: Vec::new(),
+        };
+        let answered = finish_review(&store, call("close-answered"), input).await;
+        assert_eq!(answered.unwrap().receipt, closed.receipt);
+        reseverity(&store, "reseverity-2-again", 2, Severity::P1).await;
+        assert_eq!(
+            untouched(&store, "close-after-answer").await,
+            ["F-01", "F-03"]
+        );
         store.close(Duration::from_secs(1)).await.unwrap();
     });
 }
@@ -599,18 +657,13 @@ async fn inbox(store: &SqliteStore) -> Vec<Kind> {
 
 /// The settle read's `lead_idle` for each candidate run.
 async fn lead_idle(store: &SqliteStore) -> Vec<bool> {
-    lead_idle_when(store, SilentSessions::Ended).await
-}
-
-/// The same, for what a silent Claude session counts as.
-async fn lead_idle_when(store: &SqliteStore, silent: SilentSessions) -> Vec<bool> {
-    let candidates = store.runs_to_settle(silent).await.unwrap();
+    let candidates = store.runs_to_settle().await.unwrap();
     candidates.iter().map(|run| run.facts.lead_idle).collect()
 }
 
 /// What settling does for each candidate run.
 async fn settlements(store: &SqliteStore) -> Vec<Settlement> {
-    let candidates = store.runs_to_settle(SilentSessions::Ended).await.unwrap();
+    let candidates = store.runs_to_settle().await.unwrap();
     candidates.iter().map(|run| settle(run.facts)).collect()
 }
 
@@ -660,4 +713,87 @@ async fn select_thread(store: &SqliteStore, receipt: &str) {
         })
         .await
         .unwrap();
+}
+
+/// The lead assesses F-01 as still present, expecting `revision`.
+async fn assess(store: &SqliteStore, id: &str, revision: i64) {
+    let assessment = FindingAssessment {
+        id: FindingId::FIRST,
+        expected_revision: RecordRevision::try_from(revision).unwrap(),
+        outcome: FindingOutcome {
+            conclusion: FindingConclusion::StillPresent,
+            reason: "The retry still builds a fresh key.".into(),
+            discussion_ids: Vec::new(),
+            checked_sha: None,
+        },
+    };
+    store
+        .write_record(call(id), RecordWrite::AssessFinding(assessment))
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+/// The lead files a finding like `fields()` titled `title`.
+async fn file(store: &SqliteStore, id: &str, title: &str) {
+    let mut fields = fields();
+    fields.title = title.into();
+    let create = RecordWrite::CreateFinding(Box::new(fields));
+    store.write_record(call(id), create).await.unwrap().unwrap();
+}
+
+/// The lead's `finish_review` with `fullReview`, through the app's closing checks.
+async fn finish_full_review(store: &SqliteStore, id: &str) -> Result<FinishReceipt, AppError> {
+    let input = FinishReview {
+        verdict: Some(Verdict::RequestChanges),
+        revision: Some(RevisionEvidence::Exact(SHA.parse().unwrap())),
+        full_review: true,
+        assessments: Vec::new(),
+    };
+    finish_review(store, call(id), input).await
+}
+
+/// The lead sets F-02's severity, expecting `revision`.
+async fn reseverity(store: &SqliteStore, id: &str, revision: i64, severity: Severity) {
+    let patch = FindingPatch {
+        severity: Some(severity),
+        ..FindingPatch::default()
+    };
+    let change = RecordWrite::ChangeFinding {
+        id: FindingId::FIRST.next().unwrap(),
+        expected_revision: RecordRevision::try_from(revision).unwrap(),
+        patch: Box::new(patch),
+    };
+    store.write_record(call(id), change).await.unwrap().unwrap();
+}
+
+/// The finding IDs a full review closed with `id` names as left untouched, in order.
+async fn untouched(store: &SqliteStore, id: &str) -> Vec<String> {
+    let Err(AppError::InvalidFields(errors)) = finish_full_review(store, id).await else {
+        panic!("a skipped finding is a field error");
+    };
+    errors
+        .iter()
+        .map(|error| error.message[..4].to_owned())
+        .collect()
+}
+
+/// The kinds of the run's versions, oldest first.
+async fn versions(store: &SqliteStore) -> Vec<String> {
+    store
+        .read(|db| {
+            let mut statement = db.prepare(
+                "WITH RECURSIVE chain(run_id, receipt_id, depth) AS (
+                   SELECT run_id, receipt_id, 0 FROM report_heads
+                   UNION ALL SELECT v.run_id, v.parent_receipt_id, c.depth + 1 FROM chain c
+                   JOIN report_versions v USING(run_id, receipt_id)
+                   WHERE v.parent_receipt_id IS NOT NULL)
+                 SELECT v.kind FROM chain c JOIN report_versions v USING(run_id, receipt_id)
+                 ORDER BY c.depth DESC",
+            )?;
+            let kinds = statement.query_map([], |row| row.get(0))?;
+            Ok(kinds.collect::<Result<_, _>>()?)
+        })
+        .await
+        .unwrap()
 }

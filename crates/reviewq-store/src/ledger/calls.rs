@@ -71,7 +71,14 @@ pub(super) fn note_target(key: &NoteKey) -> String {
     format!("note:{}:{}", key.section(), note_title(key))
 }
 
-/// Stores the result of `caller`'s accepted call at the run's ledger sequence.
+/// The ordinal of the last accepted ledger call of the run `run`, an SQL expression, or 0
+/// before its first.
+pub(super) fn last_ordinal(run: &str) -> String {
+    format!("coalesce((SELECT max(o.ordinal) FROM ledger_calls o WHERE o.run_id={run}), 0)")
+}
+
+/// Stores the result of `caller`'s accepted call at the run's ledger sequence, as the run's
+/// next call in order.
 pub(super) fn store(
     db: &Connection,
     caller: &Caller,
@@ -79,13 +86,13 @@ pub(super) fn store(
     target: &str,
     sequence: Revision,
     result: &Value,
-    time: i64,
 ) -> Result<(), StoreError> {
-    db.prepare_cached(
+    db.prepare_cached(&format!(
         "INSERT INTO ledger_calls(provider, native_session, call_id, run_id, tool, target,
-           native_turn_id, sequence, result, accepted_at_ms)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-    )?
+           native_turn_id, sequence, ordinal, result)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, {} + 1, ?9)",
+        last_ordinal("?4")
+    ))?
     .execute(params![
         provider_label(caller.provider()),
         caller.native_session().as_str(),
@@ -96,9 +103,24 @@ pub(super) fn store(
         caller.turn.as_ref().map(|turn| turn.as_str()),
         sequence.as_sqlite_integer(),
         result.to_string(),
-        time
     ])?;
     Ok(())
+}
+
+/// The lead's last accepted closing call on `run`: its stored result, the ledger sequence it
+/// closed at and its ordinal. Every closing call answered with success is stored, including
+/// one answered with the current version.
+pub(super) fn last_closing(
+    db: &Connection,
+    run: &str,
+) -> Result<Option<(String, i64, i64)>, StoreError> {
+    Ok(db
+        .prepare_cached(
+            "SELECT result, sequence, ordinal FROM ledger_calls
+             WHERE run_id=?1 AND tool='finish_review' ORDER BY ordinal DESC LIMIT 1",
+        )?
+        .query_row([run], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .optional()?)
 }
 
 pub(super) fn receipt_json(receipt: &RecordReceipt) -> Value {

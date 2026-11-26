@@ -9,7 +9,6 @@ use rusqlite::{OptionalExtension, params};
 use super::workflow::ensure_lead;
 use crate::StoreError;
 use crate::connection::WriteTx;
-use crate::events::now_ms;
 use crate::queue::parse;
 use crate::workspace::advance_queue;
 
@@ -39,8 +38,8 @@ pub(super) fn record(
         lead.session_key().to_string()
     };
     let live: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM claude_companions WHERE session_key=?1 AND generation=?2 AND seen_at_ms>?3)",
-        params![lead.session_key().as_str(), child.generation, now_ms()?.saturating_sub(30_000)],
+        "SELECT EXISTS(SELECT 1 FROM claude_companions WHERE session_key=?1 AND generation=?2 AND reviewq_companion_live(seen_at_ms))",
+        params![lead.session_key().as_str(), child.generation],
         |row| row.get(0),
     )?;
     let sequence = i64::try_from(child.sequence).map_err(|_| AppError::InvalidRequest)?;

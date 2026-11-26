@@ -12,16 +12,57 @@ use rusqlite::params;
 use super::{activity_columns, allow_target};
 use crate::connection::WriteTx;
 use crate::events::{now_ms, snapshot};
-use crate::queue::lead_for_run;
+use crate::queue::{lead_for_run, parse};
 use crate::workspace::advance_queue;
 use crate::{SqliteStore, StoreError};
-
-pub(super) const COMPANION_FRESH_MS: i64 = 30_000;
 
 mod child;
 mod classic;
 mod delivery;
+pub(crate) mod watch;
 mod workflow;
+
+impl SqliteStore {
+    /// Stores each Claude companion that counts as gone by silence as ended, as a companion
+    /// that reports disconnecting is, and announces each change. Reads first, and opens a
+    /// write only when one timed out. The runtime calls it on its periodic tick.
+    pub async fn end_silent_companions(&self) -> Result<(), AppError> {
+        let silent = self
+            .read(|db| {
+                let mut statement = db.prepare_cached(
+                    "SELECT s.run_id, c.session_key, c.generation
+                     FROM claude_companions c JOIN sessions s USING(session_key)
+                     WHERE c.seen_at_ms<>0 AND reviewq_companion_gone(c.seen_at_ms)",
+                )?;
+                let rows = statement.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get(2)?,
+                    ))
+                })?;
+                let mut silent = Vec::new();
+                for row in rows {
+                    let (run, session, generation): (String, String, String) = row?;
+                    silent.push((parse(&run)?, parse(&session)?, generation));
+                }
+                Ok(silent)
+            })
+            .await
+            .map_err(StoreError::app)?;
+        if silent.is_empty() {
+            return Ok(());
+        }
+        self.write(move |tx| {
+            for (run, session, generation) in &silent {
+                classic::store_ended(tx, run, session, generation, true)?;
+            }
+            Ok(())
+        })
+        .await
+        .map_err(StoreError::app)
+    }
+}
 
 impl ClaudeStore for SqliteStore {
     fn fence_claude_question(
@@ -36,11 +77,10 @@ impl ClaudeStore for SqliteStore {
                 let active: bool = db.prepare_cached(
                     "SELECT EXISTS(SELECT 1 FROM claude_companions c JOIN sessions s USING(session_key)
                      WHERE c.session_key=?1 AND c.generation=?2 AND c.turn_id=?3
-                       AND c.seen_at_ms>?4 AND s.host_activity IN ('working','blocked')
+                       AND reviewq_companion_live(c.seen_at_ms) AND s.host_activity IN ('working','blocked')
                        AND NOT EXISTS(SELECT 1 FROM claude_turns t WHERE t.session_key=c.session_key AND t.turn_id=c.turn_id))",
                 )?.query_row(params![
                     lead.session_key().as_str(), address.generation, address.turn.as_str(),
-                    now_ms()?.saturating_sub(COMPANION_FRESH_MS),
                 ], |row| row.get(0))?;
                 if !active {
                     return Err(AppError::StaleRevision.into());
@@ -78,12 +118,12 @@ impl ClaudeStore for SqliteStore {
                 if lead.binding().identity().provider() != HostProvider::Claude {
                     return Ok(None);
                 }
-                let fresh = db.prepare_cached(
-                    "SELECT EXISTS(SELECT 1 FROM claude_companions WHERE session_key=?1 AND seen_at_ms>?2)",
-                )?.query_row(
-                    params![target.session_key().as_str(),now_ms()?.saturating_sub(COMPANION_FRESH_MS)],
-                    |row| row.get(0),
-                )?;
+                let fresh = db
+                    .prepare_cached(
+                        "SELECT EXISTS(SELECT 1 FROM claude_companions WHERE session_key=?1
+                       AND NOT reviewq_companion_gone(seen_at_ms))",
+                    )?
+                    .query_row([target.session_key().as_str()], |row| row.get(0))?;
                 Ok(Some(fresh))
             })
             .await
@@ -248,12 +288,10 @@ fn heartbeat(
     let now = now_ms()?;
     let was_connected: bool = db
         .prepare_cached(
-            "SELECT EXISTS(SELECT 1 FROM claude_companions WHERE session_key=?1 AND seen_at_ms>?2)",
+            "SELECT EXISTS(SELECT 1 FROM claude_companions WHERE session_key=?1
+               AND NOT reviewq_companion_gone(seen_at_ms))",
         )?
-        .query_row(
-            params![key, now.saturating_sub(COMPANION_FRESH_MS)],
-            |row| row.get(0),
-        )?;
+        .query_row([key], |row| row.get(0))?;
     let recorded = db.execute(
         "INSERT INTO claude_companions(session_key,generation,sequence,seen_at_ms,turn_id,latest_prompt_id,model,effort,latest_prompt_turn_id,latest_prompt_manual,turn_step)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
@@ -267,13 +305,13 @@ fn heartbeat(
             model=excluded.model,effort=excluded.effort,
             latest_prompt_turn_id=excluded.latest_prompt_turn_id,latest_prompt_manual=excluded.latest_prompt_manual
          WHERE (generation=excluded.generation AND sequence<excluded.sequence) OR
-               (generation<>excluded.generation AND seen_at_ms<=?12)",
+               (generation<>excluded.generation AND reviewq_companion_gone(seen_at_ms))",
         params![key, observation.generation, observation.sequence as i64, now,
             observation.turn.as_ref().map(|value| value.as_str()),
             observation.latest_prompt.as_ref().map(|value| value.as_str()),
             observation.model, observation.effort,
             observation.latest_prompt_turn.as_ref().map(|value| value.as_str()),
-            observation.latest_prompt_manual, observation.step.map(|value| value as i64), now.saturating_sub(COMPANION_FRESH_MS)],
+            observation.latest_prompt_manual, observation.step.map(|value| value as i64)],
     )?;
     if recorded == 0 {
         return Err(AppError::StaleRevision.into());

@@ -59,8 +59,8 @@ pub(super) struct PassRow {
     pub(super) state: PassState,
     /// The ledger sequence when it opened.
     pub(super) opened_sequence: i64,
-    /// When it opened, in Unix milliseconds.
-    pub(super) opened_at_ms: i64,
+    /// The ordinal of the run's last accepted ledger call when it opened.
+    pub(super) opened_call: i64,
     pub(super) batch: Option<String>,
     gate_turn: Option<String>,
     gate_blocks: u8,
@@ -72,7 +72,7 @@ pub(super) struct PassRow {
 pub(super) fn current(db: &Connection, run: &str) -> Result<Option<PassRow>, StoreError> {
     let sql = format!(
         "SELECT p.pass_id, p.kind, {PASS_STATE}, p.opened_sequence, p.batch_id, p.gate_turn_id,
-           p.gate_blocks, p.opened_at_ms, p.hold_reason
+           p.gate_blocks, p.opened_call, p.hold_reason
          FROM review_passes p WHERE p.run_id=?1 AND p.state<>'closed'"
     );
     let mut statement = db.prepare_cached(&sql)?;
@@ -89,7 +89,7 @@ pub(super) fn current(db: &Connection, run: &str) -> Result<Option<PassRow>, Sto
         batch: row.get(4)?,
         gate_turn: row.get(5)?,
         gate_blocks: u8::try_from(row.get::<_, i64>(6)?).map_err(|_| AppError::Internal)?,
-        opened_at_ms: row.get(7)?,
+        opened_call: row.get(7)?,
         question: row.get(8)?,
     }))
 }
@@ -143,11 +143,12 @@ pub(super) fn open_for_record(
     opened_sequence: u64,
     time: i64,
 ) -> Result<(), StoreError> {
-    db.prepare_cached(
+    db.prepare_cached(&format!(
         "INSERT INTO review_passes(run_id, kind, state, opened_by, call_id, opened_sequence,
-           opened_at_ms, lead_started_at_ms)
-         VALUES(?1, ?2, 'open', 'record', ?3, ?4, ?5, ?5) ON CONFLICT DO NOTHING",
-    )?
+           opened_call, lead_started_at_ms)
+         VALUES(?1, ?2, 'open', 'record', ?3, ?4, {}, ?5) ON CONFLICT DO NOTHING",
+        calls::last_ordinal("?1")
+    ))?
     .execute(params![
         run,
         PassKind::FullReview.as_str(),
@@ -172,11 +173,12 @@ fn started_at_open(run: &str, time: &str) -> String {
 /// confirmation transaction; opens nothing when the launch is not confirmed or bound to a run.
 pub(crate) fn open_for_launch(db: &Connection, launch: &str, time: i64) -> Result<(), StoreError> {
     let started = started_at_open("l.run_id", "?3");
+    let call = calls::last_ordinal("l.run_id");
     db.prepare_cached(&format!(
         "INSERT INTO review_passes(run_id, kind, state, opened_by, launch_id, opened_sequence,
-           opened_at_ms, lead_started_at_ms)
+           opened_call, lead_started_at_ms)
          SELECT l.run_id, ?2, 'open', 'launch', l.id,
-           coalesce((SELECT sequence FROM ledger_runs s WHERE s.run_id=l.run_id), 0), ?3, {started}
+           coalesce((SELECT sequence FROM ledger_runs s WHERE s.run_id=l.run_id), 0), {call}, {started}
          FROM launch_attempts l WHERE l.id=?1 AND l.state='confirmed' AND l.run_id IS NOT NULL
          ON CONFLICT DO NOTHING"
     ))?
@@ -199,11 +201,12 @@ pub(crate) fn open_for_batch(
     )?
     .execute(params![review.as_str(), batch, time])?;
     let started = started_at_open("b.run_id", "?4");
+    let call = calls::last_ordinal("b.run_id");
     db.prepare_cached(&format!(
         "INSERT INTO review_passes(run_id, kind, state, opened_by, review_id, batch_id,
-           opened_sequence, opened_at_ms, lead_started_at_ms)
+           opened_sequence, opened_call, lead_started_at_ms)
          SELECT b.run_id, ?3, 'open', 'batch', b.review_id, b.batch_id,
-           coalesce((SELECT sequence FROM ledger_runs s WHERE s.run_id=b.run_id), 0), ?4, {started}
+           coalesce((SELECT sequence FROM ledger_runs s WHERE s.run_id=b.run_id), 0), {call}, {started}
          FROM followup_batches b WHERE b.review_id=?1 AND b.batch_id=?2 AND b.state='executing'
          ON CONFLICT DO NOTHING"
     ))?
@@ -373,7 +376,6 @@ pub(super) fn hold(
         RUN_TARGET,
         sequence(db, run)?,
         &result,
-        time,
     )?;
     if let Some(occurrence) = occurrence {
         let notification = insert_notification(

@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek};
 use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
@@ -16,6 +17,7 @@ use super::profile::Profile;
 use super::staging::{self, Stage};
 use super::wal;
 use crate::StoreError;
+use crate::hosts::claude::watch::{self, CompanionWatch};
 
 const SCHEMA: &str = concat!(
     include_str!("../schema.sql"),
@@ -70,8 +72,11 @@ pub struct StoreIdentity {
     pub store_id: Uuid,
 }
 
+/// Opens the profile's writer and reader, with `companions` answering
+/// `reviewq_companion_live()` and `reviewq_companion_gone()` on both.
 pub(super) fn open_profile(
     path: &AbsolutePath,
+    companions: &Arc<CompanionWatch>,
 ) -> Result<(Profile, StoreIdentity, Connection, Connection), StoreError> {
     let profile = Profile::resolve(path)?;
     profile.try_lock()?;
@@ -86,6 +91,7 @@ pub(super) fn open_profile(
 
     let writer = Connection::open_with_flags(profile.path(), WRITE_FLAGS)?;
     configure(&writer, false)?;
+    watch::register(&writer, companions)?;
     let mode = writer.query_row("PRAGMA journal_mode = WAL", [], |row| {
         row.get::<_, String>(0)
     })?;
@@ -98,6 +104,7 @@ pub(super) fn open_profile(
     writer.pragma_update(None, "synchronous", "FULL")?;
     let reader = Connection::open_with_flags(profile.path(), READ_FLAGS)?;
     configure(&reader, true)?;
+    watch::register(&reader, companions)?;
     Ok((profile, identity, reader, writer))
 }
 

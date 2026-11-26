@@ -214,9 +214,9 @@ pub struct ClosingCommit {
     pub summary: ClosingSummary,
     /// Only in a selected-thread pass.
     pub assessments: Vec<Assessment>,
-    /// `None` only for a selected-thread pass in which no record changed and the verdict
-    /// equals the current version's. The app decides that, and the batch then completes
-    /// `unchanged` against the current version.
+    /// `None` for a selected-thread pass in which no record changed and the verdict equals the
+    /// current version's, whose batch then completes `unchanged` against the current version,
+    /// and for a call answered with the current version without a pass. The app decides both.
     pub version: Option<NewVersion>,
 }
 

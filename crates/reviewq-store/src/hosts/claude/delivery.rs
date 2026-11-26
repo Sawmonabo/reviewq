@@ -8,7 +8,6 @@ use reviewq_app::workflow::ReadyWorkflow;
 use reviewq_domain::session::LeadTarget;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::COMPANION_FRESH_MS;
 use crate::StoreError;
 use crate::connection::WriteTx;
 use crate::events::now_ms;
@@ -309,8 +308,8 @@ pub(super) fn fresh(
         "SELECT s.host_activity='idle' AND s.host_questions=0,c.model,c.effort,c.latest_prompt_id,
                 c.latest_prompt_turn_id
          FROM claude_companions c JOIN sessions s USING(session_key)
-         WHERE c.session_key=?1 AND c.generation=?2 AND c.seen_at_ms>?3 AND s.run_id=?4",
-        params![lead.session_key().as_str(),generation,now_ms()?.saturating_sub(COMPANION_FRESH_MS),lead.run_id().as_str()],
+         WHERE c.session_key=?1 AND c.generation=?2 AND reviewq_companion_live(c.seen_at_ms) AND s.run_id=?3",
+        params![lead.session_key().as_str(),generation,lead.run_id().as_str()],
         |row| Ok((row.get::<_, Option<bool>>(0)?,row.get::<_, Option<String>>(1)?,row.get::<_, Option<String>>(2)?,
             row.get::<_, Option<String>>(3)?,row.get::<_, Option<String>>(4)?)),
     ).optional()?;

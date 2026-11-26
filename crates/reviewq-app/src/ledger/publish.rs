@@ -17,14 +17,14 @@ use super::passes::findings_on_file;
 use super::record::capitalized;
 use super::refusal::{for_agent, root};
 use super::{
-    CallBinding, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
+    CallBinding, Caller, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
     FailureRecord, FinishReceipt, FinishReview, LedgerSnapshot, LedgerStore, NewVersion,
-    NoteSection, PublishCommit, PublishOutcome, SettleCandidate, SilentSessions, VersionFacts,
+    NoteSection, PublishCommit, PublishOutcome, SettleCandidate, SnapshotGuard, VersionFacts,
 };
 use crate::access::{AppError, FieldError};
 use crate::followups::ResultKind;
 use crate::reports::{
-    Coverage, FindingEdit, ReportEdits, ReportSummary, RevisionEvidence, Verdict,
+    Assessment, Coverage, FindingEdit, ReportEdits, ReportSummary, RevisionEvidence, Verdict,
 };
 
 /// Recomposes after a stale snapshot before a publish gives up.
@@ -52,10 +52,12 @@ const KEPT_CHANGING_FOR_AGENT: &str = "Findings or notes kept changing while Rev
 
 /// Closes the run's review for the lead and publishes, from a snapshot read in one short
 /// transaction and committed conditionally; nothing is held open while composing. A repeat of
-/// an answered call, or a new call that repeats the lead's last closing call with nothing
-/// changed, returns that acknowledgement. A call that would only repeat the current version as
-/// an update returns `unchanged` with that version and writes nothing. After a publish it
-/// builds the display index.
+/// an answered call returns its acknowledgement. A new call that repeats the lead's last
+/// closing call with nothing changed answers that acknowledgement again, and a call that would
+/// only repeat the current version as an update answers `unchanged` with that version; each
+/// publishes nothing but is stored as the lead's accepted closing call, under the same
+/// conditional commit, so the next full review starts after it. After a publish it builds the
+/// display index.
 ///
 /// Fails with `InvalidFields` for anything the lead corrects in its turn: a missing verdict
 /// or revision, `fullReview` or assessments that do not fit the open pass, a revision other
@@ -102,10 +104,11 @@ async fn close(
             }
             ClosingRead::Current(closing) => *closing,
         };
-        if let Some(ack) = repeated(&closing, input).or_else(|| restates_current(&closing, input)) {
-            return Ok(ack);
-        }
-        let prepared = prepare_closing(closing, input)?;
+        let prepared = match repeated(&closing, input).or_else(|| restates_current(&closing, input))
+        {
+            Some(answer) => answered(closing, answer),
+            None => prepare_closing(closing, input)?,
+        };
         match store.commit_publish(prepared.commit).await {
             Ok(PublishOutcome::Published(receipt)) => {
                 // The version is readable without its index, so a failure here is ignored.
@@ -137,16 +140,12 @@ async fn close(
 
 /// Settles every run that may need it from its stored state: publishes the update a run owes,
 /// or records `unfinished_review` for an open pass its idle lead left, or does nothing. Runs at
-/// startup and on the periodic tick, where `silent` says whether ReviewQ has watched long
-/// enough to take a silent Claude session as ended. A run already handled costs one read and
-/// no write, so calls may overlap. One run's error does not stop the others; the first is
-/// returned after all were tried.
-pub async fn settle_due(
-    store: &(impl LedgerStore + ?Sized),
-    silent: SilentSessions,
-) -> Result<(), AppError> {
+/// startup and on the periodic tick. A run already handled costs one read and no write, so
+/// calls may overlap. One run's error does not stop the others; the first is returned after
+/// all were tried.
+pub async fn settle_due(store: &(impl LedgerStore + ?Sized)) -> Result<(), AppError> {
     let mut first = None;
-    for candidate in store.runs_to_settle(silent).await? {
+    for candidate in store.runs_to_settle().await? {
         if let Err(error) = settle_run(store, candidate).await {
             first.get_or_insert(error);
         }
@@ -273,7 +272,7 @@ struct PreparedClosing {
 /// no record changed since, no pass opened, its version is still current, and the call
 /// states nothing other than the current version's verdict, revision and kind or the
 /// assessments that call closed with.
-fn repeated(closing: &ClosingSnapshot, input: &FinishReview) -> Option<FinishReceipt> {
+fn repeated(closing: &ClosingSnapshot, input: &FinishReview) -> Option<Answer> {
     let last = closing.last_closing.as_ref()?;
     let snapshot = &closing.snapshot;
     let parent = snapshot.parent.as_ref()?;
@@ -283,15 +282,18 @@ fn repeated(closing: &ClosingSnapshot, input: &FinishReview) -> Option<FinishRec
     let restated = restates_version(&parent.summary, input)
         && (!input.full_review || parent.kind == VersionKind::FullReview)
         && (input.assessments.is_empty() || input.assessments == last.assessments);
-    (unchanged && restated).then(|| last.ack.clone())
+    (unchanged && restated).then(|| Answer {
+        ack: last.ack.clone(),
+        assessments: last.assessments.clone(),
+    })
 }
 
 /// The `unchanged` acknowledgement, naming the current version, for a closing call that would
 /// publish an update identical to it: no pass is open, no record changed since the current
 /// version, and the call asks for no full review and states no verdict or revision other than
-/// the current version's. Nothing is written. A first version, a full review and a pass's
-/// close always commit.
-fn restates_current(closing: &ClosingSnapshot, input: &FinishReview) -> Option<FinishReceipt> {
+/// the current version's. No version is written. A first version, a full review and a pass's
+/// close always compose.
+fn restates_current(closing: &ClosingSnapshot, input: &FinishReview) -> Option<Answer> {
     let snapshot = &closing.snapshot;
     let parent = snapshot.parent.as_ref()?;
     let receipt = snapshot.guard.head.clone()?;
@@ -300,11 +302,36 @@ fn restates_current(closing: &ClosingSnapshot, input: &FinishReview) -> Option<F
         && input.assessments.is_empty()
         && parent.sequence == snapshot.guard.sequence
         && restates_version(&parent.summary, input);
-    nothing_new.then(|| FinishReceipt {
-        receipt,
-        sha256: parent.summary.reference.hash.clone(),
-        summary: closing_summary(snapshot, ResultKind::Unchanged),
+    nothing_new.then(|| Answer {
+        ack: FinishReceipt {
+            receipt,
+            sha256: parent.summary.reference.hash.clone(),
+            summary: closing_summary(snapshot, ResultKind::Unchanged),
+        },
+        assessments: Vec::new(),
     })
+}
+
+/// A closing call's answer without a new version, and the assessments its stored call keeps.
+struct Answer {
+    ack: FinishReceipt,
+    assessments: Vec<Assessment>,
+}
+
+/// `answer` as a closing commit that stores the call against the current version.
+fn answered(closing: ClosingSnapshot, answer: Answer) -> PreparedClosing {
+    let ClosingSnapshot {
+        caller, snapshot, ..
+    } = closing;
+    let Answer { ack, assessments } = answer;
+    prepared(
+        caller,
+        snapshot.guard,
+        ack.summary,
+        assessments,
+        None,
+        ack.sha256,
+    )
 }
 
 /// Whether the call's verdict and revision, when given, equal the version's.
@@ -366,23 +393,43 @@ fn prepare_closing(
         (ResultKind::Final, Some(version), hash)
     };
     let summary = closing_summary(&snapshot, result);
+    Ok(prepared(
+        caller,
+        snapshot.guard,
+        summary,
+        input.assessments.clone(),
+        version,
+        sha256,
+    ))
+}
+
+/// The conditional commit of `caller`'s closing call on `guard`, with what its
+/// acknowledgement and a refusal need.
+fn prepared(
+    caller: Caller,
+    guard: SnapshotGuard,
+    summary: ClosingSummary,
+    assessments: Vec<Assessment>,
+    version: Option<NewVersion>,
+    sha256: ReportHash,
+) -> PreparedClosing {
     let run = caller.lead.run_id().clone();
     let refusal = FailureRecord {
         run: run.clone(),
-        pass: snapshot.guard.pass,
+        pass: guard.pass,
         kind: FailureKind::ClosingRefused,
         reason: CLOSING_REFUSED.to_owned(),
-        sequence: snapshot.guard.sequence,
+        sequence: guard.sequence,
         turn: caller.turn.clone(),
     };
-    let current = snapshot.guard.head.clone();
-    Ok(PreparedClosing {
+    let current = guard.head.clone();
+    PreparedClosing {
         commit: PublishCommit {
-            guard: snapshot.guard,
+            guard,
             kind: CommitKind::Closing(Box::new(ClosingCommit {
                 call: caller,
                 summary: summary.clone(),
-                assessments: input.assessments.clone(),
+                assessments,
                 version,
             })),
         },
@@ -391,7 +438,7 @@ fn prepare_closing(
         current,
         summary,
         refusal,
-    })
+    }
 }
 
 fn closing_error(error: ClosingError) -> FieldError {

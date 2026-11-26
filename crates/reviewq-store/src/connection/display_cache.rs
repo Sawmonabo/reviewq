@@ -19,7 +19,7 @@ use super::staging::{self, Stage};
 use crate::reports::{read_markdown, version};
 use crate::{SqliteStore, StoreError};
 
-const SUFFIX: &str = ".findings-display-v2";
+const SUFFIX: &str = ".findings-display";
 const APPLICATION_ID: i64 = 0x5256_4644;
 const SCHEMA_VERSION: i64 = 2;
 const PAGE_BYTES: i64 = 4096;

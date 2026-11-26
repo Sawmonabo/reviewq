@@ -118,7 +118,7 @@ pub(super) fn write(
         },
     };
     let result = calls::receipt_json(&receipt);
-    calls::store(db, &caller, tool, &target, sequence, &result, time)?;
+    calls::store(db, &caller, tool, &target, sequence, &result)?;
     if activity_changed {
         advance_queue(&tx.sql)?;
         tx.emit(&[ResourceKey::Queue, ResourceKey::Run(Some(run.clone()))])?;

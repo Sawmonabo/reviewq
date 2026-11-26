@@ -16,7 +16,7 @@ use reviewq_domain::session::LeadTarget;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::calls::{self, finish_from};
-use super::passes::{self, RUN_TARGET};
+use super::passes::{self, PassRow, RUN_TARGET};
 use super::rows::{self, FINDING_COLUMNS, FINDING_WIDTH, NOTE_COLUMNS, section_order};
 use super::{caller, sequence};
 use crate::StoreError;
@@ -63,16 +63,8 @@ pub(super) fn closing(db: &Connection, binding: &CallBinding) -> Result<ClosingR
             )?));
         }
     }
-    let last_closing = db
-        .prepare_cached(
-            "SELECT result, sequence FROM ledger_calls WHERE rowid=(SELECT max(rowid)
-               FROM ledger_calls WHERE run_id=?1 AND tool='finish_review')",
-        )?
-        .query_row([caller.lead.run_id().as_str()], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        })
-        .optional()?
-        .map(|(result, sequence)| {
+    let last_closing = calls::last_closing(db, caller.lead.run_id().as_str())?
+        .map(|(result, sequence, _)| {
             let (ack, assessments) = finish_from(&rows::from_json(&result)?)?;
             Ok::<_, StoreError>(LastClosing {
                 ack,
@@ -140,20 +132,7 @@ fn read(db: &Connection, lead: LeadTarget) -> Result<Option<LedgerSnapshot>, Sto
     let since = parent
         .as_ref()
         .map_or(0, |parent| parent.sequence.as_sqlite_integer());
-    let touched = match &row {
-        Some(row) => Touched {
-            after_sequence: row.opened_sequence,
-            from_ms: row.opened_at_ms,
-        },
-        None => Touched {
-            after_sequence: since,
-            from_ms: head
-                .as_ref()
-                .map(|receipt| published_at(db, run, receipt.as_str()))
-                .transpose()?
-                .unwrap_or(0),
-        },
-    };
+    let touched = Touched::began(db, run, row.as_ref())?;
     let findings = findings(
         db,
         &lead,
@@ -265,22 +244,34 @@ fn thread_notes(
     Ok(notes)
 }
 
-/// Where the work a full review is checked against begins: the open pass's opening, or the
-/// parent version's publication when no pass is open.
+/// Where the work a full review is checked against began, in the run's own order rather than
+/// by time.
 struct Touched {
-    /// A finding whose change sequence is above this was changed or assessed in it.
+    /// A finding whose change sequence is above this was changed or assessed since.
     after_sequence: i64,
-    /// An accepted `record_finding` or `assess_finding` call from this time on also touched
-    /// its finding, even when it equalled the stored record and so advanced nothing.
-    from_ms: i64,
+    /// An accepted `record_finding` or `assess_finding` call with an ordinal above this also
+    /// touched its finding, even when it equalled the stored record and so advanced nothing.
+    after_call: i64,
 }
 
-fn published_at(db: &Connection, run: &str, receipt: &str) -> Result<i64, StoreError> {
-    Ok(db
-        .prepare_cached(
-            "SELECT published_at_ms FROM report_versions WHERE run_id=?1 AND receipt_id=?2",
-        )?
-        .query_row(params![run, receipt], |row| row.get(0))?)
+impl Touched {
+    /// The open pass's opening; with no pass, the lead's last accepted closing call, or the
+    /// run's start when it has none. A version that settling published by itself is no
+    /// closing call, so it does not move the start: what the lead did before it still counts.
+    fn began(db: &Connection, run: &str, pass: Option<&PassRow>) -> Result<Self, StoreError> {
+        if let Some(pass) = pass {
+            return Ok(Self {
+                after_sequence: pass.opened_sequence,
+                after_call: pass.opened_call,
+            });
+        }
+        let (after_sequence, after_call) = calls::last_closing(db, run)?
+            .map_or((0, 0), |(_, sequence, ordinal)| (sequence, ordinal));
+        Ok(Self {
+            after_sequence,
+            after_call,
+        })
+    }
 }
 
 /// Every active finding, every finding on the parent version and every finding changed
@@ -326,9 +317,9 @@ fn findings(
     let called: HashSet<i64> = db
         .prepare_cached(
             "SELECT json_extract(result, '$.id') FROM ledger_calls
-             WHERE run_id=?1 AND tool IN ('record_finding','assess_finding') AND accepted_at_ms>=?2",
+             WHERE run_id=?1 AND tool IN ('record_finding','assess_finding') AND ordinal>?2",
         )?
-        .query_map(params![run, touched.from_ms], |row| row.get(0))?
+        .query_map(params![run, touched.after_call], |row| row.get(0))?
         .collect::<Result<_, _>>()?;
     let sql = format!(
         "SELECT {FINDING_COLUMNS}, f.sequence, f.outcome_sequence

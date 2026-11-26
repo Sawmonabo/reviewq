@@ -100,7 +100,8 @@ CREATE TABLE review_passes (
     batch_id TEXT,
     call_id TEXT CHECK (length(CAST(call_id AS BLOB)) BETWEEN 1 AND 512),
     opened_sequence INTEGER NOT NULL CHECK (opened_sequence >= 0),
-    opened_at_ms INTEGER NOT NULL,
+    -- The ordinal of the run's last accepted ledger call when it opened, 0 before any.
+    opened_call INTEGER NOT NULL CHECK (opened_call >= 0),
     -- When the lead was first seen starting a turn for this pass. Settling waits for it.
     lead_started_at_ms INTEGER,
     held_turn_id TEXT CHECK (length(CAST(held_turn_id AS BLOB)) BETWEEN 1 AND 512),
@@ -136,14 +137,14 @@ CREATE TABLE ledger_calls (
     target TEXT NOT NULL CHECK (length(CAST(target AS BLOB)) BETWEEN 1 AND 512),
     native_turn_id TEXT CHECK (length(CAST(native_turn_id AS BLOB)) BETWEEN 1 AND 512),
     sequence INTEGER NOT NULL CHECK (sequence >= 0),
+    -- The order the run's calls were accepted in, from 1.
+    ordinal INTEGER NOT NULL CHECK (ordinal > 0),
     result TEXT NOT NULL CHECK (json_valid(result)),
-    accepted_at_ms INTEGER NOT NULL,
     PRIMARY KEY (provider, native_session, call_id)
 ) STRICT;
 
 CREATE INDEX ledger_call_closing ON ledger_calls(run_id, native_turn_id) WHERE tool = 'finish_review';
-CREATE INDEX ledger_call_findings ON ledger_calls(run_id, accepted_at_ms)
-    WHERE tool IN ('record_finding', 'assess_finding');
+CREATE UNIQUE INDEX ledger_call_order ON ledger_calls(run_id, ordinal);
 
 -- One row once Codex's stop hook has reported on this installation.
 CREATE TABLE codex_stop_hook_reported (

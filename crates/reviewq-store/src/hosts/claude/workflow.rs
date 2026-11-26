@@ -4,9 +4,8 @@ use reviewq_domain::identity::NativeTurnId;
 use reviewq_domain::session::{HostProvider, LeadTarget};
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::{COMPANION_FRESH_MS, delivery::fresh};
+use super::delivery::fresh;
 use crate::connection::WriteTx;
-use crate::events::now_ms;
 use crate::history::history_session;
 use crate::hosts::allow_target;
 use crate::queue::{lead_for_run, parse};
@@ -60,8 +59,8 @@ fn context(
            coalesce(s.host_activity='idle' AND s.host_questions=0 AND c.permission_turn_id IS NULL,0),
            CASE WHEN s.host_activity='working' AND c.turn_id=c.latest_prompt_turn_id THEN c.latest_prompt_id END
          FROM claude_companions c JOIN sessions s USING(session_key)
-         WHERE c.session_key=?1 AND c.seen_at_ms>?2",
-            params![key, now_ms()?.saturating_sub(COMPANION_FRESH_MS)],
+         WHERE c.session_key=?1 AND reviewq_companion_live(c.seen_at_ms)",
+            [key],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,

@@ -23,7 +23,7 @@ CREATE VIEW review_active_sessions AS
     LEFT JOIN claude_companions c ON c.session_key=r.lead_session_key
     LEFT JOIN claude_children child ON child.session_key=s.session_key
     WHERE s.provider <> 'claude'
-       OR (c.seen_at_ms > unixepoch('subsec') * 1000 - 30000 AND
+       OR (NOT reviewq_companion_gone(c.seen_at_ms) AND
            (s.parent_session_key IS NULL OR child.companion_generation=c.generation));
 
 CREATE VIEW review_pending_followup_results AS

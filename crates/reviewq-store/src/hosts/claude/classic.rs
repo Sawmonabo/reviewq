@@ -1,10 +1,11 @@
 use reviewq_app::access::AppError;
 use reviewq_app::events::ResourceKey;
 use reviewq_app::hosts::ClaudeClassicEvent;
+use reviewq_domain::identity::{RunId, SessionKey};
 use reviewq_domain::session::LeadTarget;
 use rusqlite::{OptionalExtension, params};
 
-use super::{COMPANION_FRESH_MS, workflow::ensure_lead};
+use super::workflow::ensure_lead;
 use crate::StoreError;
 use crate::connection::WriteTx;
 use crate::events::now_ms;
@@ -19,21 +20,15 @@ pub(super) fn record(
     ensure_lead(db, &lead)?;
     let key = lead.session_key().as_str();
     if let ClaudeClassicEvent::Disconnected { generation } = event {
-        let changed = db.execute(
-            "UPDATE claude_companions SET seen_at_ms=0 WHERE session_key=?1 AND generation=?2 AND seen_at_ms<>0",
-            params![key,generation],
-        )?;
-        if changed != 0 {
-            affected(tx, &lead)?;
-        }
+        store_ended(tx, lead.run_id(), lead.session_key(), &generation, false)?;
         return Ok(());
     }
     let active: Option<String> = db
         .query_row(
             "SELECT c.turn_id FROM claude_companions c JOIN sessions s USING(session_key)
-         WHERE c.session_key=?1 AND c.seen_at_ms>?2 AND c.turn_id IS NOT NULL
+         WHERE c.session_key=?1 AND reviewq_companion_live(c.seen_at_ms) AND c.turn_id IS NOT NULL
            AND s.host_activity IN ('working','blocked')",
-            params![key, now_ms()?.saturating_sub(COMPANION_FRESH_MS)],
+            [key],
             |row| row.get(0),
         )
         .optional()?;
@@ -94,12 +89,39 @@ pub(super) fn record(
     Ok(())
 }
 
+/// Stores `generation` of the companion of `session` as ended, which counts as gone at once,
+/// and announces the change. A companion that said it disconnected is ended as it is; with
+/// `if_silent`, as the tick ends companions that went silent, only while it still counts as
+/// gone, because a report may have landed since the tick read it. The next report of the same
+/// generation makes it live again, and a different generation may take it over at once.
+pub(super) fn store_ended(
+    tx: &mut WriteTx<'_>,
+    run: &RunId,
+    session: &SessionKey,
+    generation: &str,
+    if_silent: bool,
+) -> Result<(), StoreError> {
+    let changed = tx.sql.execute(
+        "UPDATE claude_companions SET seen_at_ms=0 WHERE session_key=?1 AND generation=?2
+           AND seen_at_ms<>0 AND (?3=0 OR reviewq_companion_gone(seen_at_ms))",
+        params![session.as_str(), generation, if_silent],
+    )?;
+    if changed != 0 {
+        announce(tx, run, session)?;
+    }
+    Ok(())
+}
+
 fn affected(tx: &mut WriteTx<'_>, lead: &LeadTarget) -> Result<(), StoreError> {
+    announce(tx, lead.run_id(), lead.session_key())
+}
+
+fn announce(tx: &mut WriteTx<'_>, run: &RunId, session: &SessionKey) -> Result<(), StoreError> {
     advance_queue(&tx.sql)?;
     tx.emit(&[
         ResourceKey::Queue,
-        ResourceKey::Run(Some(lead.run_id().clone())),
-        ResourceKey::Session(Some(lead.session_key().clone())),
+        ResourceKey::Run(Some(run.clone())),
+        ResourceKey::Session(Some(session.clone())),
     ])?;
     Ok(())
 }

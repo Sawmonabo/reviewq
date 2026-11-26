@@ -7,12 +7,14 @@ use reviewq_app::decisions::{
 };
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::queue::{MergeRequestState, ReviewSource, RunSummary};
-use reviewq_domain::identity::{MrIdentity, ReviewId, Revision, SubmissionId};
+use reviewq_domain::identity::{MrIdentity, NotificationId, ReviewId, Revision, SubmissionId};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use sha2::{Digest, Sha256};
 
 use crate::events::{now_ms, snapshot};
+use crate::notifications::{publish, withdraw};
 use crate::queue::{identity_for_review, parse, save_observations, source_for_review, text};
+use crate::reports::failures::unresolved_alerts;
 use crate::workspace::{
     actor_key, advance_queue, allow_review, configured, hash_field, scope, settings_revision,
 };
@@ -133,7 +135,9 @@ impl DecisionStore for SqliteStore {
                     mark_handled(db, &input.review, frontier)?;
                 }
                 record(db, &actor, &input, &outcome)?;
+                let withdrawn = withdraw(db, answered_alerts(db, &input)?)?;
                 advance_queue(db)?;
+                publish(tx, &withdrawn)?;
                 tx.emit(&[
                     ResourceKey::Review(Some(input.review.clone())),
                     ResourceKey::Queue,
@@ -150,6 +154,34 @@ impl DecisionStore for SqliteStore {
             .await
             .map_err(StoreError::app)
         })
+    }
+}
+
+/// The failure alerts a decision answers. Review complete and Waiting on author end the
+/// review's need for attention, which answers the unresolved failures of its earlier runs. The
+/// newest run's unresolved failure still outranks every decision in the review's stage, so its
+/// alert stays until a publish or the merge request's end resolves it. Clearing the record and
+/// Follow-up handled answer none.
+fn answered_alerts(
+    db: &Connection,
+    input: &DecisionRequest,
+) -> Result<Vec<NotificationId>, StoreError> {
+    if !matches!(
+        input.disposition,
+        Some(Disposition::Reviewed | Disposition::WaitingAuthor)
+    ) {
+        return Ok(Vec::new());
+    }
+    let newest: Option<String> = db
+        .prepare_cached(
+            "SELECT run_id FROM runs WHERE review_id=?1
+             ORDER BY started_at_ms DESC, run_id DESC LIMIT 1",
+        )?
+        .query_row([input.review.as_str()], |row| row.get(0))
+        .optional()?;
+    match newest {
+        Some(run) => unresolved_alerts(db, &input.review, Some(&run)),
+        None => Ok(Vec::new()),
     }
 }
 

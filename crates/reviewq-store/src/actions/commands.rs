@@ -17,6 +17,7 @@ use super::{by_id, current};
 use crate::connection::WriteTx;
 use crate::events::{now_ms, snapshot};
 use crate::hosts::admit_workflow;
+use crate::hosts::claude::watch;
 use crate::notifications::insert_notification;
 use crate::queue::{identity_for_review, lead_for_run, parse};
 use crate::workspace::{advance_queue, configured, settings_revision};
@@ -302,6 +303,17 @@ fn at_open_head(db: &Connection, target: &LeadTarget, head: &str) -> Result<bool
     )?)
 }
 
+/// Whether `lead`'s Claude companion is neither live nor gone.
+fn companion_unknown(db: &Connection, lead: &LeadTarget) -> Result<bool, StoreError> {
+    let sql = format!(
+        "SELECT EXISTS(SELECT 1 FROM claude_companions WHERE session_key=?1 AND {})",
+        watch::unknown("seen_at_ms")
+    );
+    Ok(db
+        .prepare_cached(&sql)?
+        .query_row([lead.session_key().as_str()], |row| row.get(0))?)
+}
+
 pub(super) fn record_evidence(
     tx: &mut WriteTx<'_>,
     work: ActionWork,
@@ -415,6 +427,11 @@ pub(super) fn record_evidence(
             )
         }
     };
+    // Asking the reviewer acts on the lead being absent, so it waits while the lead's Claude
+    // companion is neither live nor gone; the publication stays due and is checked again.
+    if state == State::NeedsInput && companion_unknown(db, &work.target)? {
+        return Err(AppError::Busy.into());
+    }
     let unknown = evidence.approval == Approval::Unknown
         || evidence
             .targets
