@@ -1,9 +1,10 @@
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::recovery::{NativeFailure, RecoveryKind};
-use reviewq_app::hosts::{HostPhase, QuestionStatus};
+use reviewq_app::hosts::{HostActivity, HostPhase, QuestionStatus};
 use reviewq_app::notifications::{Kind, NativeAttention, NativeOccurrence, TrackedNative};
 
 use super::Codex;
+use super::history::Turn;
 use super::session::ThreadStatus;
 
 impl Codex {
@@ -32,9 +33,20 @@ impl Codex {
                     events.push(occurrence(Kind::AgentPermission, turn.id.clone(), None));
                 }
             }
-        } else if let Some(activity) = &mut activity {
-            let page = self.turns(&thread.id, None, false, 1, false).await?;
-            if let Some(turn) = page.data.first().filter(|turn| turn.status == "failed") {
+        } else {
+            let read = self.turns(&thread.id, None, false, 1, false).await;
+            let latest = if matches!(thread.status, ThreadStatus::NotLoaded) {
+                // Without a readable turn the thread is unknown; its stored state is replaced,
+                // not kept, because another process may have started a turn since.
+                let latest = read.ok().and_then(|page| page.data.into_iter().next());
+                activity = latest.as_ref().and_then(saved_turn_activity);
+                latest
+            } else {
+                read?.data.into_iter().next()
+            };
+            if let Some(activity) = &mut activity
+                && let Some(turn) = latest.filter(|turn| turn.status == "failed")
+            {
                 let id = turn.id.parse().map_err(|_| AppError::Unavailable)?;
                 if target.known_failure.as_ref() != Some(&id) {
                     let at = turn.completed_at.and_then(|stamp| stamp.checked_mul(1000));
@@ -95,6 +107,22 @@ impl Codex {
             async_questions,
         }))
     }
+}
+
+/// The activity of a thread this connection has not loaded, from its latest saved turn: idle
+/// after a completed turn and failed after a failed one. Any other turn is unknown: a turn
+/// running in another process reads as interrupted, and an interrupted turn leaves its review
+/// open, so neither counts as idle.
+fn saved_turn_activity(turn: &Turn) -> Option<HostActivity> {
+    let phase = match turn.status.as_str() {
+        "completed" => HostPhase::Idle,
+        "failed" => HostPhase::Failed,
+        _ => return None,
+    };
+    Some(HostActivity {
+        phase,
+        has_questions: false,
+    })
 }
 
 fn occurrence(kind: Kind, native_ref: String, at_ms: Option<i64>) -> NativeOccurrence {

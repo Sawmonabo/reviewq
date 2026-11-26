@@ -35,6 +35,7 @@ P0: 0 · P1: 1 · P2: 1 · P3: 1 · Blocking: 1 · Nonblocking: 2
 | Finding | Outcome and verification | Thread or evidence |
 | --- | --- | --- |
 | F-01 · Retry writes the same invoice twice | **Still present.** The retry path still builds a new key. | `D9` · Checked revision: `4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a` |
+| F-02 · `retry_key` is rebuilt on every attempt | **Still present.** `retry_key` is still called inside the loop. | No linked discussion · Checked revision: `4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a` |
 | F-03 · Two retry paths build separate keys | **Fixed.** Both paths now share one key \| verified by replay. | `D7` · Checked revision: `17a2b3c417a2b3c417a2b3c417a2b3c417a2b3c4` |
 
 The author replied on D7 that the shared key landed in the second commit.

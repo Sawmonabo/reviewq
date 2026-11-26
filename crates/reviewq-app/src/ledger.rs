@@ -525,6 +525,9 @@ pub struct OpenPass {
     pub state: PassState,
     /// The frozen batch of a selected-thread pass.
     pub batch: Option<FrozenBatch>,
+    /// The question `needs_input` asked, while the pass waits on the reviewer; `None` while
+    /// it is open.
+    pub question: Option<String>,
 }
 
 /// The selected-thread batch a pass closes.

@@ -186,10 +186,24 @@ async fn write_record(
 ) -> Result<Recorded, AppError> {
     let session = binding.session.clone();
     let tool = write.tool();
+    let sent = sent_revision(&write);
     match store.write_record(binding, write).await {
-        Ok(written) => written
-            .map_err(|refusal| AppError::InvalidFields(vec![refusal_error(&refusal, &subject)])),
+        Ok(written) => written.map_err(|refusal| {
+            AppError::InvalidFields(vec![refusal_error(&refusal, &subject, sent)])
+        }),
         Err(error) => Err(for_agent(store, &session, tool, error).await),
+    }
+}
+
+/// The revision a write names as the one its caller last read.
+fn sent_revision(write: &RecordWrite) -> Option<RecordRevision> {
+    match write {
+        RecordWrite::CreateFinding(_) => None,
+        RecordWrite::ChangeFinding {
+            expected_revision, ..
+        } => Some(*expected_revision),
+        RecordWrite::AssessFinding(assessment) => Some(assessment.expected_revision),
+        RecordWrite::WriteNote(note) => note.expected_revision,
     }
 }
 
@@ -280,8 +294,13 @@ fn problem_error(path: &str, problem: FieldProblem) -> FieldError {
     FieldError::new(path, problem.to_string())
 }
 
-/// A store refusal as the field error the agent can act on in the same turn.
-fn refusal_error(refusal: &WriteRefusal, subject: &Subject) -> FieldError {
+/// A store refusal as the field error the agent can act on in the same turn. `sent` is the
+/// revision the write named, which a stale-revision refusal compares with the current one.
+fn refusal_error(
+    refusal: &WriteRefusal,
+    subject: &Subject,
+    sent: Option<RecordRevision>,
+) -> FieldError {
     let name = subject.name();
     match refusal {
         WriteRefusal::UnknownFinding => FieldError::new(
@@ -293,11 +312,17 @@ fn refusal_error(refusal: &WriteRefusal, subject: &Subject) -> FieldError {
         ),
         WriteRefusal::StaleRevision { current, changed } => FieldError::new(
             "/expectedRevision",
-            format!(
-                "{} is at revision {current} now, and {} since the revision you sent. Read it again with review_ledger, then send your change with expectedRevision {current}.",
-                capitalized(&name),
-                changed_fields(changed),
-            ),
+            match sent {
+                Some(sent) if sent > *current => format!(
+                    "{} is at revision {current}, and revision {sent}, which you sent, does not exist yet: send the revision that review_ledger or a tool result showed you. Read it again with review_ledger, then send your change with expectedRevision {current}.",
+                    capitalized(&name),
+                ),
+                _ => format!(
+                    "{} is at revision {current} now, and {} since the revision you sent. Read it again with review_ledger, then send your change with expectedRevision {current}.",
+                    capitalized(&name),
+                    changed_fields(changed),
+                ),
+            },
         ),
         WriteRefusal::RevisionRequired { current } => FieldError::new(
             "/expectedRevision",

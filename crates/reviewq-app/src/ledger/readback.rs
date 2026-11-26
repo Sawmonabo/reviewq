@@ -1,6 +1,6 @@
 //! The rule ReviewQ states to the model, written once, and the read-back after compaction: the
-//! rule, the open pass and what it owes, and one line per active finding with its title quoted
-//! as data, newest change first, within 4,000 characters.
+//! rule, the open pass and what it owes, with the question it waits on, and one line per active
+//! finding with its title quoted as data, newest change first, within 4,000 characters.
 
 use std::fmt::Write as _;
 
@@ -42,11 +42,13 @@ pub(crate) fn append_rule(text: &mut String) {
     text.push_str(RULE);
 }
 
-/// The read-back for a compacted lead session: the rule, what the open pass owes, and one
-/// line per active finding (ID, revision, severity, blocking value and a title cut to 80
-/// characters and quoted), newest change first, after a line that presents them as records
-/// agents filed, to be read as data. It holds at most 4,000 characters. When lines do not
-/// fit, the text ends with how many were left out. `None` unless `session` is a run's lead
+/// The read-back for a compacted lead session: the rule, what the open pass owes (with the
+/// question a waiting pass asked, quoted on one line), and one line per active finding (ID,
+/// revision, severity, blocking value and a title cut to 80 characters and quoted), newest
+/// change first, after a line that presents them as records agents filed, to be read as data.
+/// It holds at most 4,000 characters: the question is at most 1,024 characters, so the rule
+/// and the pass always fit, and when finding lines do not, the text ends with how many were
+/// left out. `None` unless `session` is a run's lead
 /// session, so the hook shows nothing.
 pub async fn read_back(
     store: &(impl LedgerStore + ?Sized),
@@ -89,15 +91,15 @@ fn text(ledger: &ReadBack) -> String {
     out.text
 }
 
-/// What the open pass owes. A selected-thread pass also names its discussions when the text
-/// then holds at most `room` characters.
+/// What the open pass owes, or what it waits on. A selected-thread pass also names its
+/// discussions when the text then holds at most `room` characters.
 fn pass_lines(out: &mut Budget, pass: Option<&OpenPass>, room: usize) {
     let Some(pass) = pass else {
         out.push("Nothing is waiting to be closed right now.");
         return;
     };
     out.push(match pass.state {
-        PassState::Waiting => "This review is waiting on the reviewer's answer to your question. ",
+        PassState::Waiting => "This review is waiting on the reviewer's answer. ",
         PassState::Open | PassState::Closed => "This review is still open. ",
     });
     out.push(&owed(pass));
@@ -114,8 +116,7 @@ fn pass_lines(out: &mut Budget, pass: Option<&OpenPass>, room: usize) {
 }
 
 /// `- F-03, revision 2, P1, blocking: "Retry writes the same invoice twice"`, after a line
-/// break. The title is cut to `MAX_TITLE_CHARS`, then quoted with each `"` and `\` in it
-/// escaped, so it reads as one quoted value.
+/// break, with the title quoted and cut to `MAX_TITLE_CHARS`.
 fn finding_line(text: &mut String, finding: &FindingLine) {
     let blocking = if finding.blocking {
         "blocking"
@@ -129,14 +130,21 @@ fn finding_line(text: &mut String, finding: &FindingLine) {
         finding.revision.get(),
         finding.severity,
     );
-    let cut = finding.title.chars().count() > MAX_TITLE_CHARS;
-    let kept = if cut {
-        MAX_TITLE_CHARS - 1
-    } else {
-        MAX_TITLE_CHARS
-    };
+    push_quoted(text, &finding.title, MAX_TITLE_CHARS);
+}
+
+/// Appends authored `value` as one quoted value on one line, so it reads as data: cut to
+/// `max_chars` with an ellipsis, each line break or control character written as a space, and
+/// each `"` and `\` escaped.
+pub(super) fn push_quoted(text: &mut String, value: &str, max_chars: usize) {
+    let cut = value.chars().count() > max_chars;
+    let kept = if cut { max_chars - 1 } else { max_chars };
     text.push('"');
-    for character in finding.title.chars().take(kept) {
+    for character in value.chars().take(kept) {
+        if character.is_control() || matches!(character, '\u{2028}' | '\u{2029}') {
+            text.push(' ');
+            continue;
+        }
         if matches!(character, '"' | '\\') {
             text.push('\\');
         }

@@ -23,7 +23,10 @@ export async function invoke($, action, id, value, timeoutMs = 5000) {
     if (result.exitCode === 0 && !result.isStdoutTruncated) {
       return JSON.parse(result.stdout);
     }
-    return { error: result.stderr.trim().slice(0, 1024) || "ReviewQ is unavailable." };
+    // The helper starts its failure line with `reviewq: `. The host already prints the command's
+    // output under the command's name, and a tool result answers a ReviewQ tool, so the prefix
+    // is dropped.
+    return { error: result.stderr.trim().replace(/^reviewq: /, "").slice(0, 1024) || "ReviewQ is unavailable." };
   } catch {
     return { error: "ReviewQ is unavailable. Check the installed service and plugin." };
   }

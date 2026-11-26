@@ -190,7 +190,7 @@
         "type": "string"
       }
     },
-    "description": "Closes the review and publishes a version.",
+    "description": "Closes the review and publishes a version. A first or full review needs `verdict` and `revision`; a selected-thread check needs one entry in `assessments` per selected discussion.",
     "properties": {
       "assessments": {
         "description": "One per selected discussion of a selected-thread check, and only there.",
@@ -227,10 +227,10 @@
   "needs_input": {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "additionalProperties": false,
-    "description": "Records a question the reviewer must answer before the review can finish.",
+    "description": "Records a question the reviewer must answer before the review can finish, and holds the review until then. It publishes nothing.",
     "properties": {
       "reason": {
-        "description": "The question, and what the review waits on.",
+        "description": "The question, and what the review waits on. Ask it in your reply as well: the reviewer is told only that the review needs input.",
         "maxLength": 1024,
         "minLength": 1,
         "type": "string"
@@ -320,7 +320,7 @@
         "type": "string"
       }
     },
-    "description": "Files a new finding, or changes the finding named by `id`.",
+    "description": "Files a new finding, or changes the finding named by `id`. A new finding gives `title`, `severity`, `blocking`, `section`, `issue`, `consequence` and `evidence`. A change gives `id`, `expectedRevision` and only the fields it changes.",
     "properties": {
       "blocking": {
         "description": "Whether the lead holds the merge on this finding.",

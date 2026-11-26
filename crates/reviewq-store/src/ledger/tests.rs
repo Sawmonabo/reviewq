@@ -18,7 +18,7 @@ use reviewq_app::reports::{
 };
 use reviewq_domain::identity::{GitSha, ReportHash, Revision, RunId};
 use reviewq_domain::ledger::{
-    FailureKind, FindingId, PassKind, PassState, RecordRevision, VersionKind,
+    FailureKind, FindingId, PassKind, PassState, RecordRevision, Settlement, VersionKind, settle,
 };
 use reviewq_domain::session::AbsolutePath;
 use sha2::{Digest, Sha256};
@@ -332,8 +332,12 @@ fn pass_hold_and_start_follow_lead_activity() {
             })
             .await
             .unwrap();
+        // A lead whose activity is unknown, as for a Codex thread running in another
+        // process, does not settle; the same lead stored idle does.
+        activity(&store, None).await;
+        assert_eq!(settlements(&store).await, [Settlement::Nothing]);
         activity(&store, "idle").await;
-        assert_eq!(lead_idle(&store).await, [true]);
+        assert_eq!(settlements(&store).await, [Settlement::Unfinished]);
 
         // A hold made before the host reported its turn as working survives the host's first
         // sight of that turn, and reopens when the next turn starts without any call.
@@ -344,14 +348,20 @@ fn pass_hold_and_start_follow_lead_activity() {
             .unwrap();
         let state = async || {
             let page = store.read_ledger(lead(), short()).await.unwrap();
-            page.pass.map(|pass| pass.state)
+            page.pass.map(|pass| (pass.state, pass.question))
         };
+        // The question is read back while the pass waits and dropped once it reopens.
+        let waiting = Some((PassState::Waiting, Some("Which branch is the base?".into())));
         activity(&store, "working").await;
-        assert_eq!(state().await, Some(PassState::Waiting));
+        assert_eq!(state().await, waiting);
         activity(&store, "idle").await;
-        assert_eq!(state().await, Some(PassState::Waiting));
+        assert_eq!(state().await, waiting);
+        // Losing and regaining sight of the idle lead is no new turn.
+        activity(&store, None).await;
+        activity(&store, "idle").await;
+        assert_eq!(state().await, waiting);
         activity(&store, "working").await;
-        assert_eq!(state().await, Some(PassState::Open));
+        assert_eq!(state().await, Some((PassState::Open, None)));
         store.close(Duration::from_secs(1)).await.unwrap();
     });
 }
@@ -538,10 +548,17 @@ async fn lead_idle(store: &SqliteStore) -> Vec<bool> {
     candidates.iter().map(|run| run.facts.lead_idle).collect()
 }
 
-/// Stores the lead's observed activity as the host adapters do.
-async fn activity(store: &SqliteStore, phase: &'static str) {
+/// What settling does for each candidate run.
+async fn settlements(store: &SqliteStore) -> Vec<Settlement> {
+    let candidates = store.runs_to_settle().await.unwrap();
+    candidates.iter().map(|run| settle(run.facts)).collect()
+}
+
+/// Stores the lead's observed activity, or `None` for unknown, as the host adapters do.
+async fn activity(store: &SqliteStore, phase: impl Into<Option<&'static str>>) {
+    let phase = phase.into();
     store
-        .write(move |tx| crate::hosts::record_activity(&tx.sql, "claude:lead", Some(phase), false))
+        .write(move |tx| crate::hosts::record_activity(&tx.sql, "claude:lead", phase, false))
         .await
         .unwrap();
 }

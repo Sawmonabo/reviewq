@@ -70,13 +70,13 @@ fn finding(
 fn outcome(
     conclusion: FindingConclusion,
     reason: &str,
-    discussion: &str,
+    discussions: &[&str],
     checked: Option<&str>,
 ) -> Option<FindingOutcome> {
     Some(FindingOutcome {
         conclusion,
         reason: reason.to_owned(),
-        discussion_ids: vec![discussion.to_owned()],
+        discussion_ids: discussions.iter().map(|id| (*id).to_owned()).collect(),
         checked_sha: checked.map(sha),
     })
 }
@@ -90,9 +90,10 @@ fn note(section: NoteSection, body: &str) -> NoteRecord {
 }
 
 /// The worked snapshot: a lead's and a subagent's finding, a gap, two locations, a
-/// retired finding with `|` in its reason, a user disposition that overrides the lead's
-/// blocking value, every fixed note and one extra note, a title that starts with code, a
-/// level-two heading inside details and a line with `Vec<u8>` and `<runner>`.
+/// retired finding with `|` in its reason, a keeping outcome on every other finding of the
+/// parent version, one of them with no linked discussion, a user disposition that overrides
+/// the lead's blocking value, every fixed note and one extra note, a title that starts with
+/// code, a level-two heading inside details and a line with `Vec<u8>` and `<runner>`.
 fn worked_findings() -> Vec<SnapshotFinding> {
     let mut retry_twice = finding(
         1,
@@ -127,7 +128,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
     retry_twice.record.outcome = outcome(
         FindingConclusion::StillPresent,
         "The retry path still builds a new key.",
-        "D9",
+        &["D9"],
         None,
     );
     retry_twice.outcome_is_new = true;
@@ -136,7 +137,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
 
     let mut rebuilt_key = finding(
         2,
-        1,
+        2,
         Author::Subagent("agent-7".to_owned()),
         FindingFields {
             title: "`retry_key` is rebuilt on every attempt".to_owned(),
@@ -162,6 +163,15 @@ fn worked_findings() -> Vec<SnapshotFinding> {
         },
         Some((1, true)),
     );
+    // The full review assessed it, as it must every active finding of the parent version.
+    rebuilt_key.record.outcome = outcome(
+        FindingConclusion::StillPresent,
+        "`retry_key` is still called inside the loop.",
+        &[],
+        None,
+    );
+    rebuilt_key.outcome_is_new = true;
+    rebuilt_key.touched = true;
     rebuilt_key.by_subagent = true;
     rebuilt_key.disposition = Some(FindingDisposition {
         blocking: Some(false),
@@ -193,7 +203,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
     separate_keys.record.outcome = outcome(
         FindingConclusion::Fixed,
         "Both paths now share one key | verified by replay.",
-        "D7",
+        &["D7"],
         Some(FIXED_AT),
     );
     separate_keys.outcome_is_new = true;

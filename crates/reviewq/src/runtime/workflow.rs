@@ -13,12 +13,14 @@ use tokio::sync::watch;
 
 /// Every 10 seconds until shutdown: reads native attention, settles the ledger runs that are
 /// due, which it also does once on start, then polls the configured sources and runs the due
-/// follow-ups, recoveries and publications. A step's error skips that step for the tick, as a
-/// settle error does.
+/// follow-ups, recoveries and publications. With `settle_only`, as in validation, each tick
+/// only settles, which reads stored state alone and asks no provider. A step's error skips
+/// that step for the tick, as a settle error does.
 pub(super) async fn run(
     store: Arc<SqliteStore>,
     sources: Arc<RuntimeSources>,
     native: Arc<dyn NativeWorkflowProof>,
+    settle_only: bool,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let mut cursor = None;
@@ -36,16 +38,21 @@ pub(super) async fn run(
             _ = shutdown.changed() => break,
             () = tokio::time::sleep(Duration::from_secs(10)) => {},
         }
-        let attention = tokio::select! {
-            _ = shutdown.changed() => break,
-            observed = poll_native_attention(store.as_ref(),native.as_ref(),native_cursor.clone()) => observed,
-        };
-        if let Ok(next) = attention {
-            native_cursor = next;
+        if !settle_only {
+            let attention = tokio::select! {
+                _ = shutdown.changed() => break,
+                observed = poll_native_attention(store.as_ref(),native.as_ref(),native_cursor.clone()) => observed,
+            };
+            if let Ok(next) = attention {
+                native_cursor = next;
+            }
         }
         tokio::select! {
             _ = shutdown.changed() => break,
             _ = settle_due(store.as_ref()) => {},
+        }
+        if settle_only {
+            continue;
         }
         let Ok(context) = sources.current().await else {
             continue;

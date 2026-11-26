@@ -105,23 +105,28 @@ fn field_errors(error: AppError, errors: &[FieldError]) -> Response {
 
 /// The text of an MCP tool error, which the model reads to correct its call: for refused
 /// fields, one line per field with its path and message, capped as the HTTP reply is; for any
-/// other failure, the protocol's error object as JSON.
+/// other failure, the protocol's error object as JSON. A refusal whose errors are all at the
+/// root names no field, so its messages stand alone, one per line, without the line that asks
+/// for fields to be corrected. The Claude plugin's `toolResult` applies the same rule.
 pub(super) fn tool_error_text(error: ApiError) -> String {
     let error = match error {
         ApiError::InvalidFields(errors) => {
-            let mut text = format!(
-                "{} Correct these fields and call again.",
-                AppError::InvalidFields(Vec::new())
-            );
-            for error in capped(errors) {
-                text.push('\n');
-                if !error.path.is_empty() {
-                    text.push_str(&error.path);
-                    text.push_str(": ");
-                }
-                text.push_str(&error.message);
+            let errors = capped(errors);
+            let mut lines = Vec::with_capacity(errors.len() + 1);
+            if errors.is_empty() || errors.iter().any(|error| !error.path.is_empty()) {
+                lines.push(format!(
+                    "{} Correct these fields and call again.",
+                    AppError::InvalidFields(Vec::new())
+                ));
             }
-            return text;
+            lines.extend(errors.into_iter().map(|error| {
+                if error.path.is_empty() {
+                    error.message
+                } else {
+                    format!("{}: {}", error.path, error.message)
+                }
+            }));
+            return lines.join("\n");
         }
         ApiError::Application(error) => error,
         ApiError::BrowserProofRejected => AppError::Forbidden,

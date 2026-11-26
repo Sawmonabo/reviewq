@@ -51,7 +51,9 @@ pub enum NoteSection {
     Extra,
 }
 
-/// Files a new finding, or changes the finding named by `id`.
+/// Files a new finding, or changes the finding named by `id`. A new finding gives `title`,
+/// `severity`, `blocking`, `section`, `issue`, `consequence` and `evidence`. A change gives
+/// `id`, `expectedRevision` and only the fields it changes.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -219,7 +221,9 @@ pub struct ReviewLedger {
     pub cursor: Option<PageCursorDto>,
 }
 
-/// Closes the review and publishes a version.
+/// Closes the review and publishes a version. A first or full review needs `verdict` and
+/// `revision`; a selected-thread check needs one entry in `assessments` per selected
+/// discussion.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -244,12 +248,14 @@ pub struct FinishReview {
     pub assessments: Vec<Assessment>,
 }
 
-/// Records a question the reviewer must answer before the review can finish.
+/// Records a question the reviewer must answer before the review can finish, and holds the
+/// review until then. It publishes nothing.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct NeedsInput {
-    /// The question, and what the review waits on.
+    /// The question, and what the review waits on. Ask it in your reply as well: the reviewer
+    /// is told only that the review needs input.
     #[cfg_attr(feature = "schema", schemars(length(min = 1, max = crate::reports::MAX_REASON_CHARS)))]
     pub reason: String,
 }

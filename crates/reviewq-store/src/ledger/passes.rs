@@ -57,12 +57,15 @@ pub(super) struct PassRow {
     pub(super) batch: Option<String>,
     gate_turn: Option<String>,
     gate_blocks: u8,
+    /// The question `needs_input` stored, read only while `state` is `Waiting`: a held pass
+    /// that `PASS_STATE` reads as open may still store the question it no longer waits on.
+    question: Option<String>,
 }
 
 pub(super) fn current(db: &Connection, run: &str) -> Result<Option<PassRow>, StoreError> {
     let sql = format!(
         "SELECT p.pass_id, p.kind, {PASS_STATE}, p.opened_sequence, p.batch_id, p.gate_turn_id,
-           p.gate_blocks, p.opened_at_ms
+           p.gate_blocks, p.opened_at_ms, p.hold_reason
          FROM review_passes p WHERE p.run_id=?1 AND p.state<>'closed'"
     );
     let mut statement = db.prepare_cached(&sql)?;
@@ -70,15 +73,20 @@ pub(super) fn current(db: &Connection, run: &str) -> Result<Option<PassRow>, Sto
     let Some(row) = rows.next()? else {
         return Ok(None);
     };
+    let state = PassState::from_label(text(row, 2)?).ok_or(AppError::Internal)?;
     Ok(Some(PassRow {
         id: PassId::try_from(row.get::<_, i64>(0)?).map_err(|_| AppError::Internal)?,
         kind: PassKind::from_label(text(row, 1)?).ok_or(AppError::Internal)?,
-        state: PassState::from_label(text(row, 2)?).ok_or(AppError::Internal)?,
+        state,
         opened_sequence: row.get(3)?,
         batch: row.get(4)?,
         gate_turn: row.get(5)?,
         gate_blocks: u8::try_from(row.get::<_, i64>(6)?).map_err(|_| AppError::Internal)?,
         opened_at_ms: row.get(7)?,
+        question: match state {
+            PassState::Waiting => row.get(8)?,
+            PassState::Open | PassState::Closed => None,
+        },
     }))
 }
 
@@ -118,6 +126,7 @@ pub(super) fn describe(db: &Connection, row: &PassRow) -> Result<OpenPass, Store
         kind: row.kind,
         state: row.state,
         batch,
+        question: row.question.clone(),
     })
 }
 

@@ -1,9 +1,12 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use futures_util::{SinkExt, StreamExt};
+use reviewq_app::history::HistorySession;
+use reviewq_app::hosts::HostPhase;
+use reviewq_app::notifications::TrackedNative;
 use reviewq_domain::session::{
     AbsolutePath, HostProvider, NativeBinding, NativeIdentity, SessionTarget,
 };
@@ -47,6 +50,10 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
 
     let resumed = Arc::new(AtomicUsize::new(0));
     let recorded_resumes = resumed.clone();
+    let turn_reads = Arc::new(AtomicUsize::new(0));
+    let recorded_turn_reads = turn_reads.clone();
+    let latest_turn = Arc::new(Mutex::new("completed"));
+    let saved_turn = latest_turn.clone();
     let host_profile = profile.clone();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
@@ -67,10 +74,13 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
                 "thread/turns/list" => {
                     assert_eq!(params["threadId"], thread_id);
                     assert_eq!(params["limit"], 1);
-                    json!({"data":[{"id":turn_id,"status":"completed","items":[
+                    recorded_turn_reads.fetch_add(1, Ordering::Relaxed);
+                    let status = *saved_turn.lock().unwrap();
+                    json!({"data":[{"id":turn_id,"status":status,"items":[
                         {"type":"userMessage","id":"last-request","content":[]}
                     ]}]})
                 }
+                "thread/list" => json!({"data":[],"nextCursor":null}),
                 "thread/resume" => {
                     assert_eq!(*params, json!({"threadId":thread_id,"excludeTurns":true}));
                     let mut response = thread.clone();
@@ -112,6 +122,33 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
             profile,
         ),
     );
+
+    // The thread is loaded only in another process. Its latest saved turn shows it idle once
+    // completed, and unknown while interrupted, which is how a turn running elsewhere reads.
+    // Each observation reads one turn.
+    let tracked = || TrackedNative {
+        session: HistorySession {
+            target: lead.target().clone(),
+            binding: lead.binding().clone(),
+            source: None,
+            parent: None,
+        },
+        known_failure: None,
+        child_cursor: None,
+        started_at_ms: 0,
+        questions: Vec::new(),
+    };
+    let observed = codex.attention(tracked()).await.unwrap().unwrap();
+    assert_eq!(
+        observed.activity.map(|seen| seen.phase),
+        Some(HostPhase::Idle)
+    );
+    *latest_turn.lock().unwrap() = "interrupted";
+    let observed = codex.attention(tracked()).await.unwrap().unwrap();
+    assert!(observed.activity.is_none());
+    assert_eq!(turn_reads.load(Ordering::Relaxed), 2);
+    *latest_turn.lock().unwrap() = "completed";
+
     assert!(matches!(
         readers.dispatch_readiness(lead.clone()).await.unwrap(),
         WorkflowReadiness::Held(WorkflowHold::SessionNotLoaded)

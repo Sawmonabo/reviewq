@@ -13,6 +13,8 @@ use reviewq_domain::ledger::{
 };
 
 use super::compose::{self, checked_revision, finding_bytes, recorded_outcome, state};
+use super::passes::findings_on_file;
+use super::record::capitalized;
 use super::refusal::{for_agent, root};
 use super::{
     CallBinding, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
@@ -242,12 +244,9 @@ async fn update_failed(
 }
 
 fn unfinished_reason(findings: u32) -> String {
-    let on_file = match findings {
-        1 => "1 finding is".to_owned(),
-        count => format!("{count} findings are"),
-    };
     format!(
-        "The lead ended without finishing the review: it called neither finish_review nor needs_input. {on_file} on file and stay unpublished until the lead closes the review."
+        "The lead ended without finishing the review: it called neither finish_review nor needs_input. {}. What is on file stays unpublished until the lead closes the review.",
+        capitalized(&findings_on_file(findings))
     )
 }
 

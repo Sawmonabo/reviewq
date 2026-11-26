@@ -415,13 +415,14 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
                 source.clone(),
             )));
         }
+        workers.push(tokio::spawn(workflow::run(
+            store.clone(),
+            source,
+            workflow,
+            options.validation,
+            wait.clone(),
+        )));
         if !options.validation {
-            workers.push(tokio::spawn(workflow::run(
-                store.clone(),
-                source,
-                workflow,
-                wait.clone(),
-            )));
             workers.push(tokio::spawn(crate::checkout_setup::reconcile::run(
                 store.clone(),
                 profile.clone(),

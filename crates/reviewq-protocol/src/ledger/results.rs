@@ -81,7 +81,8 @@ pub struct LedgerPass {
     pub kind: PassKind,
     /// True while the pass waits on the reviewer's answer to `needs_input`.
     pub waiting: bool,
-    /// One plain sentence naming what the closing call must supply.
+    /// Plain sentences naming what the closing call must supply and, while the pass waits,
+    /// the question it waits on.
     pub owes: String,
     /// The selected discussions a selected-thread pass needs one assessment for each.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

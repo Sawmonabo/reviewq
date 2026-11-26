@@ -18,8 +18,12 @@ use crate::reports::failures::{self, Noted};
 use crate::workspace::advance_queue;
 
 /// A session that is working, blocked or asking is not idle. Reads `review_active_sessions`,
-/// the same evidence the stage classifier reads. A lead not yet seen starting a turn for the
-/// open pass is not idle either: it has not begun the work the pass waits for.
+/// the same evidence the stage classifier reads, so a Claude lead without a live companion
+/// does not count as working. A lead with no stored activity is unknown, such as a Codex
+/// thread running in another process, and its run is neither settled nor updated. A lead not
+/// yet seen starting a turn for the open pass is not idle either: it has not begun the work
+/// the pass waits for. A child counts as idle unless it shows work, because a child's last
+/// turn can stay unknown long after the child ended.
 ///
 /// `candidates` leaves out a run whose unresolved failure of the kind settling would record
 /// (unfinished review for its pass, failed update without one) was recorded at its current
@@ -37,6 +41,8 @@ pub(super) fn candidates(db: &Connection) -> Result<Vec<SettleCandidate>, StoreE
          SELECT x.run_id, coalesce(l.sequence, 0), p.pass_id, {PASS_STATE},
            (SELECT count(*) FROM ledger_findings f WHERE f.run_id=x.run_id AND f.active=1),
            (p.pass_id IS NULL OR p.lead_started_at_ms IS NOT NULL)
+             AND EXISTS(SELECT 1 FROM sessions s WHERE s.session_key=r.lead_session_key
+               AND s.host_activity IS NOT NULL)
              AND NOT EXISTS(SELECT 1 FROM review_active_sessions s WHERE s.run_id=x.run_id
                AND s.parent_session_key IS NULL AND {BUSY}),
            NOT EXISTS(SELECT 1 FROM review_active_sessions s WHERE s.run_id=x.run_id

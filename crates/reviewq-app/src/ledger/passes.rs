@@ -1,8 +1,11 @@
 //! `needs_input`, which holds the open pass, and the stop gate, whose block reason names what
 //! the pass owes and how many findings are on file.
 
+use std::fmt::Write as _;
+
 use reviewq_domain::ledger::{GateDecision, PassKind, PassState, Tool};
 
+use super::readback::push_quoted;
 use super::record::capitalized;
 use super::refusal::{for_agent, root};
 use super::{CallBinding, GateAnswer, GateRequest, HoldReceipt, LedgerStore, OpenPass};
@@ -40,41 +43,56 @@ pub async fn gate(
     Ok(block_reason(&answer))
 }
 
-/// The reason for a block, in under 600 characters: what the closing call needs and how many
-/// findings are on file. `None` for a release.
+/// The reason for a block, in under 600 characters: how many findings are on file, what each
+/// of the two calls does, and that one of them is owed before the turn ends. `None` for a
+/// release.
 fn block_reason(answer: &GateAnswer) -> Option<String> {
     let GateDecision::Block { .. } = answer.decision else {
         return None;
     };
-    let on_file = match answer.active_findings {
-        0 => "no finding is on file yet".to_owned(),
-        1 => "1 finding is on file".to_owned(),
-        count => format!("{count} findings are on file"),
-    };
-    let owed = answer
-        .pass
-        .as_ref()
-        .map_or_else(|| "Call finish_review.".to_owned(), owed);
+    let owed = answer.pass.as_ref().map_or_else(
+        || "Call finish_review, which shows the reviewer what is on file, or needs_input if the review must wait for the reviewer's answer.".to_owned(),
+        owed,
+    );
     Some(format!(
-        "This review is not closed yet, and {on_file}. {owed} Do this before you stop: the reviewer sees nothing you filed until then."
+        "This review is not closed yet, and {}. {owed} Make one of these calls before you stop.",
+        findings_on_file(answer.active_findings)
     ))
 }
 
-/// What `pass` owes, as one sentence for an agent: the closing call with what it needs, and
-/// `needs_input` for a review that must wait on the reviewer, or, while the pass already
-/// waits, the closing call once the reviewer answers. The gate, the read-back and
+/// `no finding is on file yet`, `1 finding is on file` or `{count} findings are on file`.
+pub(super) fn findings_on_file(count: u32) -> String {
+    match count {
+        0 => "no finding is on file yet".to_owned(),
+        1 => "1 finding is on file".to_owned(),
+        count => format!("{count} findings are on file"),
+    }
+}
+
+/// What `pass` owes, for an agent. While it is open: the closing call with what it needs and
+/// that only it publishes, and `needs_input` for a review that must wait on the reviewer,
+/// which publishes nothing. While it waits: the question the lead asked, quoted as data on one
+/// line, and the closing call once the reviewer answers. The gate, the read-back and
 /// `review_ledger`'s open pass all state it in these words.
 pub fn owed(pass: &OpenPass) -> String {
     let closing = closing_call(pass);
     match pass.state {
-        PassState::Waiting => format!("Once the reviewer answers, {closing}."),
-        PassState::Open | PassState::Closed => {
-            let mut sentence = capitalized(&closing);
-            sentence.push_str(
-                ", or call needs_input if the review must wait for the reviewer's answer.",
-            );
-            sentence
-        }
+        PassState::Waiting => match &pass.question {
+            Some(question) => {
+                let mut sentence =
+                    "You asked the reviewer this with needs_input, quoted as you wrote it: "
+                        .to_owned();
+                // The tool input already bounds the question, so it is quoted whole.
+                push_quoted(&mut sentence, question, usize::MAX);
+                let _ = write!(sentence, ". Once the reviewer answers, {closing}.");
+                sentence
+            }
+            None => format!("Once the reviewer answers your question, {closing}."),
+        },
+        PassState::Open | PassState::Closed => format!(
+            "{}: only that call shows the reviewer what is on file. If the review must wait for the reviewer's answer to a question, call needs_input with that question instead and ask it in your reply as well; needs_input publishes nothing and only records that the review is waiting.",
+            capitalized(&closing)
+        ),
     }
 }
 
