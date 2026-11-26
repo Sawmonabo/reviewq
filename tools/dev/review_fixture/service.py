@@ -27,11 +27,19 @@ READY_SECONDS = 60
 
 
 def build_binary():
-    """Builds the checkout's `reviewq` binary and returns its path."""
-    subprocess.run(["cargo", "build", "--locked", "-q", "-p", "reviewq", "--bin", "reviewq"],
-                   cwd=ROOT, check=True)
-    metadata = subprocess.run(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
-                              cwd=ROOT, check=True, capture_output=True)
+    """Builds the checkout's `reviewq` binary and returns its path.
+
+    `CARGO_DRIVER=mbx` builds through mbx into the target folder's `mbx` directory, as the
+    Makefile does, so plain Cargo never rebuilds what mbx cached.
+    """
+    driver = os.environ.get("CARGO_DRIVER", "cargo")
+    env = os.environ.copy()
+    if driver == "mbx":
+        env["CARGO_TARGET_DIR"] = str(Path(env.get("CARGO_TARGET_DIR") or ROOT / "target") / "mbx")
+    subprocess.run([driver, "build", "--locked", "-q", "-p", "reviewq", "--bin", "reviewq"],
+                   cwd=ROOT, env=env, check=True)
+    metadata = subprocess.run([driver, "metadata", "--locked", "--no-deps", "--format-version", "1"],
+                              cwd=ROOT, env=env, check=True, capture_output=True)
     return Path(json.loads(metadata.stdout)["target_directory"]) / "debug" / "reviewq"
 
 
