@@ -104,7 +104,7 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
             .unwrap();
         }
     });
-    let mut codex = Codex::new(executable, profile.clone(), None).unwrap();
+    let mut codex = Codex::new(executable.clone(), profile.clone(), None).unwrap();
     // The synthetic daemon has just started; it restores nothing.
     codex.restore_grace = std::time::Duration::ZERO;
     let codex = Arc::new(codex);
@@ -223,4 +223,33 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
     );
     assert_eq!(resumed.load(Ordering::Relaxed), 3);
     server.abort();
+    let _ = server.await;
+
+    // Discovery now fails, as it does when its 2-second probe gets no answer. The session is
+    // idle only while no daemon command runs, no daemon accepts a connection on the profile's
+    // control socket and no process holds the thread. Threads a daemon saved at shutdown do not
+    // count once no command that restarts it runs.
+    fs::write(&executable, "#!/bin/sh\nexit 1\n").unwrap();
+    // The first observation may still meet the closed connection.
+    let _ = codex.attention(tracked(true)).await;
+    let unknown =
+        async || codex.attention(tracked(true)).await.err() == Some(AppError::Unavailable);
+    let control = session_dir.with_file_name("app-server-control");
+    fs::create_dir(&control).unwrap();
+    let listening = UnixListener::bind(control.join("app-server-control.sock")).unwrap();
+    assert!(unknown().await);
+    drop(listening);
+    let state = session_dir.with_file_name("app-server-daemon");
+    fs::create_dir(&state).unwrap();
+    fs::write(
+        state.join("loaded-threads.json"),
+        json!({"loaded":[thread_id]}).to_string(),
+    )
+    .unwrap();
+    assert_eq!(phase(true).await, Some(HostPhase::Idle));
+    let command = fs::File::create(state.join("daemon.lock")).unwrap();
+    command.lock().unwrap();
+    assert!(unknown().await);
+    drop(command);
+    assert_eq!(phase(true).await, Some(HostPhase::Idle));
 }

@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{ErrorKind, Read};
+use std::io::ErrorKind;
 use std::path::Path;
 use std::time::Duration;
 
@@ -7,6 +7,8 @@ use reviewq_app::access::AppError;
 use reviewq_app::hosts::recovery::{NativeFailure, RecoveryKind};
 use reviewq_app::hosts::{HostActivity, HostPhase, NativeSessionMetadata, QuestionStatus};
 use reviewq_app::notifications::{Kind, NativeAttention, NativeOccurrence, TrackedNative};
+use tokio::net::UnixStream;
+use tokio::time::timeout;
 use uuid::Uuid;
 
 use super::Codex;
@@ -58,11 +60,15 @@ impl Codex {
                 ThreadStatus::NotLoaded => {
                     let read = self.turns(&thread.id, None, false, 1, false).await;
                     let latest = read.ok().and_then(|page| page.data.into_iter().next());
-                    activity = latest.as_ref().and_then(|turn| {
-                        saved_turn_activity(turn, || {
-                            self.daemon_settled() && writer_gone(self.profile.as_path(), &thread.id)
-                        })
-                    });
+                    activity = match &latest {
+                        Some(turn) => {
+                            saved_turn_activity(turn, async {
+                                self.daemon_settled() && self.thread_free(&thread.id, None).await
+                            })
+                            .await
+                        }
+                        None => None,
+                    };
                     latest
                 }
                 _ => self
@@ -138,19 +144,38 @@ impl Codex {
 }
 
 impl Codex {
-    /// A session whose thread could not be read because no Codex daemon answered. Once no
-    /// process holds the thread and no daemon shutdown saved it to be restored, no turn runs in
-    /// it and it is idle. The observation carries no thread data, so the stored name, status and
-    /// start time stay. Otherwise the read fails and nothing is stored.
+    /// A session whose thread could not be read because no Codex daemon was reached. It is idle
+    /// once three things hold together: no daemon start, restart, update or stop is under way,
+    /// the daemon's socket is missing or refuses connections, and no process holds the thread.
+    /// The lifecycle lock stays held from the first check to the last, so no daemon can start
+    /// and resume the thread in between. A daemon that a command restarts takes the threads its
+    /// predecessor saved before it answers, and the command holds the lock until it answers, so
+    /// threads saved while the lock is free are not being resumed. A socket that accepts the
+    /// connection belongs to a daemon that runs, even one too busy to answer discovery in time.
+    /// The observation carries no thread data, so the stored name, status and start time stay.
+    /// Otherwise the read fails and nothing is stored.
     async fn without_daemon(
         &self,
         target: TrackedNative,
     ) -> Result<Option<NativeAttention>, AppError> {
         let thread = target.session.binding.identity().native_id().as_str();
-        if !matches!(self.connection.reach(), Reach::Absent)
-            || restore_pending(self.profile.as_path(), thread)
-            || !writer_gone(self.profile.as_path(), thread)
-        {
+        if matches!(self.connection.reach(), Reach::Bound(_)) {
+            return Err(AppError::Unavailable);
+        }
+        let profile = self.profile.as_path().to_owned();
+        let Some(lifecycle) = tokio::task::spawn_blocking(move || lifecycle_paused(&profile))
+            .await
+            .ok()
+            .flatten()
+        else {
+            return Err(AppError::Unavailable);
+        };
+        let socket = self.profile.as_path().join(CONTROL_SOCKET);
+        let no_listener = matches!(
+            timeout(PROBE_LIMIT, UnixStream::connect(socket)).await,
+            Ok(Err(error)) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused)
+        );
+        if !no_listener || !self.thread_free(thread, lifecycle).await {
             return Err(AppError::Unavailable);
         }
         let async_questions = super::super::history::observe_async_questions(
@@ -179,42 +204,65 @@ impl Codex {
     /// is about to resume and continue.
     fn daemon_settled(&self) -> bool {
         matches!(self.connection.reach(), Reach::Bound(Some(bound))
-            if bound.elapsed().is_ok_and(|age| age >= self.restore_grace))
+            if bound.elapsed() >= self.restore_grace)
+    }
+
+    /// Whether no process holds the thread, probed off the async runtime. A lifecycle lock
+    /// passed in is released there once the probe is done.
+    async fn thread_free(&self, thread: &str, lifecycle: Option<SharedLock>) -> bool {
+        let (profile, thread) = (self.profile.as_path().to_owned(), thread.to_owned());
+        tokio::task::spawn_blocking(move || {
+            let free = writer_gone(&profile, &thread);
+            drop(lifecycle);
+            free
+        })
+        .await
+        .unwrap_or(false)
     }
 }
 
-/// Whether a managed daemon that shut down saved the thread to resume when it starts again,
-/// with any turn it interrupted. A saved file that cannot be read counts as saving it.
-fn restore_pending(profile: &Path, thread: &str) -> bool {
-    const LIMIT: u64 = 1024 * 1024;
-    let Ok(thread) = Uuid::parse_str(thread) else {
-        return true;
-    };
-    let mut saved = Vec::new();
-    match File::open(profile.join("app-server-daemon/loaded-threads.json")) {
-        Ok(file) => {
-            if file.take(LIMIT + 1).read_to_end(&mut saved).is_err() || saved.len() as u64 > LIMIT {
-                return true;
-            }
-        }
-        Err(error) => return error.kind() != ErrorKind::NotFound,
+/// The control socket Codex binds in its profile for the daemon it runs.
+const CONTROL_SOCKET: &str = "app-server-control/app-server-control.sock";
+/// The longest the lifecycle lock is held for a connection attempt to that socket.
+const PROBE_LIMIT: Duration = Duration::from_secs(1);
+
+/// A shared hold on a lock file, released explicitly so a child process forked meanwhile
+/// cannot keep it held.
+struct SharedLock(File);
+
+impl Drop for SharedLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
     }
-    let thread = thread.hyphenated().to_string();
-    saved
-        .windows(thread.len())
-        .any(|part| part == thread.as_bytes())
+}
+
+/// Holds Codex's daemon lifecycle lock shared, when no command holds it, so none can start,
+/// restart, update or stop the daemon until the hold ends. Every such command takes
+/// `app-server-daemon/daemon.lock` exclusively without waiting and retries while it is taken,
+/// so a short hold only delays it. A missing lock file means no command has run in the
+/// profile. `None` while a command runs or the lock cannot be read.
+fn lifecycle_paused(profile: &Path) -> Option<Option<SharedLock>> {
+    match File::open(profile.join("app-server-daemon/daemon.lock")) {
+        Ok(file) => file.try_lock_shared().ok().map(|()| Some(SharedLock(file))),
+        Err(error) if error.kind() == ErrorKind::NotFound => Some(None),
+        Err(_) => None,
+    }
 }
 
 /// The activity of a thread this connection has not loaded, from its latest saved turn: failed
 /// after a failed turn, and idle after any other turn with an end time, which completed or was
 /// interrupted. A turn without an end time, which reads as interrupted, is running while a
 /// process holds the thread, so the thread is unknown. Once none does, its process ended
-/// without finishing it, as a killed or crashed one does, and the thread is idle.
-fn saved_turn_activity(turn: &Turn, writer_gone: impl FnOnce() -> bool) -> Option<HostActivity> {
+/// without finishing it, as a killed or crashed one does, and the thread is idle. The writer
+/// probe runs only for such a turn.
+async fn saved_turn_activity(
+    turn: &Turn,
+    writer_gone: impl Future<Output = bool>,
+) -> Option<HostActivity> {
     let phase = match (turn.status.as_str(), turn.completed_at) {
         ("failed", _) => HostPhase::Failed,
         (_, Some(_)) => HostPhase::Idle,
-        (_, None) if writer_gone() => HostPhase::Idle,
+        (_, None) if writer_gone.await => HostPhase::Idle,
         (_, None) => return None,
     };
     Some(HostActivity {

@@ -42,12 +42,63 @@ pub(super) struct Connection {
 /// What the latest attempt to connect learned about the profile's Codex daemon.
 #[derive(Clone, Copy, Default)]
 pub(super) enum Reach {
+    /// No daemon was reached. That alone does not show that none runs.
     #[default]
     Unknown,
-    /// No daemon answered: discovery found none, or its socket refused the connection.
-    Absent,
-    /// A daemon accepted the connection on a socket bound at this time.
-    Bound(Option<SystemTime>),
+    /// A daemon accepted the connection on a socket bound this long ago, when its bind time is
+    /// readable.
+    Bound(Option<BoundAge>),
+}
+
+/// How long a daemon's socket has been bound: credited once when this connection first
+/// reaches that socket, and counted on the monotonic clock from then on.
+#[derive(Clone, Copy)]
+pub(super) struct BoundAge {
+    credit: Duration,
+    sighted: Instant,
+}
+
+impl BoundAge {
+    pub(super) fn elapsed(&self) -> Duration {
+        self.credit + self.sighted.elapsed()
+    }
+}
+
+/// The ages credited to the sockets this connection reached. The first credit is the smaller
+/// of the wall clock's age of the socket and its age on a clock that reads the wall clock
+/// once, when the connection was made, and runs on the monotonic clock after. So a clock set
+/// forward or back, or a wake from sleep, after the connection was made cannot make a socket
+/// look older than it is. A later sighting of the same socket keeps its credit, so a
+/// reconnect neither restarts nor shortens the count.
+struct Sightings {
+    wall: SystemTime,
+    steady: Instant,
+    last: Option<(SystemTime, BoundAge)>,
+}
+
+impl Sightings {
+    fn new() -> Self {
+        Self {
+            wall: SystemTime::now(),
+            steady: Instant::now(),
+            last: None,
+        }
+    }
+
+    fn age(&mut self, bound: SystemTime) -> BoundAge {
+        if let Some((seen, age)) = self.last
+            && seen == bound
+        {
+            return age;
+        }
+        let since = |now: SystemTime| now.duration_since(bound).unwrap_or_default();
+        let age = BoundAge {
+            credit: since(SystemTime::now()).min(since(self.wall + self.steady.elapsed())),
+            sighted: Instant::now(),
+        };
+        self.last = Some((bound, age));
+        age
+    }
 }
 
 enum CommandRequest {
@@ -296,6 +347,7 @@ impl Daemon {
         reach: Arc<Mutex<Reach>>,
     ) {
         let mut id = 1_u64;
+        let mut sightings = Sightings::new();
         while let Some(first) = commands.recv().await {
             let request = match first {
                 CommandRequest::Rpc(request) => request,
@@ -313,9 +365,11 @@ impl Daemon {
             })
             .await;
             let (reached, connected) = match connected {
-                Ok(Ok((socket, bound))) => (Reach::Bound(bound), socket),
-                Ok(Err(None)) => (Reach::Absent, Err(AppError::Unavailable)),
-                Ok(Err(Some(error))) => (Reach::Unknown, Err(error)),
+                Ok(Ok((socket, bound))) => (
+                    Reach::Bound(bound.map(|bound| sightings.age(bound))),
+                    socket,
+                ),
+                Ok(Err(error)) => (Reach::Unknown, Err(error)),
                 Err(_) => (Reach::Unknown, Err(AppError::Unavailable)),
             };
             if let Ok(mut current) = reach.lock() {
@@ -344,23 +398,17 @@ impl Daemon {
         }
     }
 
-    /// Connects to the profile's daemon socket and reads when it was bound. `None` means no
-    /// daemon answered; any other refusal carries its error.
-    async fn open(&self) -> Result<(UnixStream, Option<SystemTime>), Option<AppError>> {
-        let absent = |error| match error {
-            AppError::Unavailable => None,
-            error => Some(error),
-        };
-        let discovery = self.discover().await.map_err(absent)?;
-        let socket_path = self
-            .verified_socket(&discovery.socket_path)
-            .await
-            .map_err(absent)?;
+    /// Connects to the profile's daemon socket and reads when it was bound.
+    async fn open(&self) -> Result<(UnixStream, Option<SystemTime>), AppError> {
+        let discovery = self.discover().await?;
+        let socket_path = self.verified_socket(&discovery.socket_path).await?;
         let bound = tokio::fs::metadata(&socket_path)
             .await
             .ok()
             .and_then(|socket| socket.modified().ok());
-        let stream = UnixStream::connect(socket_path).await.map_err(|_| None)?;
+        let stream = UnixStream::connect(socket_path)
+            .await
+            .map_err(|_| AppError::Unavailable)?;
         Ok((stream, bound))
     }
 
