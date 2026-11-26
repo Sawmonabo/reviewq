@@ -1,7 +1,12 @@
+use std::fs::File;
+use std::io::ErrorKind;
+use std::path::Path;
+
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::recovery::{NativeFailure, RecoveryKind};
 use reviewq_app::hosts::{HostActivity, HostPhase, QuestionStatus};
 use reviewq_app::notifications::{Kind, NativeAttention, NativeOccurrence, TrackedNative};
+use uuid::Uuid;
 
 use super::Codex;
 use super::history::Turn;
@@ -39,10 +44,16 @@ impl Codex {
                 // for. Without a readable turn the thread is unknown; its stored state is
                 // replaced, not kept, because another process may have started a turn since.
                 ThreadStatus::NotLoaded if !target.idle_decides => None,
+                // The writer is probed after the turn is read, so a process that opens the
+                // thread in between holds it by the probe and the turn still counts as running.
                 ThreadStatus::NotLoaded => {
                     let read = self.turns(&thread.id, None, false, 1, false).await;
                     let latest = read.ok().and_then(|page| page.data.into_iter().next());
-                    activity = latest.as_ref().and_then(saved_turn_activity);
+                    activity = latest.as_ref().and_then(|turn| {
+                        saved_turn_activity(turn, || {
+                            writer_gone(self.profile.as_path(), &thread.id)
+                        })
+                    });
                     latest
                 }
                 _ => self
@@ -119,18 +130,43 @@ impl Codex {
 
 /// The activity of a thread this connection has not loaded, from its latest saved turn: failed
 /// after a failed turn, and idle after any other turn with an end time, which completed or was
-/// interrupted. A turn without an end time is still running in another process, which reports
-/// it as interrupted, so the thread is unknown.
-fn saved_turn_activity(turn: &Turn) -> Option<HostActivity> {
+/// interrupted. A turn without an end time, which reads as interrupted, is running while a
+/// process holds the thread, so the thread is unknown. Once none does, its process ended
+/// without finishing it, as a killed or crashed one does, and the thread is idle.
+fn saved_turn_activity(turn: &Turn, writer_gone: impl FnOnce() -> bool) -> Option<HostActivity> {
     let phase = match (turn.status.as_str(), turn.completed_at) {
         ("failed", _) => HostPhase::Failed,
         (_, Some(_)) => HostPhase::Idle,
+        (_, None) if writer_gone() => HostPhase::Idle,
         (_, None) => return None,
     };
     Some(HostActivity {
         phase,
         has_questions: false,
     })
+}
+
+/// Whether no process holds the thread. A Codex process keeps an exclusive lock on
+/// `thread-writer-locks/<thread>.lock` in its profile for every thread it has loaded, and the
+/// system releases it when the process ends, however it ends. The probe first takes the
+/// folder's coordination lock without waiting, as Codex does before it checks that a thread
+/// is idle, so it never meets a process in the middle of taking a thread. A missing thread
+/// lock means no process holds the thread. Anything else unclear counts as held.
+fn writer_gone(profile: &Path, thread: &str) -> bool {
+    let Ok(thread) = Uuid::parse_str(thread) else {
+        return false;
+    };
+    let locks = profile.join("thread-writer-locks");
+    let Ok(coordination) = File::open(locks.join(".coordination.lock")) else {
+        return false;
+    };
+    if coordination.try_lock().is_err() {
+        return false;
+    }
+    match File::open(locks.join(format!("{}.lock", thread.hyphenated()))) {
+        Ok(lock) => lock.try_lock_shared().is_ok(),
+        Err(error) => error.kind() == ErrorKind::NotFound,
+    }
 }
 
 fn occurrence(kind: Kind, native_ref: String, at_ms: Option<i64>) -> NativeOccurrence {

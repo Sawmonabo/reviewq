@@ -124,9 +124,11 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
     );
 
     // The thread is loaded only in another process. Its latest saved turn shows it idle once
-    // the turn has an end time, completed or interrupted, and unknown while it reads as
-    // interrupted without one, which is how a turn running elsewhere reads. Each observation
-    // of a lead that settling waits on reads one turn; any other session's reads none.
+    // the turn has an end time, completed or interrupted. Without one, which is how a turn
+    // running elsewhere reads, it is unknown while a process holds the thread's writer lock or
+    // the lock cannot be read, and idle once no process holds it, as after a killed process.
+    // Each observation of a lead that settling waits on reads one turn; any other session's
+    // reads none.
     let tracked = |idle_decides| TrackedNative {
         session: HistorySession {
             target: lead.target().clone(),
@@ -151,10 +153,18 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
     assert_eq!(phase(true).await, Some(HostPhase::Idle));
     *latest_turn.lock().unwrap() = ("interrupted", None);
     assert_eq!(phase(true).await, None);
+    let locks = session_dir.with_file_name("thread-writer-locks");
+    fs::create_dir(&locks).unwrap();
+    fs::write(locks.join(".coordination.lock"), "").unwrap();
+    let writer = fs::File::create(locks.join(format!("{thread_id}.lock"))).unwrap();
+    writer.lock().unwrap();
+    assert_eq!(phase(true).await, None);
+    drop(writer);
+    assert_eq!(phase(true).await, Some(HostPhase::Idle));
     *latest_turn.lock().unwrap() = ("interrupted", Some(2));
     assert_eq!(phase(true).await, Some(HostPhase::Idle));
     assert_eq!(phase(false).await, None);
-    assert_eq!(turn_reads.load(Ordering::Relaxed), 3);
+    assert_eq!(turn_reads.load(Ordering::Relaxed), 5);
     *latest_turn.lock().unwrap() = ("completed", Some(1));
 
     assert!(matches!(
