@@ -23,6 +23,11 @@ const countsLine = /^P0: \d+ · P1: \d+ · P2: \d+ · P3: \d+ · Blocking: \d+ �
 const countToken = /(?:P[0-3]|Blocking|Nonblocking): (\d+)/g;
 // The four cover lines of a composed version, which the formatted view leaves out.
 const coverLabels = new Set(["Scope:", "Reviewed source:", "Reviewed target:", "Checked at:"]);
+// A thread outcome that needs nothing more from the reader. A resolved discussion is confirmed
+// in tone too, but GitLab resolution alone does not settle a thread.
+const settledLabels = "fixed(?: in code)?|clarified(?: and withdrawn)?|withdrawn|superseded";
+const settledLabel = new RegExp(`^(?:${settledLabels})$`, "i");
+const confirmedLabel = new RegExp(`^(?:${settledLabels}|resolved(?: in GitLab)?)$`, "i");
 
 export function reportStructure(
   nodes: readonly RootContent[],
@@ -189,7 +194,7 @@ function reportTable(node: Element, previousThreads: boolean): Element {
   );
   const table = styled(node, "report-previous-threads");
   if (!statusColumns?.length) return table;
-  return {
+  const styledTable = {
     ...table,
     children: table.children.map((body) =>
       body.type === "element" && body.tagName === "tbody"
@@ -207,6 +212,81 @@ function reportTable(node: Element, previousThreads: boolean): Element {
         : body,
     ),
   };
+  // GitLab resolution alone is not an outcome, so the fold reads every other status column.
+  const outcomes = statusColumns.filter((index) => headings?.[index] !== "gitlab");
+  // Hidden rows add no width, so only CSS-sized columns (up to three) stay put when rows open.
+  // Paired with the previous-threads column widths in report.css; change both together.
+  const columns = headings?.length ?? 0;
+  return outcomes.length && columns <= 3
+    ? foldSettled(styledTable, outcomes, columns)
+    : styledTable;
+}
+
+// Draws the settled rows after the others, behind one control the reader opens. Each body
+// row keeps its source order in `data-report-row`, which a selection must respect, and each
+// settled cell holds its content in a wrapper the reader hides until browser find reaches it.
+// The table's position keys the reader's fold state, so a table without one stays unfolded.
+function foldSettled(table: Element, outcomes: number[], columns: number): Element {
+  const index = table.children.findIndex(
+    (child) => child.type === "element" && child.tagName === "tbody",
+  );
+  const body = table.children[index];
+  if (body?.type !== "element" || !table.position) return table;
+  const rows = body.children.filter(
+    (row): row is Element => row.type === "element" && row.tagName === "tr",
+  );
+  const numbered = rows.map((row, order) => ({
+    ...row,
+    properties: { ...row.properties, dataReportRow: order },
+  }));
+  const settled = numbered.filter((row) => isSettled(row, outcomes));
+  if (!settled.length) return table;
+  const position = table.position;
+  const part = (name: string, children: ElementContent[], properties = {}): Element => ({
+    type: "element",
+    tagName: "tbody",
+    properties: { className: [name], ...properties },
+    children,
+    position,
+  });
+  const kept = numbered.filter((row) => !settled.includes(row));
+  const folded = settled.map((row) => ({
+    ...row,
+    children: row.children.map((cell) =>
+      cell.type === "element" && cell.tagName === "td"
+        ? { ...cell, children: [element("div", "report-thread-cell", cell.children)] }
+        : cell,
+    ),
+  }));
+  return {
+    ...table,
+    children: [
+      ...table.children.slice(0, index),
+      ...(kept.length ? [{ ...body, children: kept }] : []),
+      part("report-thread-control", [], {
+        dataReportSettled: settled.length,
+        dataReportColumns: columns,
+      }),
+      part("report-thread-settled", folded),
+      ...table.children.slice(index + 1),
+    ],
+  };
+}
+
+// Every outcome cell is a settled label, or begins with one in bold, such as
+// `**Fixed.** reason`.
+function isSettled(row: Element, outcomes: number[]) {
+  const cells = row.children.filter(
+    (child): child is Element => child.type === "element" && child.tagName === "td",
+  );
+  return outcomes.every((column) => {
+    const cell = cells[column];
+    if (!cell) return false;
+    const lead = cell.children.find((child) => child.type !== "text" || child.value.trim());
+    const label =
+      lead?.type === "element" && lead.tagName === "strong" ? reportText(lead) : reportText(cell);
+    return settledLabel.test(label.trim().replace(/\.$/, ""));
+  });
 }
 
 function twoColumnBody(table: Element) {
@@ -240,14 +320,11 @@ function styleStatuses(cells: ElementContent[], columns: number[]) {
     const index = column++;
     const label = reportText(cell).trim();
     if (!columns.includes(index)) return cell;
-    const tone =
-      /^(?:fixed(?: in code)?|resolved(?: in GitLab)?|clarified(?: and withdrawn)?|withdrawn|superseded)$/i.test(
-        label,
-      )
-        ? "confirmed"
-        : /^(?:still present|open|unresolved|partly addressed|unverified)$/i.test(label)
-          ? "attention"
-          : "neutral";
+    const tone = confirmedLabel.test(label)
+      ? "confirmed"
+      : /^(?:still present|open|unresolved|partly addressed|unverified)$/i.test(label)
+        ? "attention"
+        : "neutral";
     return { ...cell, properties: { ...cell.properties, dataReportThreadStatus: tone } };
   });
 }

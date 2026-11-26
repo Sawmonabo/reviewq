@@ -16,6 +16,7 @@ import {
 import type { GroupPosition, PreparedGroup, ReportBlock } from "./report-presentation";
 import { outcomeLabels } from "./report-structure";
 import type { ReaderDocument } from "./report-reader";
+import { ThreadFoldScope, ThreadTableBody } from "./ThreadTableBody";
 import { useReportPreparation } from "./useReportPreparation";
 
 type Quote = { readonly text: string; readonly offset: number };
@@ -33,6 +34,8 @@ export function RichReport({
   bookmark,
   onQuote,
   onSource,
+  openFolds,
+  onFold,
 }: {
   readonly historyAccess: ReactNode;
   readonly document: ReaderDocument;
@@ -41,6 +44,9 @@ export function RichReport({
   readonly bookmark: string;
   readonly onQuote: (text: string, offset: number) => void;
   readonly onSource: (offset: number) => void;
+  // The report offsets of the thread tables the reader opened.
+  readonly openFolds: ReadonlySet<number>;
+  readonly onFold: (table: number) => void;
 }) {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const [scroll, setScroll] = useState<HTMLElement | null>(null);
@@ -189,9 +195,11 @@ export function RichReport({
     };
   }, [host, scroll, usesVirtual]);
 
+  const latestFolds = useRef(openFolds);
   useLayoutEffect(() => {
     latestReader.current = reader;
-  }, [reader]);
+    latestFolds.current = openFolds;
+  }, [reader, openFolds]);
   // The whole document replacing a windowed one after the place was restored can move rows.
   // Restore the latest place again, before the browser paints, so the same row stays aligned.
   useLayoutEffect(() => {
@@ -221,7 +229,7 @@ export function RichReport({
       timer = window.setTimeout(commit, 180);
     }
     function commit() {
-      saveValue(bookmark, position.current);
+      saveValue(bookmark, { ...position.current, folds: [...latestFolds.current] });
     }
     container.addEventListener("scroll", record, { passive: true });
     window.addEventListener("pagehide", commit);
@@ -453,7 +461,9 @@ export function RichReport({
         {index === 0 && historyAccess}
         {group ? (
           <DiagramDisplayContext value={group.drawings}>
-            {renderBlock(group.block, index)}
+            <ThreadFoldScope start={group.source.utf16} open={openFolds} toggle={onFold}>
+              {renderBlock(group.block, index)}
+            </ThreadFoldScope>
           </DiagramDisplayContext>
         ) : (
           <div
@@ -554,8 +564,9 @@ const AuthoredContent = memo(function AuthoredContent({
 }: {
   readonly nodes: readonly RootContent[];
 }) {
-  return <MarkdownTree tree={{ type: "root", children: [...nodes] }} />;
+  return <MarkdownTree tree={{ type: "root", children: [...nodes] }} components={authored} />;
 });
+const authored = { tbody: ThreadTableBody };
 
 // A group is known by its source offset.
 function blockKey(group: GroupPosition) {

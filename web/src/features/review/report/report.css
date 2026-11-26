@@ -390,6 +390,9 @@
   font-size: 11px;
   font-weight: 600;
 }
+/* These widths hold the columns of a folded table when its settled rows open, which hidden rows
+   do not size. reportTable in report-structure.ts folds only tables of up to three columns for
+   this reason; change both together. */
 .report-authored .prose .report-previous-threads :is(th, td):first-child {
   width: 1%;
   min-width: min(100px, 24vw);
@@ -412,6 +415,126 @@
 }
 .report-previous-threads [data-report-thread-status="attention"] {
   color: var(--amber);
+}
+/* Settled rows fold behind a pill on the one line after the rows that still need attention.
+   A folded cell has no padding or border and its content is hidden until found, so a folded
+   row is 0px tall. */
+.report-authored
+  .prose
+  .report-previous-threads
+  :is(
+    tbody:has(+ .report-thread-control) > tr:last-child > td,
+    thead:has(+ .report-thread-control) th
+  ) {
+  border-block-end-color: transparent;
+}
+.report-authored .prose .report-previous-threads > .report-thread-control > tr > td {
+  width: auto;
+  min-width: 0;
+  padding: 13px 0 11px;
+  border: 0;
+  transition: padding 0.24s cubic-bezier(0.2, 0, 0, 1);
+}
+.report-authored
+  .prose
+  .report-previous-threads
+  > .report-thread-control:has([aria-expanded="true"])
+  > tr
+  > td {
+  padding-block-end: 0;
+}
+.report-thread-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.report-thread-line::before,
+.report-thread-line::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--thread-divider);
+}
+.report-authored .report-thread-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 0;
+  padding: 3px 10px 3px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  transition:
+    border-color 0.14s ease,
+    color 0.14s ease,
+    background 0.14s ease;
+}
+.report-authored .report-thread-pill:hover {
+  border-color: var(--strong-line);
+  background: var(--raised);
+  color: var(--text);
+}
+.report-thread-pill b {
+  color: var(--text);
+  font-weight: 600;
+}
+/* The action keeps the width of its longer word, so the centred pill stays put. */
+.report-thread-action {
+  display: inline-grid;
+}
+.report-thread-action > span,
+.report-thread-action::before,
+.report-thread-action::after {
+  grid-area: 1 / 1;
+}
+.report-thread-action::before,
+.report-thread-action::after {
+  visibility: hidden;
+  content: "Show" / "";
+}
+.report-thread-action::after {
+  content: "Hide" / "";
+}
+.report-thread-pill > svg {
+  flex: none;
+}
+.report-thread-pill > svg:first-child {
+  color: var(--green);
+}
+.report-thread-pill > svg:last-child {
+  transition: transform 0.24s cubic-bezier(0.2, 0, 0, 1);
+}
+.report-thread-pill[aria-expanded="true"] > svg:last-child {
+  transform: rotate(180deg);
+}
+.report-authored
+  .prose
+  .report-previous-threads
+  > .report-thread-settled:not([data-open])
+  > tr
+  > td {
+  padding-block: 0;
+  border: 0;
+}
+.report-thread-settled[data-opening] > tr {
+  animation: report-thread-fade-in 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes report-thread-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .report-thread-settled[data-opening] > tr {
+    animation: none;
+  }
+  .report-authored .prose .report-previous-threads > .report-thread-control > tr > td,
+  .report-authored .report-thread-pill,
+  .report-thread-pill > svg:last-child {
+    transition: none;
+  }
 }
 .report-finding-assessment {
   color: var(--amber);

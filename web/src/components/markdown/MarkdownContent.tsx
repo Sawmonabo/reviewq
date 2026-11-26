@@ -2,6 +2,7 @@ import { createContext, useContext, useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
+import type { Components } from "hast-util-to-jsx-runtime";
 import type { Element, Root } from "hast";
 import type { DocumentDisplay } from "../../api/generated/contracts/common";
 import { DiagramCacheContext, DiagramDisplayContext } from "./diagram-cache";
@@ -66,9 +67,12 @@ function MarkdownSource({ source }: { readonly source: string }) {
 export function MarkdownTree({
   tree,
   provisional = false,
+  components,
 }: {
   readonly tree: Root;
   readonly provisional?: boolean;
+  // Elements the caller draws itself, such as the report's table bodies.
+  readonly components?: Partial<Components>;
 }) {
   return (
     <div className="prose">
@@ -81,6 +85,7 @@ export function MarkdownTree({
           components: {
             pre: CodeBlock,
             table: MarkdownTable,
+            ...components,
           },
         })}
       </ProvisionalMarkdown>

@@ -6,6 +6,8 @@ type Bookmark = {
   readonly top: number;
   readonly offset?: number;
   readonly inset?: number;
+  // The report offsets of the thread tables the reader opened.
+  readonly folds?: readonly number[];
 };
 export function restoreBookmark(
   host: HTMLElement,
@@ -138,6 +140,12 @@ export function readBookmark(key: string): Bookmark | undefined {
     item.top < 0
   )
     return;
+  const folds =
+    "folds" in item &&
+    Array.isArray(item.folds) &&
+    item.folds.every((fold) => Number.isSafeInteger(fold) && fold >= 0)
+      ? { folds: item.folds as number[] }
+      : {};
   if (
     "offset" in item &&
     typeof item.offset === "number" &&
@@ -155,7 +163,8 @@ export function readBookmark(key: string): Bookmark | undefined {
         typeof item.byte === "number" &&
         Number.isSafeInteger(item.byte) &&
         item.byte >= 0 && { byte: item.byte }),
+      ...folds,
     };
   }
-  return { top: item.top };
+  return { top: item.top, ...folds };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { RunDetail } from "../../../api/generated/contracts";
 import type { QuoteRef, ReportSummary } from "../../../api/generated/contracts/reports";
@@ -77,6 +77,20 @@ export default function ReportDocument({
   const admitted =
     report.byteLength <= 1024 * 1024 && report.lineCount <= 10_000 && report.maxLineBytes <= 16_384;
   const bookmark = `findings.position.${run.runId}.${report.receiptId}.${report.sha256}`;
+  // Opened thread tables by report offset, kept while the reader is replaced or reads source,
+  // and saved with the reading position.
+  const [openFolds, setOpenFolds] = useState<ReadonlySet<number>>(
+    () => new Set(readBookmark(bookmark)?.folds),
+  );
+  const toggleFold = useCallback(
+    (table: number) =>
+      setOpenFolds((previous) => {
+        const next = new Set(previous);
+        if (!next.delete(table)) next.add(table);
+        return next;
+      }),
+    [],
+  );
   const full = useRef(false);
   const body = useResource(
     JSON.stringify(["accepted-document", run.runId, report.receiptId, report.sha256]),
@@ -253,6 +267,8 @@ export default function ReportDocument({
               openSource(offset);
               setNotice("Select the exact passage in the original Markdown to attach a quote.");
             }}
+            openFolds={openFolds}
+            onFold={toggleFold}
           />
         ) : (
           <Empty title="Formatted report unavailable">

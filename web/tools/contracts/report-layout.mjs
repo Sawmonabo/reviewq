@@ -136,14 +136,42 @@ export function verifyReportLayout({ parseMarkdown, wholeDocument, reportMarkdow
   const threads = blocks.find((block) => block.name === lines[heading]?.slice(3));
   const nodes = threads?.nodes.filter((node) => node.type === "element") ?? [];
   const table = nodes.find((node) => node.tagName === "table");
-  const rows = table && find(table.children, (node) => node.tagName === "tbody")?.children;
-  const drawnRows = rows?.filter((node) => node.tagName === "tr") ?? [];
+  // The reader draws settled rows last, behind its fold control, and numbers rows in source order.
+  const drawnRows = (table?.children ?? [])
+    .filter((node) => node.tagName === "tbody")
+    .flatMap((body) => body.children.filter((node) => node.tagName === "tr"))
+    .sort((a, b) => a.properties.dataReportRow - b.properties.dataReportRow);
   expect(
     firstRow > 2 &&
       tableLength > 2 &&
       table?.properties.className?.includes("report-previous-threads") &&
       drawnRows.length === tableLength - 2,
     "draws the previous-threads table",
+  );
+  const settled = lines
+    .slice(firstRow, tableStart + tableLength)
+    .flatMap((line, index) =>
+      /^\|(?:[^|\\]|\\.)+\| \*\*(?:Fixed|Clarified and withdrawn|Superseded)\.\*\* /.test(line)
+        ? [index]
+        : [],
+    );
+  // The kept rows come first, then the control, then the settled rows.
+  const [kept, control, foldedBody, ...rest] =
+    table?.children.filter((node) => node.tagName === "tbody") ?? [];
+  const folded = foldedBody?.properties.className?.includes("report-thread-settled")
+    ? foldedBody.children.filter((node) => node.tagName === "tr")
+    : undefined;
+  expect(
+    settled.length > 0 &&
+      settled.length < tableLength - 2 &&
+      rest.length === 0 &&
+      !kept?.properties.className &&
+      kept.children.some((node) => node.tagName === "tr") &&
+      control?.properties.className?.includes("report-thread-control") &&
+      control.properties.dataReportSettled === settled.length &&
+      folded?.length === settled.length &&
+      folded.every((row, index) => row.properties.dataReportRow === settled[index]),
+    "folds the settled rows behind one control after the others",
   );
   const drawnNote = nodes.findIndex((node) => node.tagName === "p");
   expect(

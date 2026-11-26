@@ -117,7 +117,7 @@ export type PreparedGroup = {
 export function selectionSource(range: Range, groups: readonly PreparedGroup[]) {
   const start = groups[0],
     end = groups.at(-1);
-  if (!start || !end || !range.toString().trim()) return;
+  if (!start || !end || !range.toString().trim() || !followsSourceRows(range)) return;
   const from = sourcePoint(start.source.text, range, "start");
   const to = sourcePoint(end.source.text, range, "end");
   if (from === undefined || to === undefined || from < start.block.offset || to > end.block.end)
@@ -143,6 +143,48 @@ export function selectionSource(range: Range, groups: readonly PreparedGroup[]) 
     text,
     offset: scalarOffset(start.source, from) + [...exact.slice(0, exact.indexOf(text))].length,
   };
+}
+
+// A folded previous-threads table draws its rows out of source order. A selection that ends
+// inside it maps to one source range only when the rows it covers form one unbroken run in
+// source order, from the row it starts in, or the first row when it starts outside the rows, to
+// the row it ends in, or the last row when it ends outside them. Rows folded closed are never
+// covered. A selection around the whole table quotes it.
+function followsSourceRows(range: Range) {
+  const around = parentElement(range.commonAncestorContainer);
+  const tables = [
+    ...(around?.closest("table") ? [around.closest("table")!] : []),
+    ...(around?.querySelectorAll("table") ?? []),
+  ];
+  return tables.every((table) => {
+    if (
+      !table.querySelector(":scope > .report-thread-control") ||
+      (!table.contains(range.startContainer) && !table.contains(range.endContainer))
+    )
+      return true;
+    const rows = [...table.querySelectorAll<HTMLElement>(":scope > tbody > tr[data-report-row]")];
+    const covered = rows
+      .filter(
+        (row) =>
+          range.intersectsNode(row) && !row.closest(".report-thread-settled:not([data-open])"),
+      )
+      .map((row) => Number(row.dataset.reportRow))
+      .sort((a, b) => a - b);
+    const rowOf = (node: Node) => {
+      const row = rows.find((candidate) => candidate.contains(node));
+      return row && Number(row.dataset.reportRow);
+    };
+    const start = rowOf(range.startContainer);
+    const end = rowOf(range.endContainer);
+    const first = covered[0];
+    const last = covered.at(-1);
+    if (first === undefined || last === undefined) return start === undefined && end === undefined;
+    return (
+      last - first === covered.length - 1 &&
+      (start === undefined ? first === 0 : start === first) &&
+      (end === undefined ? last === rows.length - 1 : end === last)
+    );
+  });
 }
 
 export function scalarOffset(slice: ReportText, local: number) {
