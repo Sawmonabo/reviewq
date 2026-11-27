@@ -75,12 +75,15 @@ async function registerTools($) {
   }
 }
 
-// ReviewQ verifies a conversation from its file, which Claude Code writes only once it stores a
-// row. A notice is stored at once, so a new conversation gets its file before the link.
+// ReviewQ verifies a conversation from its file, which Claude Code creates only once it stores a
+// row. A notice is stored at once and reaches the file a moment later, so a new conversation
+// gets its file before the link.
 async function storeConversation($, target) {
   const { transcriptPath } = await $.session.info();
-  if (!transcriptPath || await $.fs.exists(transcriptPath).catch(() => true)) return;
+  const written = () => $.fs.exists(transcriptPath).catch(() => true);
+  if (!transcriptPath || await written()) return;
   await $.session.append({ message: { type: "system", content: [{ type: "text", text: `Linking this conversation to ${target} in ReviewQ.` }] } });
+  for (let waited = 0; waited < 2000 && !(await written()); waited += 50) await $.clock.sleep(50);
 }
 
 function pending(state) {
