@@ -75,15 +75,25 @@ async function registerTools($) {
   }
 }
 
-// ReviewQ verifies a conversation from its file, which Claude Code creates only once it stores a
-// row. A notice is stored at once and reaches the file a moment later, so a new conversation
-// gets its file before the link.
+// ReviewQ verifies a conversation from the rows in its file, and Claude Code writes none for a
+// new conversation until it stores one. A notice is stored at once; whether one was added.
 async function storeConversation($, target) {
   const { transcriptPath } = await $.session.info();
-  const written = () => $.fs.exists(transcriptPath).catch(() => true);
-  if (!transcriptPath || await written()) return;
-  await $.session.append({ message: { type: "system", content: [{ type: "text", text: `Linking this conversation to ${target} in ReviewQ.` }] } });
-  for (let waited = 0; waited < 2000 && !(await written()); waited += 50) await $.clock.sleep(50);
+  if (!transcriptPath || await $.fs.exists(transcriptPath).catch(() => true)) return false;
+  const added = await $.session.append({ message: { type: "system", content: [{ type: "text", text: `Linking this conversation to ${target} in ReviewQ.` }] } });
+  return !added?.deny;
+}
+
+// Links `target`, storing a new conversation first. Its rows reach the file a moment after the
+// notice, so the link is tried again for up to two seconds.
+async function link($, target) {
+  const stored = await storeConversation($, target).catch(() => false);
+  let result = await refresh($, target);
+  for (let waited = 0; stored && result.error && waited < 2000; waited += 100) {
+    await $.clock.sleep(100);
+    result = await refresh($, target);
+  }
+  return result;
 }
 
 function pending(state) {
@@ -201,8 +211,7 @@ export function register(on) {
     const refused = toolsRefused && `ReviewQ's tools are missing from this session, so it cannot run a review here. Claude Code said: ${toolsRefused}\nStart a new Claude Code session in this checkout and run /reviewq again.`;
     // A review without its tools could record nothing, so no target is linked while they are refused.
     if (refused && target) return { text: refused, isTextDisplayOnly: true };
-    if (target) await storeConversation($, target).catch(() => {});
-    const result = await refresh($, target);
+    const result = target ? await link($, target) : await refresh($);
     if (session?.linked) schedule($);
     if (result.rule && !refused) return { text: `${result.message}\n\n${result.rule}` };
     const status = result.message ?? result.error;
