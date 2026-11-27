@@ -23,7 +23,7 @@ export async function callLedger($, state, event) {
   const tool = ledgerTools[ledgerToolIds.indexOf(event.tool)];
   if (!tool) return refusal("ReviewQ does not serve this tool.");
   const call = { tool: tool.name, callId: event.tool_use_id, input: toolInput(event) };
-  if (state?.activeTurn) call.turnId = state.activeTurn;
+  if (state?.turn?.activeTurn) call.turnId = state.turn.activeTurn;
   if (event.agentId) call.agentId = event.agentId;
   return toolResult(await invoke($, "ledger", state ?? { id: await $.session.id() }, call, tool.waitMs));
 }

@@ -1,6 +1,6 @@
 import { invoke } from "./bridge.js";
 import { currentSettings } from "./settings.js";
-import { claimDelivery } from "./companion.js";
+import { claimDelivery, phaseOf } from "./companion.js";
 
 const PLUGIN = "reviewq";
 
@@ -19,8 +19,7 @@ async function remember($, state, attempt) {
 }
 
 function canSend(state) {
-  return state.linked && !state.working && state.phase === "idle" && !state.question
-    && !state.draft && !state.pendingPrompt && !state.activeTurn;
+  return state.linked && !state.draft && phaseOf(state) === "idle";
 }
 
 async function postOutcome($, state, attempt) {

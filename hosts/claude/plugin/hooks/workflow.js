@@ -41,7 +41,7 @@ export async function stageAction($, state, event) {
     return refusal("The user has a newer instruction waiting. Nothing was recorded. Read it before you declare an action.");
   }
   if (declare) {
-    context.turnId = state.activeTurn;
+    context.turnId = state.turn.activeTurn;
     context.declaration = event.declaration;
   }
   const result = await invoke($, declare ? "action" : "action-status", state, context, actionWaitMs);

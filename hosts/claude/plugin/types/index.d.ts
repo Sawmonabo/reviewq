@@ -22,12 +22,36 @@ export type ReviewqDelivery = {
   copy: string;
 };
 
+/** The generation's turn as its copies left it; each handler writes only what its event changed. */
+export type ReviewqTurn = {
+  id: string;
+  generation: string;
+  turnId?: string;
+  activeTurn?: string | null;
+  step?: number | null;
+  model?: string;
+  effort?: string | null;
+  phase?: "working" | "idle" | "failed" | null;
+  question?: string | null;
+  lastPrompt?: string;
+  lastPromptTurn?: string | null;
+  lastPromptManual?: boolean;
+};
+
+/** The copy of the module that opened the companion last. */
+export type ReviewqCopy = {
+  id: string;
+  copy: string;
+};
+
 declare module "claude-code" {
   interface PluginState {
     reviewq: {
       companion: ReviewqCompanion;
       progress: ReviewqProgress;
       delivery: ReviewqDelivery;
+      turn: ReviewqTurn;
+      copy: ReviewqCopy;
     };
   }
 }

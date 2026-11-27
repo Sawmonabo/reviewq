@@ -44,13 +44,15 @@ export async function invoke($, action, state, value, timeoutMs = 5000) {
 }
 
 // Waits for ReviewQ to answer the question at `address`, until `signal` aborts, which ends the
-// helper.
+// helper. Nothing awaits between the check of `signal` and the listener on it, which never
+// fires once added to a signal already aborted.
 export async function waitForQuestion($, state, address, questions, signal) {
   const argv = await nativeArgv($);
+  const env = argv && await $.process.hookEnv();
   if (!argv || signal.aborted) return undefined;
   argv.push("claude-bridge", "question", state.id);
   const input = JSON.stringify(withProof(state, { address, input: { questions } }));
-  const stream = $.process.spawn({ argv, input, env: await $.process.hookEnv() });
+  const stream = $.process.spawn({ argv, input, env });
   const end = () => { void stream.return(undefined).catch(() => {}); };
   signal.addEventListener("abort", end, { once: true });
   let stdout = "";

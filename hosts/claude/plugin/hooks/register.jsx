@@ -5,7 +5,7 @@ import { callLedger, ledgerToolIds, registerLedgerTools } from "./ledger.js";
 import { reconcileChildren } from "./children.js";
 import { currentSettings } from "./settings.js";
 import { observeQuestion } from "./questions.js";
-import { keepCounters, openCompanion } from "./companion.js";
+import { keepCounters, keepTurn, newest, openCompanion, phaseOf, readTurn } from "./companion.js";
 
 const HEARTBEAT_MS = 5000;
 const OFFLINE_MS = 30000;
@@ -77,18 +77,19 @@ async function workflowLead($) {
 }
 
 async function heartbeat($, state, allowDelivery = true) {
+  const turn = await readTurn($, state);
   const settings = await currentSettings($, state);
   const result = await invoke($, "heartbeat", state, {
     generation: state.generation,
     sequence: await keepCounters($, state, "sequence"),
-    phase: state.question ? "blocked" : state.working || state.activeTurn || state.pendingPrompt ? "working" : state.phase ?? null,
-    hasQuestions: !!state.question,
-    questionId: state.question ?? null,
-    turnId: state.turnId ?? null,
-    step: state.stepIndex ?? null,
-    latestPromptId: state.lastPrompt ?? null,
-    latestPromptTurnId: state.lastPromptTurn ?? null,
-    latestPromptManual: !!state.lastPromptTurn && !!state.lastPromptManual,
+    phase: phaseOf(state),
+    hasQuestions: !!turn.question,
+    questionId: turn.question ?? null,
+    turnId: turn.turnId ?? null,
+    step: turn.step ?? null,
+    latestPromptId: turn.lastPrompt ?? null,
+    latestPromptTurnId: turn.lastPromptTurn ?? null,
+    latestPromptManual: !!turn.lastPromptTurn && !!turn.lastPromptManual,
     model: settings?.model ?? null,
     effort: settings?.effort ?? null,
   });
@@ -105,6 +106,25 @@ async function heartbeat($, state, allowDelivery = true) {
   }
 }
 
+// A turn this copy restored from the kept value and has heard nothing of: the copy that saw it
+// start may have gone before it ended, leaving it running there. Claude Code's prompt says
+// whether a turn runs, and only a hook that draws it hears that, so the kept turn ends from a
+// timer, while the prompt still says idle. A step or the end of the turn reaching this copy
+// shows it hears the turn's end itself.
+function settleRestored($, state) {
+  const turnId = state.restoredTurn;
+  $.clock.after(0, async () => {
+    if (state !== session || state.restoredTurn !== turnId || state.working !== false) return;
+    state.restoredTurn = undefined;
+    await keepTurn($, state, kept => kept.activeTurn === turnId ? { activeTurn: null, phase: "idle", question: null } : {});
+    if (state.linked) schedule($);
+  });
+}
+
+function hear(event) {
+  if (!event.agentId && session?.restoredTurn === event.turnId) session.restoredTurn = undefined;
+}
+
 function schedule($, delay = 0, registration = false) {
   recheck ||= registration;
   if (checking) return;
@@ -112,9 +132,13 @@ function schedule($, delay = 0, registration = false) {
   timer = $.clock.after(delay, async () => {
     timer = undefined;
     checking = true;
+    let owner = true;
     try {
       const previous = session;
       const state = await current($);
+      // A reload's copy took over: this one stops its loop.
+      owner = await newest($);
+      if (!owner) return;
       if (recheck || state !== previous || pending(state)) {
         recheck = false;
         await refresh($);
@@ -122,7 +146,8 @@ function schedule($, delay = 0, registration = false) {
       if (state === session && state.linked) await heartbeat($, state);
     } finally {
       checking = false;
-      if (recheck) schedule($, 0);
+      if (!owner) recheck = false;
+      else if (recheck) schedule($, 0);
       else if (session?.linked) schedule($, HEARTBEAT_MS);
       else if (pending(session)) schedule($, REGISTRATION_RETRY_MS);
     }
@@ -177,27 +202,27 @@ export function register(on) {
       return next(event);
     }
     const state = await current($);
-    state.turnId = event.turnId;
-    state.activeTurn = event.turnId;
-    state.stepIndex = undefined;
-    state.phase = "working";
+    await keepTurn($, state, { turnId: event.turnId, activeTurn: event.turnId, step: null, phase: "working" });
     observeTurn(state, event.turnId);
     if (state.linked) schedule($);
     return next(event);
   });
 
   on("turn.step", async function* ($, event, next) {
-    if (!event.agentId && session?.turnId === event.turnId) {
-      session.stepIndex = event.index;
-      session.model = event.model;
-      session.effort = typeof event.effort === "string" ? event.effort : undefined;
+    hear(event);
+    const state = event.agentId ? undefined : await current($);
+    const effort = typeof event.effort === "string" ? event.effort : null;
+    // One write before each model request; a step of another turn changes nothing.
+    let ours = false;
+    const turn = state && await keepTurn($, state, base =>
+      (ours = base.turnId === event.turnId) ? { step: event.index, model: event.model, effort } : {});
+    if (ours) {
+      const prompt = turn.lastPrompt;
       if (event.index === 0) {
-        const state = session;
-        const prompt = state.lastPrompt;
         const native = await $.session.messages({ last: 1 });
-        if (session === state && state.lastPrompt === prompt
+        if (session === state && prompt
             && Array.isArray(native) && native.at(-1)?.uuid === prompt && native.at(-1)?.role === "user") {
-          state.lastPromptTurn = event.turnId;
+          await keepTurn($, state, kept => kept.lastPrompt === prompt ? { lastPromptTurn: event.turnId } : {});
         }
         if (state.delivery) await observeFirstStep($, state, event);
         if (state.linked) schedule($);
@@ -207,19 +232,18 @@ export function register(on) {
   });
 
   on("turn.complete", async ($, event, next) => {
+    hear(event);
     const result = await next(event);
     if (event.agentId && session?.linked) schedule($);
-    if (!event.agentId && session?.turnId === event.turnId) {
-      const state = session;
+    const state = event.agentId ? undefined : await current($);
+    if (state && (await readTurn($, state)).turnId === event.turnId) {
       if (state.linked) {
         await heartbeat($, state, false);
         await reportTurn($, state, event);
       }
-      state.activeTurn = undefined;
-      session.phase = event.reason === "error" ? "failed" : "idle";
-      finishTurn(session, event.turnId);
-      session.question = undefined;
-      if (session.linked) schedule($);
+      await keepTurn($, state, { activeTurn: null, phase: event.reason === "error" ? "failed" : "idle", question: null });
+      finishTurn(state, event.turnId);
+      if (state.linked) schedule($);
     }
     return result;
   });
@@ -235,12 +259,13 @@ export function register(on) {
     if (!event.agentId && result.uuid === event.uuid && session?.linked
       && !event.message.isMeta && event.message.role === "user") {
       const state = session;
-      state.lastPrompt = result.uuid;
-      state.lastPromptTurn = undefined;
-      state.lastPromptManual = event.origin?.kind === "composer" || event.origin?.kind === "bridge";
       state.inputRevision += 1;
       state.promptSubmitted = state.submitted;
       observeInput(state, event, result.uuid);
+      await keepTurn($, state, {
+        lastPrompt: result.uuid, lastPromptTurn: null,
+        lastPromptManual: event.origin?.kind === "composer" || event.origin?.kind === "bridge",
+      });
       await keepCounters($, state);
     }
     return result;
@@ -248,7 +273,7 @@ export function register(on) {
 
   on("tool.call", { tool: "mcp__reviewq__review_action" }, async ($, event) => {
     const state = event.agentId ? undefined : await workflowLead($);
-    if (!state?.linked || !state.activeTurn) {
+    if (!state?.linked || !(await readTurn($, state)).activeTurn) {
       return refusal("A ReviewQ action requires the linked lead and current user turn.");
     }
     await heartbeat($, state, false);
@@ -256,17 +281,23 @@ export function register(on) {
   });
 
   for (const tool of ledgerToolIds) {
-    on("tool.call", { tool }, async ($, event) => callLedger($, event.agentId ? session : await workflowLead($), event));
+    on("tool.call", { tool }, async ($, event) => {
+      const state = event.agentId ? session : await workflowLead($);
+      if (state) await readTurn($, state);
+      return callLedger($, state, event);
+    });
   }
 
   // A main-loop call that asks the person reports at once, without holding the check. ReviewQ
   // stores a permission request that arrives while it cannot tell whether this companion still
   // runs, and binds it to the step the next report names, so that report lands while the dialog
-  // is up. A subagent's permission request is not reported, so its calls are left alone.
+  // is up. A subagent's permission request is not reported, so its calls are left alone. A check
+  // without a tool call, such as a plugin's query, an `op` check or an MCP call that goes
+  // straight to its server, shows no dialog.
   on("tool.check", async ($, event, next) => {
     const verdict = await next(event);
     const state = session;
-    if (verdict?.decision === "ask" && !event.agentId && state?.linked) {
+    if (verdict?.decision === "ask" && event.tool_use_id && !event.agentId && state?.linked) {
       void heartbeat($, state, false).catch(() => {});
     }
     return verdict;
@@ -294,10 +325,15 @@ export function register(on) {
   });
 
   on("ui.render", { component: "PromptHint" }, ($, event, next) => {
-    if (event.surface !== "terminal" || !session?.linked) return next(event);
+    if (!session?.linked) return next(event);
+    // Whether a turn runs is the session's on every surface that draws the hint; the typed
+    // draft and the tail are the terminal's.
     session.working = event.props.isWorking;
+    if (!session.working && session.restoredTurn && session.turn.activeTurn === session.restoredTurn) {
+      settleRestored($, session);
+    }
+    if (event.surface !== "terminal") return next(event);
     session.draft = event.props.isDraft;
-    if (!session.working && !session.phase) session.phase = "idle";
     const offline = Date.now() - session.lastSeen >= OFFLINE_MS;
     const label = offline ? "Offline" : session.label;
     const suffix = label ? `ReviewQ · ${label}` : "ReviewQ";
