@@ -44,6 +44,13 @@ async function postOutcome($, state, attempt) {
   }
 }
 
+// Leaves the offer for a later heartbeat. Why goes to Claude Code's debug log alone.
+async function defer($, state, attempt, why) {
+  $.ui.log(`reviewq: delivery deferred: ${why}`, { to: "debug" });
+  attempt.outcome = { kind: "deferred" };
+  await postOutcome($, state, attempt);
+}
+
 export async function deliver($, state, offer) {
   if (!state.readRecovery) {
     const saved = await $.store.get(deliveryKey(state));
@@ -69,22 +76,19 @@ export async function deliver($, state, offer) {
   };
   state.delivery = attempt;
   if (!canSend(state) || await $.session.id() !== state.id) {
-    attempt.outcome = { kind: "deferred" };
-    await postOutcome($, state, attempt);
+    await defer($, state, attempt, `draft ${!!state.draft}, phase ${phaseOf(state)}`);
     return;
   }
   const prior = await $.session.messages({ last: 1 });
   attempt.after = Array.isArray(prior) ? prior.at(-1)?.uuid : undefined;
   if (!attempt.after || attempt.revision !== state.inputRevision) {
-    attempt.outcome = { kind: "deferred" };
-    await postOutcome($, state, attempt);
+    await defer($, state, attempt, attempt.after ? "new input" : `no last row (${prior?.deny ?? typeof prior})`);
     return;
   }
   const authorization = await invoke($, "delivery-check", state, { offer });
   if (!authorization.data) {
     attempt.authorizationUnknown = true;
-    attempt.outcome = { kind: "deferred" };
-    await postOutcome($, state, attempt);
+    await defer($, state, attempt, authorization.error ?? "no authorization");
     return;
   }
   if (!canSend(state) || attempt.revision !== state.inputRevision || await $.session.id() !== state.id) {
