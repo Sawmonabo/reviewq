@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createReadStream } from "node:fs";
 import {
   chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
-  readdirSync, renameSync, rmSync, writeFileSync,
+  readdirSync, realpathSync, renameSync, rmSync, writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -125,10 +125,12 @@ async function main() {
   const application = metadata.packages.find((item) => item.name === "reviewq");
   const target = metadata.target_directory;
   const dist = resolve(root, "web/dist");
-  const output = process.argv[2] ? resolve(process.argv[2]) : join(target, "package");
+  const requested = process.argv[2] ? resolve(process.argv[2]) : join(target, "package");
   if (process.argv.length > 3) throw new Error("Usage: assemble.mjs [output-parent]");
-  mkdirSync(output, { recursive: true, mode: 0o700 });
-  if (lstatSync(output).isSymbolicLink()) throw new Error("Package output is a symlink");
+  mkdirSync(requested, { recursive: true, mode: 0o700 });
+  if (lstatSync(requested).isSymbolicLink()) throw new Error("Package output is a symlink");
+  // The bundle check takes only a canonical path, and a build driver may link the target folder.
+  const output = realpathSync(requested);
   const directory = join(output, `reviewq-${application.version}-${platform}`);
   const stage = mkdtempSync(join(output, ".reviewq-package."));
   try {
