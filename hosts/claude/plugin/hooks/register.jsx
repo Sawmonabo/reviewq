@@ -241,6 +241,8 @@ export function register(on) {
         await heartbeat($, state, false);
         await reportTurn($, state, event);
       }
+      // The turn ended, whatever a surface that has since detached last drew.
+      state.working = false;
       await keepTurn($, state, { activeTurn: null, phase: event.reason === "error" ? "failed" : "idle", question: null });
       finishTurn(state, event.turnId);
       if (state.linked) schedule($);
