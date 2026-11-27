@@ -31,7 +31,6 @@ struct Market {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Plugin {
-    id: String,
     scope: String,
     version: String,
     enabled: bool,
@@ -237,9 +236,15 @@ impl Registration {
             .await?;
         let mut selected = markets.into_iter().filter(|item| item.name == "reviewq");
         let market = selected.next();
-        let plugins: Vec<Plugin> = self.json(paths, &["plugin", "list", "--json"]).await?;
-        let mut installed = plugins.into_iter().filter(|item| item.id == NAME);
-        let plugin = installed.next();
+        // Claude lists every plugin, its built-in ones too; only ReviewQ's entry has to have
+        // the shape read here.
+        let plugins: Vec<serde_json::Value> =
+            self.json(paths, &["plugin", "list", "--json"]).await?;
+        let mut installed = plugins.into_iter().filter(|item| item["id"] == NAME);
+        let plugin = installed
+            .next()
+            .map(serde_json::from_value::<Plugin>)
+            .transpose()?;
         if selected.next().is_some() || installed.next().is_some() {
             return Err("Preserved ambiguous Claude Code ReviewQ registrations.".into());
         }
