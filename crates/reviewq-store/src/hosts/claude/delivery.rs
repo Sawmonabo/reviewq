@@ -184,7 +184,8 @@ pub(super) fn authorize(
             now_ms()?,
             anchor.source_generation,
             i64::try_from(anchor.file.offset).map_err(|_| AppError::InvalidRequest)?,
-            anchor.file.witness.as_slice()
+            anchor.file.witness.as_slice(),
+            offer.fence.as_sqlite_integer()
         ],
     )?;
     if changed != 1 {
