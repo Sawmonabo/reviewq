@@ -121,7 +121,7 @@ pub(crate) async fn claude_bridge(
                 404 => "This Claude session has no verified ReviewQ binding.",
                 409 => "Another ReviewQ companion owns this Claude session.",
                 412 => "Reload the ReviewQ plugin in this Claude session.",
-                _ => "ReviewQ could not record this Claude session observation.",
+                _ => return Err(unrecorded(&body).into()),
             },
         };
         return Err(detail.into());
@@ -175,6 +175,24 @@ async fn post(
 
 /// What the model reads when ReviewQ refuses `review_action`, from the refusal's error code:
 /// a declaration when `declare`, else a reconcile. A refused declaration stores nothing.
+/// The refusal of an observation the service did not record, with the service's own reason so
+/// a debug log shows which check failed.
+fn unrecorded(reply: &[u8]) -> String {
+    #[derive(Deserialize)]
+    struct Refusal {
+        error: Reason,
+    }
+    #[derive(Deserialize)]
+    struct Reason {
+        message: String,
+    }
+    let reason = serde_json::from_slice::<Refusal>(reply).map(|refusal| refusal.error.message);
+    match reason {
+        Ok(reason) => format!("ReviewQ could not record this Claude session observation: {reason}"),
+        Err(_) => "ReviewQ could not record this Claude session observation.".to_owned(),
+    }
+}
+
 fn action_refusal(declare: bool, reply: &[u8]) -> &'static str {
     #[derive(Deserialize)]
     struct Refusal {
