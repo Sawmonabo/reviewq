@@ -14,6 +14,7 @@ mod json;
 
 const TIMEOUT_SECONDS: u32 = 5;
 const OWNERSHIP: &str = "codex-hooks.json";
+const MIXED: &str = "A hook group there runs ReviewQ's command beside other hooks.";
 
 /// A Codex hook event ReviewQ answers.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -67,11 +68,9 @@ struct Registration {
 pub(super) enum Reconciled {
     /// ReviewQ owns exactly the entries it wants.
     Done,
-    /// The ownership file at this path cannot be read, so nothing was changed.
-    Unreadable(PathBuf),
     /// Entries ReviewQ no longer wants are still in these `hooks.json` files, usually because
-    /// the user changed them; ReviewQ keeps owning them, `reason` is the last refusal, and every
-    /// other entry was reconciled.
+    /// the user changed them or put ReviewQ's command beside other hooks; `reason` is the last
+    /// refusal, and every other entry was reconciled.
     Kept {
         files: Vec<PathBuf>,
         reason: Failure,
@@ -83,28 +82,58 @@ pub(super) enum Reconciled {
 /// file or command is removed first, so an upgrade replaces ReviewQ's entries; a user's other
 /// hooks and Codex's trust state are never touched. The release journal is read by older
 /// binaries during rollback, so ownership lives in its own file under the same installation
-/// lock. When that file cannot be read, `hooks.json` is left as it is. An owned entry that
-/// cannot be removed, usually because the user changed it, is kept and reported as `Kept`
-/// after every other entry was tried. Fails when the ownership file cannot be written or an
-/// entry cannot be installed; installation stops at the first entry it cannot write.
+/// lock.
+///
+/// The record repairs itself from `hooks.json`. When it is missing or cannot be read, as
+/// after a release that wrote another shape, ReviewQ's entries are the ones that run its
+/// launcher for this profile: all but the wanted ones are removed by that, under whichever
+/// event, and the record starts over. A wanted entry that is recorded but gone is added
+/// again, and one that is there but not recorded is taken as ReviewQ's own.
+///
+/// An entry that cannot be removed, usually because the user changed it, is kept and
+/// reported as `Kept` after every other entry was tried; so is a `hooks.json` that cannot be
+/// cleared without a record, which leaves the record for the next run. Fails when the
+/// ownership file cannot be written or a wanted entry cannot be installed; installation stops
+/// at the first entry it cannot write.
 pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<Reconciled, Failure> {
     let sidecar = paths.state.join(OWNERSHIP);
-    let Ok(owned) = paths::read_json::<Vec<Registration>>(&sidecar) else {
-        return Ok(Reconciled::Unreadable(sidecar));
-    };
-    let mut owned = owned.unwrap_or_default();
+    let hooks = paths.codex_home.join("hooks.json");
     let wanted = if has_codex {
-        Some((paths.codex_home.join("hooks.json"), command(paths)?))
+        Some((hooks.clone(), command(paths)?))
     } else {
         None
+    };
+    let mut kept = Vec::new();
+    let mut retire_error = None;
+    let record = paths::read_json::<Vec<Registration>>(&sidecar);
+    let mut owned = if let Ok(Some(owned)) = record {
+        owned
+    } else {
+        let keep = wanted.as_ref().map(|(_, command)| command.as_str());
+        match own_prefix(paths).and_then(|prefix| sweep(&hooks, &prefix, keep)) {
+            Ok(false) => {}
+            Ok(true) => {
+                kept.push(hooks.clone());
+                retire_error = Some(MIXED.into());
+            }
+            Err(reason) => {
+                return Ok(Reconciled::Kept {
+                    files: vec![hooks],
+                    reason,
+                });
+            }
+        }
+        if record.is_err() {
+            fs::remove_file(&sidecar)?;
+            paths::sync(&paths.state)?;
+        }
+        Vec::new()
     };
     let is_wanted = |hook: &Registration| {
         wanted
             .as_ref()
             .is_some_and(|(path, command)| hook.path == *path && hook.command == *command)
     };
-    let mut kept = Vec::new();
-    let mut retire_error = None;
     let original_count = owned.len();
     // Newest first, so the entry that created the document removes it last.
     for index in (0..owned.len()).rev() {
@@ -136,22 +165,32 @@ pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<Reconciled, Fa
             let location = owned
                 .iter()
                 .position(|hook| is_wanted(hook) && hook.event == event);
-            let index = if let Some(index) = location {
-                Some(index)
-            } else if let Some(hook) = Registration::plan(path, event, command)? {
-                owned.push(hook);
-                paths::write_json(&sidecar, &owned)?;
-                Some(owned.len() - 1)
-            } else {
-                None
-            };
-            if let Some(index) = index {
-                let hook = &mut owned[index];
-                hook.install()?;
-                if !hook.applied {
-                    hook.applied = true;
+            // What the file lacks now decides what to add, whatever was recorded.
+            let missing = Registration::plan(path, event, command)?;
+            let index = match (location, missing) {
+                (Some(index), None) => index,
+                (Some(index), Some(hook)) => {
+                    owned[index] = hook;
                     paths::write_json(&sidecar, &owned)?;
+                    index
                 }
+                (None, missing) => {
+                    owned.push(missing.unwrap_or_else(|| Registration {
+                        path: path.clone(),
+                        event,
+                        command: command.clone(),
+                        added: json::Added::Matcher,
+                        applied: true,
+                    }));
+                    paths::write_json(&sidecar, &owned)?;
+                    owned.len() - 1
+                }
+            };
+            let hook = &mut owned[index];
+            hook.install()?;
+            if !hook.applied {
+                hook.applied = true;
+                paths::write_json(&sidecar, &owned)?;
             }
         }
     }
@@ -168,11 +207,56 @@ pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<Reconciled, Fa
 /// keeps a missing or older launcher from exiting 2, which Codex reads as a block; stdout
 /// stays the hook's answer.
 fn command(paths: &Paths) -> Result<String, Failure> {
+    Ok(format!("{}codex-hook || :", own_prefix(paths)?))
+}
+
+/// How every hook command of this installation starts, in any release: the installed
+/// launcher running an internal command for the installed profile.
+fn own_prefix(paths: &Paths) -> Result<String, Failure> {
     Ok(format!(
-        "{} --profile {} internal codex-hook || :",
+        "{} --profile {} internal ",
         shell_path(&paths.launcher)?,
         shell_path(&paths.profile)?,
     ))
+}
+
+/// Removes the groups of `hooks` that run only commands starting with `prefix`, except one
+/// that runs `keep`. Returns whether a group that runs one beside other hooks was left.
+fn sweep(hooks: &Path, prefix: &str, keep: Option<&str>) -> Result<bool, Failure> {
+    let mut mixed = false;
+    rewrite(hooks, |bytes| {
+        let (change, left) = json::sweep(bytes, prefix, keep)?;
+        mixed = left;
+        Ok(change)
+    })?;
+    Ok(mixed)
+}
+
+/// Replaces `hooks` with what `change` makes of its bytes, keeping its mode. Returns whether
+/// the Codex home it belongs in is there.
+fn rewrite(
+    hooks: &Path,
+    mut change: impl FnMut(Option<&[u8]>) -> Result<json::Change, Failure>,
+) -> Result<bool, Failure> {
+    let replaced = profile_config::replace(hooks, Profile::Codex, |before| {
+        let change = change(before.map(|file| file.bytes.as_slice()))?;
+        Ok(change.map(|change| {
+            let after = change.map(|bytes| Existing {
+                bytes,
+                mode: before.map_or(0o600, |file| file.mode),
+            });
+            (after, ())
+        }))
+    })?;
+    match replaced {
+        Replacement::Unchanged => Ok(true),
+        Replacement::Missing => Ok(false),
+        Replacement::Replaced { verified, .. } => {
+            verified?;
+            profile_config::sync_parent(hooks)?;
+            Ok(true)
+        }
+    }
 }
 
 impl Registration {
@@ -198,30 +282,17 @@ impl Registration {
     }
 
     fn edit(&self, installing: bool) -> Result<(), Failure> {
-        let replaced = profile_config::replace(&self.path, Profile::Codex, |before| {
-            let bytes = before.map(|file| file.bytes.as_slice());
-            let change = if installing {
-                json::install(bytes, self.event, &self.command, self.added, self.applied)?
+        let present = rewrite(&self.path, |bytes| {
+            if installing {
+                json::install(bytes, self.event, &self.command, self.added, self.applied)
             } else {
-                json::remove(bytes, self.event, &self.command, self.added)?
-            };
-            Ok(change.map(|change| {
-                let after = change.map(|bytes| Existing {
-                    bytes,
-                    mode: before.map_or(0o600, |file| file.mode),
-                });
-                (after, ())
-            }))
-        })?;
-        match replaced {
-            Replacement::Unchanged => Ok(()),
-            Replacement::Missing if installing => Err(paths::conflict(&self.path)),
-            Replacement::Missing => Ok(()),
-            Replacement::Replaced { verified, .. } => {
-                verified?;
-                profile_config::sync_parent(&self.path)
+                json::remove(bytes, self.event, &self.command, self.added)
             }
+        })?;
+        if installing && !present {
+            return Err(paths::conflict(&self.path));
         }
+        Ok(())
     }
 }
 
@@ -358,15 +429,58 @@ mod tests {
         assert_eq!(fs::read(&config)?, trust);
         assert!(!file.with_extension("json.lock").try_exists()?);
 
-        // An ownership file that cannot be read leaves hooks.json as it is.
-        let current = fs::read(&file)?;
+        // A record this build cannot read: ReviewQ's entries go by the command they run,
+        // under whichever event an earlier release used, and the record starts over.
+        let stale = serde_json::json!({"matcher": "^old$", "hooks": [{"type": "command",
+            "command": format!("{}old-witness || :", own_prefix(&upgraded)?), "timeout": 5}]});
+        let slots = format!(r#""Stop":[{user_stop},{owned_stop},{later}]"#);
+        fs::write(
+            &file,
+            format!(r#"{{"hooks":{{"PreToolUse":[{stale},{later},{stale}],{slots}}}}}"#),
+        )?;
+        fs::write(&sidecar, br#"[{"path":"hooks.json"}]"#)?;
+        fs::set_permissions(&sidecar, fs::Permissions::from_mode(0o600))?;
+        assert!(matches!(reconcile(&upgraded, true)?, Reconciled::Done));
+        let healed = fs::read_to_string(&file)?;
+        assert!(healed.contains(&format!(r#""PreToolUse":[{{"hooks":[]}},{later}]"#)));
+        assert!(healed.contains(&slots));
+        let installed = |text: &str| -> Result<bool, Failure> {
+            let doc: serde_json::Value = serde_json::from_str(text)?;
+            Ok(
+                doc["hooks"]["Stop"][1]["hooks"][0]["command"] == upgraded_command
+                    && doc["hooks"]["SessionStart"][0]["hooks"][0]["command"] == upgraded_command,
+            )
+        };
+        assert!(installed(&healed)?);
+        let recorded = || paths::read_json::<Vec<Registration>>(&sidecar);
+        assert_eq!(recorded()?.map(|owned| owned.len()), Some(2));
+
+        // An entry removed behind ReviewQ's back comes back. Without a record, an entry that
+        // is there is taken as ReviewQ's own and an earlier release's goes.
+        fs::write(&file, format!(r#"{{"hooks":{{"Stop":[{user_stop}]}}}}"#))?;
+        reconcile(&upgraded, true)?;
+        let current = fs::read_to_string(&file)?;
+        assert!(installed(&current)?);
+        fs::remove_file(&sidecar)?;
+        let earlier = format!(r#"{{"hooks":{{"PreToolUse":[{stale}],"#);
+        fs::write(&file, current.replacen(r#"{"hooks":{"#, &earlier, 1))?;
+        reconcile(&upgraded, true)?;
+        assert_eq!(recorded()?.map(|owned| owned.len()), Some(2));
+        let adopted = fs::read_to_string(&file)?;
+        assert!(installed(&adopted)? && !adopted.contains("old-witness"));
+        reconcile(&upgraded, false)?;
+        assert!(!fs::read_to_string(&file)?.contains(&upgraded_command));
+
+        // Hooks that cannot be cleared without a record are reported, and the record stays
+        // for the next run.
+        fs::write(&file, "not JSON")?;
         fs::write(&sidecar, br#"[{"path":"hooks.json"}]"#)?;
         fs::set_permissions(&sidecar, fs::Permissions::from_mode(0o600))?;
         assert!(matches!(
-            reconcile(&upgraded, true)?,
-            Reconciled::Unreadable(path) if path == sidecar
+            reconcile(&upgraded, false)?,
+            Reconciled::Kept { files, .. } if files == [file.clone()]
         ));
-        assert_eq!(fs::read(&file)?, current);
+        assert!(sidecar.try_exists()?);
         Ok(())
     }
 }

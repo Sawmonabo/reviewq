@@ -23,7 +23,6 @@ pub(super) struct Registration {
 
 #[derive(Deserialize)]
 struct Market {
-    name: String,
     source: String,
     path: Option<PathBuf>,
 }
@@ -44,6 +43,22 @@ struct Plugin {
 struct Observed {
     market: Option<Market>,
     plugin: Option<Plugin>,
+}
+
+/// ReviewQ's entry in one of Claude's lists, found by the `key` that names it. Claude lists
+/// every marketplace and plugin, its built-in ones too, in shapes that change between its
+/// versions; only ReviewQ's own entry has to have the shape read here.
+fn own<T: DeserializeOwned>(
+    listed: Vec<serde_json::Value>,
+    key: &str,
+    name: &str,
+) -> Result<Option<T>, Failure> {
+    let mut entries = listed.into_iter().filter(|item| item[key] == name);
+    let entry = entries.next();
+    if entries.next().is_some() {
+        return Err("Preserved ambiguous Claude Code ReviewQ registrations.".into());
+    }
+    Ok(entry.map(serde_json::from_value).transpose()?)
 }
 
 pub(super) fn plan(
@@ -231,24 +246,14 @@ impl Registration {
     }
 
     async fn observe(&self, paths: &Paths) -> Result<Observed, Failure> {
-        let markets: Vec<Market> = self
+        let markets = self
             .json(paths, &["plugin", "marketplace", "list", "--json"])
             .await?;
-        let mut selected = markets.into_iter().filter(|item| item.name == "reviewq");
-        let market = selected.next();
-        // Claude lists every plugin, its built-in ones too; only ReviewQ's entry has to have
-        // the shape read here.
-        let plugins: Vec<serde_json::Value> =
-            self.json(paths, &["plugin", "list", "--json"]).await?;
-        let mut installed = plugins.into_iter().filter(|item| item["id"] == NAME);
-        let plugin = installed
-            .next()
-            .map(serde_json::from_value::<Plugin>)
-            .transpose()?;
-        if selected.next().is_some() || installed.next().is_some() {
-            return Err("Preserved ambiguous Claude Code ReviewQ registrations.".into());
-        }
-        Ok(Observed { market, plugin })
+        let plugins = self.json(paths, &["plugin", "list", "--json"]).await?;
+        Ok(Observed {
+            market: own(markets, "name", "reviewq")?,
+            plugin: own(plugins, "id", NAME)?,
+        })
     }
 
     async fn uninstall(&self, paths: &Paths) -> Result<(), Failure> {
@@ -380,4 +385,33 @@ fn release_marketplace(paths: &Paths, release: &Release) -> PathBuf {
 fn string(path: &Path) -> Result<&str, Failure> {
     path.to_str()
         .ok_or_else(|| "Claude Code plugin paths must be UTF-8.".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_reviewqs_entry_of_a_claude_list_has_to_be_readable() -> Result<(), Failure> {
+        let listed = |own: serde_json::Value| {
+            vec![
+                serde_json::json!({"id": "privacy@builtin", "version": "unknown", "enabled": true}),
+                own,
+                serde_json::json!("a shape of some later version"),
+            ]
+        };
+        let plugin: Option<Plugin> = own(
+            listed(
+                serde_json::json!({"id": NAME, "scope": "user", "version": "1", "enabled": true,
+                "installPath": "/claude/plugins/reviewq"}),
+            ),
+            "id",
+            NAME,
+        )?;
+        assert_eq!(plugin.map(|plugin| plugin.version).as_deref(), Some("1"));
+        // ReviewQ's own entry still has to be whole.
+        assert!(own::<Plugin>(listed(serde_json::json!({"id": NAME})), "id", NAME).is_err());
+        assert!(own::<Plugin>(listed(serde_json::json!({})), "id", NAME)?.is_none());
+        Ok(())
+    }
 }

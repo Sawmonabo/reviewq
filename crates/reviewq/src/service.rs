@@ -220,9 +220,10 @@ pub(crate) async fn logs() -> Result<(), Failure> {
     unit_location(&paths).await?;
     let (_, text) = capture(
         "journalctl",
+        // Without `--user`, every journal this user can read is searched, so the unit's
+        // entries are found where the user manager logs to the system journal as well.
         &[
-            "--user",
-            "--unit",
+            "--user-unit",
             UNIT,
             "--lines",
             "100",

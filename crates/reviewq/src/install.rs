@@ -339,18 +339,11 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         );
     }
     let hooks_installed = match (next.skill.is_some(), codex_hooks) {
-        (_, Ok(codex_hook::Reconciled::Unreadable(ownership))) => {
-            eprintln!(
-                "ReviewQ left the Codex hooks unchanged because it cannot read {}. Remove that file and install again.",
-                ownership.display()
-            );
-            false
-        }
         (has_codex, Ok(codex_hook::Reconciled::Done)) => has_codex,
         (has_codex, Ok(codex_hook::Reconciled::Kept { files, reason })) => {
             for file in files {
                 eprintln!(
-                    "ReviewQ kept a Codex hook entry it no longer uses in {}: {reason} Remove that changed entry there, then install again.",
+                    "ReviewQ could not remove a Codex hook of its own from {}: {reason} Remove the hook there that runs ReviewQ's launcher and leave the others.",
                     file.display()
                 );
             }
@@ -534,24 +527,15 @@ fn verified_unit(paths: &Paths, release: &Release, bundle: &Bundle) -> Result<Ve
 
 /// Removes ReviewQ's Codex hooks while uninstalling and returns the `hooks.json` files that
 /// still hold an entry it could not remove, usually because the user changed it, after
-/// saying what to remove there. When the ownership file cannot be read, it says what to
-/// remove by hand and returns nothing. Either way the uninstall continues. Fails when the
-/// ownership file cannot be written.
+/// saying what to remove there. The uninstall continues. Fails when the ownership file cannot
+/// be written or removed.
 fn retire_codex_hooks(paths: &Paths) -> Result<Vec<PathBuf>, Failure> {
     match codex_hook::reconcile(paths, false)? {
         codex_hook::Reconciled::Done => Ok(Vec::new()),
-        codex_hook::Reconciled::Unreadable(ownership) => {
-            eprintln!(
-                "ReviewQ left its Codex hooks in {} because it cannot read {}. Remove ReviewQ's entries there and that file.",
-                paths.codex_home.join("hooks.json").display(),
-                ownership.display()
-            );
-            Ok(Vec::new())
-        }
         codex_hook::Reconciled::Kept { files, reason } => {
             for file in &files {
                 eprintln!(
-                    "ReviewQ left its Codex hooks in {}: {reason} Remove the Stop and SessionStart entries there that run \"internal codex-hook\".",
+                    "ReviewQ could not remove a Codex hook of its own from {}: {reason} Remove the hook there that runs ReviewQ's launcher and leave the others.",
                     file.display()
                 );
             }
@@ -645,7 +629,7 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
         return Err(preserved_entries(&conflicts));
     }
     // The launcher and releases are gone, so a kept hook entry no longer holds the uninstall
-    // open: it is reported once the removal is recorded, and stays in the ownership file.
+    // open: it is reported once the removal is recorded.
     retention::clear_assets_journal(&paths)?;
     inventory = Inventory::default();
     paths::write_json(&journal(&paths), &inventory)?;

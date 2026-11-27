@@ -12,8 +12,11 @@ use super::{Event, Failure, TIMEOUT_SECONDS};
 
 const CHANGED: &str = "The Codex hook has changed. ReviewQ preserved the current hooks.";
 const INVALID: &str = "Expected a Codex hooks object whose Stop and SessionStart are arrays.";
+// Codex trust keys include the matcher index, so a removed group that has a later one keeps
+// its slot as this.
+const EMPTY_GROUP: &[u8] = br#"{"hooks":[]}"#;
 
-type Change = Option<Option<Vec<u8>>>;
+pub(super) type Change = Option<Option<Vec<u8>>>;
 
 #[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -50,6 +53,16 @@ struct Commands {
 #[derive(Deserialize)]
 struct CommandName {
     command: Option<String>,
+}
+
+impl Commands {
+    /// How many of the group's hooks run a command starting with `prefix`.
+    fn running(&self, prefix: &str) -> usize {
+        let commands = self.hooks.iter().filter_map(|hook| hook.command.as_deref());
+        commands
+            .filter(|command| command.starts_with(prefix))
+            .count()
+    }
 }
 
 enum Position {
@@ -182,18 +195,79 @@ pub(super) fn remove(
             return Ok(Some(Some(json_edit::replace(source, remove_event, b""))));
         }
     }
-    let item = items[owned].clone();
-    let (range, replacement) = if owned < items.len() - 1 {
-        // Codex trust keys include the matcher index. Keep later user hooks in
-        // their current slots with an empty matcher group.
-        (item, br#"{"hooks":[]}"#.as_slice())
-    } else {
-        let start = owned
-            .checked_sub(1)
-            .map_or(item.start, |prev| items[prev].end);
-        (start..item.end, b"".as_slice())
-    };
+    let (range, replacement) = cut(&items, owned, owned < items.len() - 1);
     Ok(Some(Some(json_edit::replace(source, range, replacement))))
+}
+
+/// The edit that takes `items[index]` out of its array: a group with a `later` one leaves its
+/// slot empty, and the last one goes with the comma before it.
+fn cut(items: &[Range<usize>], index: usize, later: bool) -> (Range<usize>, &'static [u8]) {
+    let item = items[index].clone();
+    if later {
+        return (item, EMPTY_GROUP);
+    }
+    let start = index
+        .checked_sub(1)
+        .map_or(item.start, |previous| items[previous].end);
+    (start..item.end, b"")
+}
+
+/// Removes every group whose hooks all run a command starting with `prefix`, under whichever
+/// event it sits, keeping later groups in their slots and any group that runs `keep`. An
+/// array this empties stays: nothing says who made it. Returns the change and whether a group
+/// that runs such a command beside other hooks was left as it is.
+pub(super) fn sweep(
+    bytes: Option<&[u8]>,
+    prefix: &str,
+    keep: Option<&str>,
+) -> Result<(Change, bool), Failure> {
+    let Some(bytes) = bytes else {
+        return Ok((None, false));
+    };
+    let source = json_edit::source(bytes)?;
+    let Some((Field::Present { value, .. }, _)) = json_edit::locate(source, &["hooks"])? else {
+        return Ok((None, false));
+    };
+    let Ok(events) =
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&source[value])
+    else {
+        return Ok((None, false));
+    };
+    let mut cuts: Vec<(Range<usize>, &[u8])> = Vec::new();
+    let mut mixed = false;
+    for name in events
+        .iter()
+        .filter_map(|(name, value)| value.is_array().then_some(name))
+    {
+        let Some((Field::Present { value, .. }, _)) =
+            json_edit::locate(source, &["hooks", name.as_str()])?
+        else {
+            continue;
+        };
+        let items = items(source, value.start)?;
+        let mut later = false;
+        for index in (0..items.len()).rev() {
+            let (ours, all) = serde_json::from_str::<Commands>(&source[items[index].clone()])
+                .ok()
+                .filter(|group| keep.is_none_or(|keep| group.running(keep) == 0))
+                .map_or((0, 0), |group| (group.running(prefix), group.hooks.len()));
+            if ours != 0 && ours == all {
+                cuts.push(cut(&items, index, later));
+            } else {
+                mixed |= ours != 0;
+                later = true;
+            }
+        }
+    }
+    if cuts.is_empty() {
+        return Ok((None, mixed));
+    }
+    cuts.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
+    let mut next = bytes.to_vec();
+    for (range, replacement) in cuts {
+        next.splice(range, replacement.iter().copied());
+    }
+    Ok((Some(Some(next)), mixed))
 }
 
 fn position(source: &str, event: Event) -> Result<Position, Failure> {
