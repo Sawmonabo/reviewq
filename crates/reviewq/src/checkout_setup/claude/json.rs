@@ -12,6 +12,12 @@ const ENTRY: &str = "The existing Claude MCP entry was preserved.";
 const ROLLBACK: &str =
     "Claude changed the ReviewQ MCP entry during setup. Its current value was preserved.";
 
+/// The entry's name. Claude Code names a plugin's tools `mcp__<plugin>__…`, so a server called
+/// `reviewq` shares the plugin's name and Claude refuses the plugin's tools beside it.
+pub(super) const NAME: &str = "reviewq-manage";
+/// The name ReviewQ wrote before. Its own entry there is removed; another server's stays.
+pub(super) const FORMER: &str = "reviewq";
+
 pub(super) struct Patch {
     pub bytes: Vec<u8>,
     pub undo: Undo,
@@ -19,6 +25,7 @@ pub(super) struct Patch {
 
 pub(super) struct Undo {
     checkout: PathBuf,
+    name: &'static str,
     before: Option<Vec<u8>>,
     after: Option<Server>,
 }
@@ -54,19 +61,26 @@ impl Server {
 pub(super) fn edit(
     before: Option<&[u8]>,
     checkout: &Path,
+    name: &'static str,
     owned: &BTreeSet<String>,
     bearer: &str,
     url: Option<&str>,
 ) -> Result<Option<Patch>, Failure> {
     let source = source(before.unwrap_or(b"{}\n"))?;
-    let path = entry_path(checkout)?;
+    let path = entry_path(checkout, name)?;
     let after = url.map(|url| Server::http(url, bearer));
     let (bytes, before) = match locate(source, &path)? {
         Some((Field::Present { value, remove }, _)) => {
-            let existing = read_server(source, &value)?;
-            if !owned.contains(&existing.url) || existing != Server::http(&existing.url, bearer) {
-                return Err(ENTRY.into());
-            }
+            let ours = read_server(source, &value).ok().filter(|existing| {
+                owned.contains(&existing.url) && *existing == Server::http(&existing.url, bearer)
+            });
+            let Some(existing) = ours else {
+                return if name == FORMER {
+                    Ok(None)
+                } else {
+                    Err(ENTRY.into())
+                };
+            };
             if after.as_ref() == Some(&existing) {
                 return Ok(None);
             }
@@ -93,6 +107,7 @@ pub(super) fn edit(
         bytes,
         undo: Undo {
             checkout: checkout.to_owned(),
+            name,
             before,
             after,
         },
@@ -102,7 +117,7 @@ pub(super) fn edit(
 impl Undo {
     pub(super) fn restore(&self, bytes: &[u8]) -> Result<Option<Vec<u8>>, Failure> {
         let source = source(bytes)?;
-        let path = entry_path(&self.checkout)?;
+        let path = entry_path(&self.checkout, self.name)?;
         match (locate(source, &path)?, &self.after) {
             (Some((Field::Absent { .. }, _)), _) if self.before.is_none() => Ok(None),
             (Some((Field::Present { value, .. }, _)), _)
@@ -127,9 +142,9 @@ impl Undo {
     }
 }
 
-fn entry_path(checkout: &Path) -> Result<[&str; 4], Failure> {
+fn entry_path<'a>(checkout: &'a Path, name: &'a str) -> Result<[&'a str; 4], Failure> {
     let checkout = checkout.to_str().ok_or("Expected a UTF-8 checkout path.")?;
-    Ok(["projects", checkout, "mcpServers", "reviewq"])
+    Ok(["projects", checkout, "mcpServers", name])
 }
 
 fn read_server(source: &str, value: &Range<usize>) -> Result<Server, Failure> {

@@ -133,33 +133,27 @@ impl Edit {
         let original = before.map(|file| file.bytes.as_slice());
         let mut after = None;
         let mut undo = Vec::new();
+        // One entry edit, applied on top of the ones before it.
+        let mut edit = |checkout: &Path, name, urls, url| -> Result<(), Failure> {
+            let bytes = after.as_deref().or(original);
+            if let Some(patch) = json::edit(bytes, checkout, name, urls, &self.bearer, url)? {
+                after = Some(patch.bytes);
+                undo.push(patch.undo);
+            }
+            Ok(())
+        };
         if original.is_some() {
             for checkout in &self.retired {
-                if let Some(patch) = json::edit(
-                    after.as_deref().or(original),
-                    checkout,
-                    &self.urls,
-                    &self.bearer,
-                    None,
-                )? {
-                    after = Some(patch.bytes);
-                    undo.push(patch.undo);
-                }
+                edit(checkout, json::FORMER, &self.urls, None)?;
+                edit(checkout, json::NAME, &self.urls, None)?;
             }
         }
         if let Some(selected) = &self.selected {
             let empty = BTreeSet::new();
             let urls = if selected.owned { &self.urls } else { &empty };
-            if let Some(patch) = json::edit(
-                after.as_deref().or(original),
-                &selected.checkout,
-                urls,
-                &self.bearer,
-                Some(&selected.url),
-            )? {
-                after = Some(patch.bytes);
-                undo.push(patch.undo);
-            } else if after.is_none() && before.is_some_and(|file| file.mode != 0o600) {
+            edit(&selected.checkout, json::FORMER, urls, None)?;
+            edit(&selected.checkout, json::NAME, urls, Some(&selected.url))?;
+            if after.is_none() && before.is_some_and(|file| file.mode != 0o600) {
                 after = original.map(<[u8]>::to_vec);
             }
         }
@@ -180,11 +174,16 @@ mod tests {
         let root = profile.path().canonicalize()?;
         let file = root.join(".claude.json");
         let native_lock = root.join(".claude.json.lock");
-        let original = b"{\"metrics\" : [0.1234567890123456789, 9e-5]}\n";
+        // Under ReviewQ's former name the first checkout has another server and the second
+        // has the entry ReviewQ wrote.
+        let original = br#"{"metrics" : [0.1234567890123456789, 9e-5],"projects":{"/repo/first":{"mcpServers":{"reviewq":{"command":"other"}}},"/repo/second":{"mcpServers":{"reviewq":{"type":"http","url":"http://127.0.0.1:8766/mcp","headers":{"Authorization":"Bearer second-test"}}}}}}
+"#;
         fs::write(&file, original)?;
         fs::set_permissions(&file, fs::Permissions::from_mode(0o600))?;
         let first_url = "http://127.0.0.1:8765/mcp";
         let second_url = "http://127.0.0.1:8766/mcp";
+        let second_urls = BTreeSet::from([second_url.to_owned()]);
+        let second_checkout = Some((Path::new("/repo/second"), second_url, true));
         let mut first = Edit::prepare(
             &file,
             &[],
@@ -193,14 +192,8 @@ mod tests {
             "first-test",
         )
         .await?;
-        let mut second = Edit::prepare(
-            &file,
-            &[],
-            Some((Path::new("/repo/second"), second_url, false)),
-            &BTreeSet::new(),
-            "second-test",
-        )
-        .await?;
+        let mut second =
+            Edit::prepare(&file, &[], second_checkout, &second_urls, "second-test").await?;
 
         fs::create_dir(&native_lock)?;
         assert!(first.apply().unwrap_err().to_string().contains("locked"));
@@ -210,34 +203,27 @@ mod tests {
 
         first.apply()?;
         second.apply()?;
-        let native_update =
-            fs::read_to_string(&file)?.replacen('{', "{\"nativePreference\" : true,", 1);
+        let renamed = fs::read_to_string(&file)?;
+        let former = r#""reviewq":{"type":"http","url":"http://127.0.0.1:8766/mcp""#;
+        let current = r#""reviewq-manage":{"type":"http","url":"http://127.0.0.1:8766/mcp""#;
+        assert!(renamed.contains(r#""reviewq":{"command":"other"}"#));
+        assert!(renamed.contains(current) && !renamed.contains(former));
+        let native_update = renamed.replacen('{', "{\"nativePreference\" : true,", 1);
         fs::write(&file, &native_update)?;
         let inode = file.metadata()?.ino();
-        Edit::prepare(
-            &file,
-            &[],
-            Some((Path::new("/repo/second"), second_url, true)),
-            &BTreeSet::from([second_url.to_owned()]),
-            "second-test",
-        )
-        .await?
-        .apply()?;
+        Edit::prepare(&file, &[], second_checkout, &second_urls, "second-test")
+            .await?
+            .apply()?;
         assert_eq!(file.metadata()?.ino(), inode);
 
-        first.rollback()?;
-        let expected = native_update.replacen(
-            r#""reviewq":{"type":"http","url":"http://127.0.0.1:8765/mcp","headers":{"Authorization":"Bearer first-test"}}"#,
-            "",
-            1,
-        );
-        assert_ne!(expected, native_update);
+        second.rollback()?;
+        let expected = native_update.replacen(current, former, 1);
         assert_eq!(fs::read_to_string(&file)?, expected);
-        assert!(expected.contains(second_url));
+        assert!(expected.contains(first_url));
 
-        let conflicting = expected.replace(second_url, "https://example.invalid/mcp");
+        let conflicting = expected.replace(first_url, "https://example.invalid/mcp");
         fs::write(&file, &conflicting)?;
-        assert!(second.rollback().is_err());
+        assert!(first.rollback().is_err());
         assert_eq!(fs::read_to_string(&file)?, conflicting);
         assert!(!native_lock.try_exists()?);
         Ok(())

@@ -16,6 +16,8 @@ let opening;
 let timer;
 let checking = false;
 let recheck = false;
+// Why Claude Code refused this session's tools, until a registration succeeds.
+let toolsRefused;
 
 function reset() {
   timer?.cancel();
@@ -60,6 +62,17 @@ async function refresh($, target) {
     $.ui.invalidate("ui.render");
   }
   return result;
+}
+
+// A registered name is replaced, so a later try after a refusal starts over.
+async function registerTools($) {
+  try {
+    await registerWorkflowTools($);
+    await registerLedgerTools($);
+    toolsRefused = undefined;
+  } catch (error) {
+    toolsRefused = String(error?.message || error) || "no reason given";
+  }
 }
 
 function pending(state) {
@@ -143,7 +156,9 @@ function schedule($, delay = 0, registration = false) {
         recheck = false;
         await refresh($);
       }
-      if (state === session && state.linked) await heartbeat($, state);
+      // A lead without its tools can record nothing: with no heartbeat ReviewQ shows it offline.
+      if (toolsRefused) await registerTools($);
+      if (state === session && state.linked && !toolsRefused) await heartbeat($, state);
     } finally {
       checking = false;
       if (!owner) recheck = false;
@@ -156,21 +171,30 @@ function schedule($, delay = 0, registration = false) {
 
 export function register(on) {
   on("session.start", async ($, event, next) => {
-    await registerWorkflowTools($);
-    await registerLedgerTools($);
-    await $.command.register({
-      name: "reviewq",
-      description: "Show ReviewQ status or link this session to a merge request",
-      argumentHint: "[merge request or ticket]",
-    });
-    schedule($, 0, true);
+    try {
+      await $.command.register({
+        name: "reviewq",
+        description: "Show ReviewQ status or link this session to a merge request",
+        argumentHint: "[merge request or ticket]",
+      });
+    } finally {
+      await registerTools($);
+      schedule($, 0, true);
+    }
     return next(event);
   });
 
   on("command.run", { command: "reviewq" }, async ($, event) => {
-    const result = await refresh($, (event.args ?? "").trim());
+    const target = (event.args ?? "").trim();
+    if (toolsRefused) await registerTools($);
+    const refused = toolsRefused && `ReviewQ's tools are missing from this session, so it cannot run a review here. Claude Code said: ${toolsRefused}\nStart a new Claude Code session in this checkout and run /reviewq again.`;
+    // A review without its tools could record nothing, so no target is linked while they are refused.
+    if (refused && target) return { text: refused, isTextDisplayOnly: true };
+    const result = await refresh($, target);
     if (session?.linked) schedule($);
-    return result.rule ? { text: `${result.message}\n\n${result.rule}` } : { text: result.message ?? result.error, isTextDisplayOnly: true };
+    if (result.rule && !refused) return { text: `${result.message}\n\n${result.rule}` };
+    const status = result.message ?? result.error;
+    return { text: refused ? `${status}\n\n${refused}` : status, isTextDisplayOnly: true };
   });
 
   on("prompt.submit", async ($, event, next) => {
