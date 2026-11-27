@@ -75,6 +75,14 @@ async function registerTools($) {
   }
 }
 
+// ReviewQ verifies a conversation from its file, which Claude Code writes only once it stores a
+// row. A notice is stored at once, so a new conversation gets its file before the link.
+async function storeConversation($, target) {
+  const { transcriptPath } = await $.session.info();
+  if (!transcriptPath || await $.fs.exists(transcriptPath).catch(() => true)) return;
+  await $.session.append({ message: { type: "system", content: [{ type: "text", text: `Linking this conversation to ${target} in ReviewQ.` }] } });
+}
+
 function pending(state) {
   return !!state?.pendingUntil && Date.now() < state.pendingUntil;
 }
@@ -190,6 +198,7 @@ export function register(on) {
     const refused = toolsRefused && `ReviewQ's tools are missing from this session, so it cannot run a review here. Claude Code said: ${toolsRefused}\nStart a new Claude Code session in this checkout and run /reviewq again.`;
     // A review without its tools could record nothing, so no target is linked while they are refused.
     if (refused && target) return { text: refused, isTextDisplayOnly: true };
+    if (target) await storeConversation($, target).catch(() => {});
     const result = await refresh($, target);
     if (session?.linked) schedule($);
     if (result.rule && !refused) return { text: `${result.message}\n\n${result.rule}` };
