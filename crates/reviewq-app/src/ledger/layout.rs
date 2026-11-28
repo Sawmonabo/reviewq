@@ -135,15 +135,15 @@ pub(crate) const REPLY_THREAD: &str = "thread";
 pub(crate) const NEW_COMMENT_AT: &str = "new comment at ";
 pub(crate) const NEW_COMMENT_ON_MR: &str = "new comment on the MR";
 
-/// Whether an `extra` note's `title` repeats a fixed section's heading. The composer writes
-/// the title as a level-two heading, whose text Markdown trims, and a heading that differs
-/// only in letter case still reads as the same section, so the comparison trims the title
-/// and ignores case. The headings are ASCII, so ASCII case folding is exact.
-pub(crate) fn repeats_fixed_heading(title: &str) -> bool {
+/// The fixed section whose heading an `extra` note's `title` repeats, if any. The composer
+/// writes the title as a level-two heading, whose text Markdown trims, and a heading that
+/// differs only in letter case still reads as the same section, so the comparison trims the
+/// title and ignores case. The headings are ASCII, so ASCII case folding is exact.
+pub(crate) fn repeated_fixed_section(title: &str) -> Option<FixedSection> {
     let title = title.trim();
     FixedSection::ALL
-        .iter()
-        .any(|section| section.heading().eq_ignore_ascii_case(title))
+        .into_iter()
+        .find(|section| section.heading().eq_ignore_ascii_case(title))
 }
 
 /// Between the parts of the identity line, a card's heading, the card line, the counts line,

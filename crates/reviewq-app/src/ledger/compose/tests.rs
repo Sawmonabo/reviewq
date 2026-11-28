@@ -415,6 +415,15 @@ fn composed_worked_set_matches() {
     // Blocking first by the effective value, then by severity: F-02's raw value is blocking,
     // but the user's disposition makes it nonblocking, so the blocking P3 comes before it.
     assert_eq!(ids, ["F-01", "F-04", "F-02"]);
+    // Among blocking cards severity decides before the ID: F-04 raised to P0 leads F-01's P1.
+    let mut raised = worked_findings();
+    raised[3].record.fields.severity = Severity::P0;
+    let raised_ids: Vec<String> = compose(&cover, &facts, &raised, &worked_notes())
+        .cards
+        .iter()
+        .map(|card| card.id.to_string())
+        .collect();
+    assert_eq!(raised_ids, ["F-04", "F-01", "F-02"]);
     assert_eq!(composed.cards.len(), cards.len());
     for (card, start) in composed.cards.iter().zip(&cards) {
         assert_slices(&card.span, block_from(*start, &ends), &card.id.to_string());

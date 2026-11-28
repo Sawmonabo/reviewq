@@ -7,7 +7,7 @@
 
 use reviewq_domain::ledger::{FindingId, RecordRevision, Tool};
 
-use super::layout::repeats_fixed_heading;
+use super::layout::{FixedSection, repeated_fixed_section};
 use super::markdown::{FieldProblem, MarkdownField, check_field};
 use super::refusal::for_agent;
 use super::required;
@@ -119,11 +119,17 @@ pub async fn save_section(
         note.body.clear();
     }
     let mut errors = Vec::new();
-    if note.key.title().is_some_and(repeats_fixed_heading) {
-        errors.push(FieldError::new(
-            "/title",
-            "This title repeats a heading the report already has. Give the extra section a title of its own, or put the text in the section of that name.",
-        ));
+    if let Some(section) = note.key.title().and_then(repeated_fixed_section) {
+        // Every fixed section but Findings shows a note of its own; Findings holds the cards.
+        let message = if section == FixedSection::Findings {
+            format!(
+                "Findings is the report's own section for saved findings. Save each finding with {}, or give the extra section another title.",
+                Tool::SaveFinding.as_str()
+            )
+        } else {
+            "This title repeats a heading the report already has. Give the extra section a title of its own, or put the text in the section of that name.".to_owned()
+        };
+        errors.push(FieldError::new("/title", message));
     }
     let subject = Subject::Note(note.key.clone());
     if note.body.is_empty() && required::is_required(note.key.section()) {
@@ -367,7 +373,7 @@ fn refusal_error(
         WriteRefusal::ReplyWithoutComment => FieldError::new(
             "/replyToNote",
             format!(
-                "{} has no proposed comment to send as this reply, so give proposedComment in the same call or leave out replyToNote.",
+                "{} has no proposed comment to send as this reply, so give proposedComment with text other than whitespace in the same call, or leave out replyToNote.",
                 capitalized(&name),
             ),
         ),
