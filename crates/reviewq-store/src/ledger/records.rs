@@ -131,6 +131,9 @@ fn create(
     caller: &Caller,
     fields: FindingFields,
 ) -> Result<Result<Planned, WriteRefusal>, StoreError> {
+    if replies_without_comment(&fields) {
+        return Ok(Err(WriteRefusal::ReplyWithoutComment));
+    }
     let run = caller.lead.run_id().as_str();
     let first = fields.body.locations.first();
     let matched: Option<i64> = db
@@ -205,10 +208,13 @@ fn change(
     if let Some(refusal) = stale_finding(db, run, &record, expected)? {
         return Ok(Err(refusal));
     }
+    apply(&mut record.fields, patch);
+    if replies_without_comment(&record.fields) {
+        return Ok(Err(WriteRefusal::ReplyWithoutComment));
+    }
     if !active && active_findings(db, run)? >= MAX_ACTIVE_FINDINGS {
         return Ok(Err(WriteRefusal::TooManyFindings));
     }
-    apply(&mut record.fields, patch);
     if !active {
         record.outcome = None;
     }
@@ -408,9 +414,19 @@ fn patch_changes(fields: &FindingFields, patch: &FindingPatch) -> bool {
         || differs(patch.consequence.as_ref(), &body.consequence)
         || differs(patch.evidence.as_ref(), &body.evidence)
         || differs(patch.proposed_comment.as_ref(), &body.proposed_comment)
+        || differs(patch.reply_to_note.as_ref(), &body.reply_to_note)
         || differs(patch.details.as_ref(), &body.details)
 }
 
+/// Whether `fields` name a note for the proposed comment to reply to without a proposed
+/// comment. The one rule of the reply target: it exists only with a comment, so a write that
+/// would leave one alone is refused, and `apply` removes it with the comment.
+fn replies_without_comment(fields: &FindingFields) -> bool {
+    fields.body.reply_to_note.is_some() && fields.body.proposed_comment.is_none()
+}
+
+/// Stores each field `patch` gives. Removing the proposed comment also removes the reply
+/// target unless the patch names one, which `replies_without_comment` then refuses.
 fn apply(fields: &mut FindingFields, patch: FindingPatch) {
     let body = &mut fields.body;
     let FindingPatch {
@@ -424,6 +440,7 @@ fn apply(fields: &mut FindingFields, patch: FindingPatch) {
         consequence,
         evidence,
         proposed_comment,
+        reply_to_note,
         details,
     } = patch;
     if let Some(value) = title {
@@ -454,7 +471,13 @@ fn apply(fields: &mut FindingFields, patch: FindingPatch) {
         body.evidence = value;
     }
     if let Some(value) = proposed_comment {
+        if value.is_none() && reply_to_note.is_none() {
+            body.reply_to_note = None;
+        }
         body.proposed_comment = value;
+    }
+    if let Some(value) = reply_to_note {
+        body.reply_to_note = value;
     }
     if let Some(value) = details {
         body.details = value;
@@ -508,9 +531,9 @@ fn put_finding(
         "INSERT INTO ledger_changes(run_id, sequence, finding, revision, provider, native_session,
            native_turn_id, call_id, author, changed_at_ms, severity, blocking, kind, title,
            category, evidence_kind, conclusion, checked_sha, outcome_reason, discussion_ids,
-           locations, issue, consequence, evidence, proposed_comment, details)
+           locations, issue, consequence, evidence, proposed_comment, reply_to_note, details)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,
-           ?23,?24,?25,?26)",
+           ?23,?24,?25,?26,?27)",
     )?
     .execute(params![
         run,
@@ -538,6 +561,7 @@ fn put_finding(
         body.consequence,
         body.evidence.text,
         body.proposed_comment,
+        body.reply_to_note,
         body.details,
     ])?;
     let first = body.locations.first();

@@ -19,6 +19,8 @@
         "path": "src/invoices.rs"
       }
     ],
+    "proposedComment": "Reuse the key stored with the first attempt instead of building a new one.",
+    "replyToNote": "9001",
     "severity": "P1",
     "title": "Retry writes the same invoice twice"
   },

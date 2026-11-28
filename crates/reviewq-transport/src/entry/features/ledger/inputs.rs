@@ -14,6 +14,7 @@ use reviewq_app::reports::{
     FindingLocation, RevisionEvidence, Severity, Verdict,
 };
 use reviewq_domain::ledger::RecordRevision;
+use reviewq_protocol::NoteIdDto;
 use reviewq_protocol::followups as followup_dto;
 use reviewq_protocol::ledger as dto;
 use reviewq_protocol::reports as report_dto;
@@ -23,8 +24,8 @@ use crate::entry::ServiceEndpoint;
 use crate::entry::pages::parse;
 
 /// `save_finding`: a new finding without `id`, otherwise a patch of the fields given. An
-/// empty `proposedComment` or `details` removes the field and `locations: []` clears the
-/// locations; a new finding stores neither empty text.
+/// empty `proposedComment`, `replyToNote` or `details` removes the field and `locations: []`
+/// clears the locations; a new finding stores no empty text.
 pub(super) fn finding(input: dto::SaveFinding) -> Result<FindingInput, AppError> {
     let Some(id) = input.id else {
         let fields = FindingFields {
@@ -44,6 +45,7 @@ pub(super) fn finding(input: dto::SaveFinding) -> Result<FindingInput, AppError>
                 consequence: given(input.consequence)?,
                 evidence: basis(given(input.evidence)?),
                 proposed_comment: input.proposed_comment.and_then(written),
+                reply_to_note: input.reply_to_note.map(reply_target).transpose()?.flatten(),
                 details: input.details.and_then(written),
             },
         };
@@ -65,6 +67,7 @@ pub(super) fn finding(input: dto::SaveFinding) -> Result<FindingInput, AppError>
             consequence: input.consequence,
             evidence: input.evidence.map(basis),
             proposed_comment: input.proposed_comment.map(written),
+            reply_to_note: input.reply_to_note.map(reply_target).transpose()?,
             details: input.details.map(written),
         },
     })
@@ -167,6 +170,17 @@ fn given<T>(value: Option<T>) -> Result<T, AppError> {
 /// Optional Markdown: empty text is no text.
 fn written(text: String) -> Option<String> {
     (!text.is_empty()).then_some(text)
+}
+
+/// `replyToNote`: `None` for the empty string that removes it, otherwise the note ID's
+/// digits, which the schema already checked.
+fn reply_target(text: String) -> Result<Option<String>, AppError> {
+    match written(text) {
+        None => Ok(None),
+        Some(text) => NoteIdDto::new(text)
+            .map(|note| Some(note.as_str().to_owned()))
+            .ok_or(AppError::InvalidRequest),
+    }
 }
 
 fn revision(value: u64) -> Result<RecordRevision, AppError> {

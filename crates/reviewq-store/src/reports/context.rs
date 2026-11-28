@@ -126,6 +126,7 @@ fn query(collection: Collection) -> &'static str {
                     d.blocking, d.publication, d.reason,
                     c.kind, c.locations, c.consequence, c.evidence_kind, c.evidence,
                     CASE WHEN ?9 THEN c.issue END, CASE WHEN ?9 THEN c.proposed_comment END,
+                    CASE WHEN ?9 THEN c.reply_to_note END,
                     x.retired, o.conclusion, o.reason, o.checked_sha
              FROM (
                  SELECT f.finding_id, f.title, f.severity, f.blocking, f.record_revision,
@@ -214,13 +215,13 @@ fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreErro
                 _ => Some(range(5)?),
             },
             details: finding_fields(row, 11)?.map(Box::new),
-            retired: row.get(18)?,
-            outcome: optional(row, 19)?
+            retired: row.get(19)?,
+            outcome: optional(row, 20)?
                 .map(|conclusion| {
                     Ok::<_, StoreError>(Box::new(FindingChange {
                         conclusion,
-                        reason: row.get(20)?,
-                        checked_sha: optional(row, 21)?,
+                        reason: row.get(21)?,
+                        checked_sha: optional(row, 22)?,
                     }))
                 })
                 .transpose()?,
@@ -272,6 +273,7 @@ fn finding_fields(row: &Row<'_>, at: usize) -> Result<Option<FindingPreview>, St
         },
         issue: row.get(at + 5)?,
         proposed_comment: row.get(at + 6)?,
+        reply_to_note: row.get(at + 7)?,
     }))
 }
 

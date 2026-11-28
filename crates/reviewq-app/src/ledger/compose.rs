@@ -28,7 +28,7 @@ use super::{
     Composed, CoverFacts, FindingOutcome, NoteRecord, NoteSection, SnapshotFinding, VersionFacts,
     default_category,
 };
-use crate::reports::{FindingBasisKind, FindingKind, FindingLocation, RevisionEvidence, Severity};
+use crate::reports::{FindingBasisKind, FindingLocation, RevisionEvidence, Severity};
 use output::{
     Cell, Output, UtcSeconds, without_blank_lines, write_code, write_heading_text, write_link,
     write_literal,
@@ -110,6 +110,17 @@ fn effective_blocking(finding: &SnapshotFinding) -> bool {
         .unwrap_or(finding.record.fields.blocking)
 }
 
+/// Where `severity` stands from P0 to P3: its place in the counts line and in the findings'
+/// order.
+const fn severity_rank(severity: Severity) -> usize {
+    match severity {
+        Severity::P0 => 0,
+        Severity::P1 => 1,
+        Severity::P2 => 2,
+        Severity::P3 => 3,
+    }
+}
+
 struct Report<'a> {
     cover: &'a CoverFacts,
     facts: &'a VersionFacts,
@@ -179,10 +190,7 @@ impl Report<'_> {
                 FixedSection::Flow => self.note_section(out, section, NoteSection::Flow),
                 FixedSection::Changes => self.note_section(out, section, NoteSection::Changes),
                 FixedSection::Threads => self.threads(out),
-                FixedSection::Functional => {
-                    self.findings_section(out, section, FindingKind::Functional)
-                }
-                FixedSection::Quality => self.findings_section(out, section, FindingKind::Quality),
+                FixedSection::Findings => self.findings_section(out),
                 FixedSection::Questions => self.note_section(out, section, NoteSection::Questions),
                 FixedSection::Verification => {
                     self.note_section(out, section, NoteSection::Verification)?;
@@ -270,13 +278,7 @@ impl Report<'_> {
             nonblocking: 0,
         };
         for finding in self.active() {
-            let index = match finding.record.fields.severity {
-                Severity::P0 => 0,
-                Severity::P1 => 1,
-                Severity::P2 => 2,
-                Severity::P3 => 3,
-            };
-            line.severities[index] += 1;
+            line.severities[severity_rank(finding.record.fields.severity)] += 1;
             if effective_blocking(finding) {
                 line.blocking += 1;
             } else {
@@ -415,19 +417,20 @@ impl Report<'_> {
         out.write_str(" |")
     }
 
-    /// `Functional findings` or `Quality findings`: the active findings of `kind`, in ID
-    /// order.
-    fn findings_section(
-        &self,
-        out: &mut Output,
-        section: FixedSection,
-        kind: FindingKind,
-    ) -> fmt::Result {
+    /// `Findings`: every active finding, the effectively blocking ones first, then by
+    /// severity from P0 to P3, then by ID.
+    fn findings_section(&self, out: &mut Output) -> fmt::Result {
+        let section = FixedSection::Findings;
         let start = out.open_section(section)?;
-        for finding in self
-            .active()
-            .filter(|finding| finding.record.fields.kind == kind)
-        {
+        let mut findings: Vec<&SnapshotFinding> = self.active().collect();
+        findings.sort_by_key(|finding| {
+            (
+                !effective_blocking(finding),
+                severity_rank(finding.record.fields.severity),
+                finding.record.id,
+            )
+        });
+        for finding in findings {
             self.card(out, finding)?;
         }
         out.close_fixed_section(section, start)
@@ -497,8 +500,9 @@ impl Report<'_> {
     }
 
     /// The bold lead line, which says where the comment would go, then the comment as a block
-    /// quote. It goes as a reply in the first linked discussion ReviewQ tracks a note for,
-    /// otherwise as a new comment at the first location, otherwise on the MR.
+    /// quote. It goes as a reply to the note the finding names, otherwise as a reply in the
+    /// first linked discussion ReviewQ tracks a note for, otherwise as a new comment at the
+    /// first location, otherwise on the MR.
     fn proposed_comment(
         &self,
         out: &mut Output,
@@ -507,11 +511,18 @@ impl Report<'_> {
     ) -> fmt::Result {
         out.block()?;
         write!(out, "**{PROPOSED_COMMENT_OPENING}")?;
-        let thread = finding
-            .discussion_ids
-            .iter()
-            .find_map(|discussion| self.thread(discussion));
-        match (thread, finding.record.fields.body.locations.first()) {
+        let body = &finding.record.fields.body;
+        let thread = body
+            .reply_to_note
+            .as_deref()
+            .map(|note| self.cover.links.note(note))
+            .or_else(|| {
+                finding
+                    .discussion_ids
+                    .iter()
+                    .find_map(|discussion| self.thread(discussion))
+            });
+        match (thread, body.locations.first()) {
             (Some(url), _) => {
                 out.write_str(REPLY_IN)?;
                 write_link(out, REPLY_THREAD, &url)?;

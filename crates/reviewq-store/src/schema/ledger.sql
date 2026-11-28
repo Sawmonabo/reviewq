@@ -36,6 +36,8 @@ CREATE TABLE ledger_changes (
     consequence TEXT,
     evidence TEXT,
     proposed_comment TEXT CHECK (length(proposed_comment) > 0),
+    reply_to_note TEXT CHECK (length(reply_to_note) BETWEEN 1 AND 19
+        AND reply_to_note GLOB '[1-9]*' AND reply_to_note NOT GLOB '*[^0-9]*'),
     details TEXT CHECK (length(details) > 0),
     body TEXT,
     PRIMARY KEY (run_id, sequence),
@@ -45,6 +47,7 @@ CREATE TABLE ledger_changes (
     CHECK (finding IS NULL OR (severity IS NOT NULL AND blocking IS NOT NULL AND kind IS NOT NULL
         AND title IS NOT NULL AND evidence_kind IS NOT NULL AND locations IS NOT NULL
         AND issue IS NOT NULL AND consequence IS NOT NULL AND evidence IS NOT NULL AND body IS NULL)),
+    CHECK (reply_to_note IS NULL OR proposed_comment IS NOT NULL),
     CHECK ((conclusion IS NULL) = (outcome_reason IS NULL)
         AND (conclusion IS NULL) = (discussion_ids IS NULL)
         AND (conclusion IS NOT NULL OR checked_sha IS NULL))

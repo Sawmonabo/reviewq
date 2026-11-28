@@ -75,6 +75,7 @@ labels!(RecordField {
     Consequence => "consequence",
     Evidence => "evidence",
     ProposedComment => "proposedComment",
+    ReplyToNote => "replyToNote",
     Details => "details",
     Outcome => "outcome",
     Reason => "reason",
@@ -259,8 +260,10 @@ pub struct FindingFields {
 /// field.
 ///
 /// The optional fields can be removed: a present empty list clears the locations
-/// (`Some(vec![])`), and a present empty string removes `proposedComment` or `details`
-/// (`Some(None)`). `Some(Some(text))` never holds empty text.
+/// (`Some(vec![])`), and a present empty string removes `proposedComment`, `replyToNote` or
+/// `details` (`Some(None)`). `Some(Some(text))` never holds empty text. Removing the proposed
+/// comment also removes the reply target, unless the patch names one, which the store then
+/// refuses with `WriteRefusal::ReplyWithoutComment`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FindingPatch {
     pub title: Option<String>,
@@ -273,12 +276,13 @@ pub struct FindingPatch {
     pub consequence: Option<String>,
     pub evidence: Option<FindingBasis>,
     pub proposed_comment: Option<Option<String>>,
+    pub reply_to_note: Option<Option<String>>,
     pub details: Option<Option<String>>,
 }
 
 impl FindingFields {
     /// The UTF-8 bytes of the authored text: title, category, location paths, issue,
-    /// consequence, evidence, proposed comment and details.
+    /// consequence, evidence, proposed comment, reply target and details.
     pub fn text_bytes(&self) -> usize {
         let body = &self.body;
         self.title.len()
@@ -292,6 +296,7 @@ impl FindingFields {
             + body.consequence.len()
             + body.evidence.text.len()
             + body.proposed_comment.as_ref().map_or(0, String::len)
+            + body.reply_to_note.as_ref().map_or(0, String::len)
             + body.details.as_ref().map_or(0, String::len)
     }
 }
@@ -465,6 +470,9 @@ pub enum WriteRefusal {
     TooManyFindings,
     /// The run would hold more than `MAX_EXTRA_NOTES` extra notes.
     TooManyExtraNotes,
+    /// The finding would name a note for its proposed comment to reply to without having a
+    /// proposed comment.
+    ReplyWithoutComment,
 }
 
 /// `read_draft`: one page of the run's ledger.

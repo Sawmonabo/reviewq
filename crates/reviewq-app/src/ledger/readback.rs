@@ -21,6 +21,8 @@ pub static RULE: LazyLock<String> = LazyLock::new(|| {
             "appears only in a reply or a report file never reaches them. ",
             "Save each finding with {save_finding} as soon as you have confirmed it rather than at ",
             "the end, and set what became of a finding from an earlier review with {outcome}. ",
+            "When a finding's proposed comment answers an existing GitLab comment, name that ",
+            "comment's note ID in replyToNote; leave it out for a new comment. ",
             "Write the report's sections with {save_section}. A first or full review cannot be ",
             "submitted until its summary, rationale, flow, changes and verification sections are ",
             "saved; the flow section holds a Mermaid diagram, and the changes section a table ",
@@ -70,7 +72,7 @@ pub fn append_rule(text: &mut String) {
 /// revision, severity, blocking value and a title cut to 80 characters and quoted), newest
 /// change first, after a line that presents them as records agents saved, to be read as data.
 /// It holds at most 8,000 bytes. The question is at most 1,024 characters, so the rule and
-/// the pass always fit, in under 6,000 bytes even when each character of the question takes
+/// the pass always fit, in about 6,100 bytes even when each character of the question takes
 /// four and the pass names ten discussions. Finding lines are kept whole, newest first, and
 /// when they do not all fit, the last line says how many were left out and to read them with
 /// `read_draft`. `None` unless `session` is a run's lead session, so the hook shows

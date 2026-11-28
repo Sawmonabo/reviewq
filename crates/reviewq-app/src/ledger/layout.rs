@@ -1,5 +1,5 @@
 //! The fixed words of the composed report, as the spec's composed layout writes them: the
-//! eight section headings with the line an empty one shows, the four cover labels, the counts
+//! seven section headings with the line an empty one shows, the four cover labels, the counts
 //! line and the card's field labels. The composer writes them and the field checks refuse
 //! authored text that a reader could take for them.
 
@@ -9,14 +9,13 @@ use reviewq_domain::ledger::VersionKind;
 
 use crate::reports::{FindingConclusion, Severity, Verdict};
 
-/// One of the eight sections every version shows, in layout order.
+/// One of the seven sections every version shows, in layout order.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FixedSection {
     Flow,
     Changes,
     Threads,
-    Functional,
-    Quality,
+    Findings,
     Questions,
     Verification,
     Publication,
@@ -25,12 +24,11 @@ pub(crate) enum FixedSection {
 impl FixedSection {
     /// Every fixed section, in the order the report shows them. Extra notes follow
     /// `Verification`.
-    pub(crate) const ALL: [Self; 8] = [
+    pub(crate) const ALL: [Self; 7] = [
         Self::Flow,
         Self::Changes,
         Self::Threads,
-        Self::Functional,
-        Self::Quality,
+        Self::Findings,
         Self::Questions,
         Self::Verification,
         Self::Publication,
@@ -42,8 +40,7 @@ impl FixedSection {
             Self::Flow => "Principal code / data flow",
             Self::Changes => "What changes across the MR",
             Self::Threads => "Our previous threads",
-            Self::Functional => "Functional findings",
-            Self::Quality => "Quality findings",
+            Self::Findings => "Findings",
             Self::Questions => "Open questions and decisions",
             Self::Verification => "Verification and limits",
             Self::Publication => "Publication and dispositions",
@@ -55,8 +52,7 @@ impl FixedSection {
         match self {
             Self::Flow | Self::Changes | Self::Verification => "Not recorded.",
             Self::Threads => "No earlier threads.",
-            Self::Functional => "No functional findings.",
-            Self::Quality => "No quality findings.",
+            Self::Findings => "No findings.",
             Self::Questions => "No open questions.",
             Self::Publication => "No publication or disposition changes recorded.",
         }
@@ -131,8 +127,9 @@ impl CardLabel {
 /// The start of the proposed comment's bold lead line.
 pub(crate) const PROPOSED_COMMENT_OPENING: &str = "Proposed comment — ";
 
-/// Where a proposed comment would go, after `PROPOSED_COMMENT_OPENING`: a reply in the
-/// finding's linked thread, a new comment at its first location, or a new comment on the MR.
+/// Where a proposed comment would go, after `PROPOSED_COMMENT_OPENING`: a reply to the note
+/// the finding names or in its linked thread, a new comment at its first location, or a new
+/// comment on the MR.
 pub(crate) const REPLY_IN: &str = "reply in ";
 pub(crate) const REPLY_THREAD: &str = "thread";
 pub(crate) const NEW_COMMENT_AT: &str = "new comment at ";

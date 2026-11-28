@@ -251,8 +251,8 @@ pub struct ContextRequest {
 pub struct FindingSelection {
     pub state: FindingState,
     pub kind: Option<FindingKind>,
-    /// Whether each finding carries its issue and proposed comment. The Findings panel leaves
-    /// them out, as it shows them from the report text.
+    /// Whether each finding carries its issue, proposed comment and the note that comment
+    /// replies to. The Findings panel leaves them out, as it shows them from the report text.
     pub full_text: bool,
 }
 
@@ -296,12 +296,16 @@ pub struct FindingDetails {
     pub consequence: String,
     pub evidence: FindingBasis,
     pub proposed_comment: Option<String>,
+    /// The GitLab note, as its ID's digits, that the proposed comment replies to. It exists
+    /// only with a proposed comment and links the finding to no discussion.
+    pub reply_to_note: Option<String>,
     pub details: Option<String>,
 }
 
 /// A finding's fields at the record revision a version published. The Findings panel shows
-/// all but `issue` and `proposed_comment` beside its title and badges, and reads the rest in
-/// the report text at the descriptor's `source`; a full-text read fills those two as well.
+/// all but `issue`, `proposed_comment` and `reply_to_note` beside its title and badges, and
+/// reads the rest in the report text at the descriptor's `source`; a full-text read fills
+/// those three as well.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FindingPreview {
     pub kind: FindingKind,
@@ -310,6 +314,7 @@ pub struct FindingPreview {
     pub evidence: FindingBasis,
     pub issue: Option<String>,
     pub proposed_comment: Option<String>,
+    pub reply_to_note: Option<String>,
 }
 
 /// The outcome a version records for one of its findings.

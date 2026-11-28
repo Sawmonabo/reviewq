@@ -9,7 +9,7 @@ use crate::ledger::{
 };
 use crate::reports::{
     Coverage, DisplayIndex, FindingBasis, FindingConclusion, FindingDetails, FindingDisposition,
-    FindingLocation, Publication, Verdict, build_report_display_index,
+    FindingKind, FindingLocation, Publication, Verdict, build_report_display_index,
 };
 
 /// The expected text, written by hand from the spec's composed layout.
@@ -95,7 +95,8 @@ fn note(section: NoteSection, body: &str) -> NoteRecord {
 /// retired finding with `|` in its reason, a keeping outcome on every other finding of the
 /// parent version, one of them with no linked discussion, an outcome on a discussion that
 /// resolves to a note and one on a discussion that does not, a user disposition that
-/// overrides the lead's blocking value, a proposed comment in each of its three places,
+/// overrides the lead's blocking value and so places that P1 below a blocking P3, a
+/// proposed comment in each of its three places,
 /// every fixed note and one extra note, a title that starts with code, a level-two heading
 /// inside details and a line with `Vec<u8>` and `<runner>`.
 fn worked_findings() -> Vec<SnapshotFinding> {
@@ -121,6 +122,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
                     "Reuse the key stored with the first attempt instead of building a new one.\n"
                         .to_owned(),
                 ),
+                reply_to_note: None,
                 details: Some(
                     "\nThe timeline below shows the race.\n\n## Timeline\n\n1. The first insert commits.\n2. The reply is lost and the client retries.\n\nEach <runner> keeps the body as a Vec<u8> until the write commits.\n\n"
                         .to_owned(),
@@ -145,7 +147,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
         Author::Subagent("agent-7".to_owned()),
         FindingFields {
             title: "`retry_key` is rebuilt on every attempt".to_owned(),
-            severity: Severity::P2,
+            severity: Severity::P1,
             blocking: true,
             kind: FindingKind::Quality,
             category: Some("Reliability".to_owned()),
@@ -162,6 +164,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
                     "The unit test `retries_reuse_key` fails at the reviewed commit.",
                 ),
                 proposed_comment: Some("Build the key once, before the loop.".to_owned()),
+                reply_to_note: None,
                 details: None,
             },
         },
@@ -199,6 +202,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
                 consequence: "A retry on the other path writes a second invoice.".to_owned(),
                 evidence: evidence(FindingBasisKind::Observed, "Both paths call `new_key`."),
                 proposed_comment: None,
+                reply_to_note: None,
                 details: None,
             },
         },
@@ -220,7 +224,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
         FindingFields {
             title: "Retry delay is not configurable".to_owned(),
             severity: Severity::P3,
-            blocking: false,
+            blocking: true,
             kind: FindingKind::Quality,
             category: None,
             body: FindingDetails {
@@ -235,6 +239,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
                     "Make the delay a setting.\n\n- Read it from `RETRY_DELAY_MS`.\n- Keep 200 ms as the default.\n"
                         .to_owned(),
                 ),
+                reply_to_note: None,
                 details: None,
             },
         },
@@ -357,6 +362,22 @@ fn composed_worked_set_matches() {
     let composed = compose(&cover, &facts, &worked_findings(), &worked_notes());
     assert_eq!(composed.text, WORKED);
 
+    // A note F-01 names for its comment to reply to wins over its monitored thread, D9's note
+    // 9001, and changes only that lead line: the threads table still links 9001 and the
+    // publication line still lists D9.
+    let mut named = worked_findings();
+    named[0].record.fields.body.reply_to_note = Some("9002".to_owned());
+    let mr = "https://gitlab.example.com/acme/billing/-/merge_requests/42";
+    let monitored = format!("**Proposed comment — reply in [thread]({mr}#note_9001):**");
+    let expected = WORKED.replacen(
+        &monitored,
+        &format!("**Proposed comment — reply in [thread]({mr}#note_9002):**"),
+        1,
+    );
+    assert!(WORKED.contains(&monitored) && expected != WORKED);
+    let replied = compose(&cover, &facts, &named, &worked_notes());
+    assert_eq!(replied.text, expected);
+
     let sections = line_starts("## ");
     let cards = line_starts("### ");
     let ends: Vec<usize> = {
@@ -375,8 +396,7 @@ fn composed_worked_set_matches() {
             "Principal code / data flow",
             "What changes across the MR",
             "Our previous threads",
-            "Functional findings",
-            "Quality findings",
+            "Findings",
             "Open questions and decisions",
             "Verification and limits",
             "Rollout plan for *v2* & `beta` #",
@@ -392,7 +412,9 @@ fn composed_worked_set_matches() {
         .iter()
         .map(|card| card.id.to_string())
         .collect();
-    assert_eq!(ids, ["F-01", "F-02", "F-04"]);
+    // Blocking first by the effective value, then by severity: F-02's raw value is blocking,
+    // but the user's disposition makes it nonblocking, so the blocking P3 comes before it.
+    assert_eq!(ids, ["F-01", "F-04", "F-02"]);
     assert_eq!(composed.cards.len(), cards.len());
     for (card, start) in composed.cards.iter().zip(&cards) {
         assert_slices(&card.span, block_from(*start, &ends), &card.id.to_string());

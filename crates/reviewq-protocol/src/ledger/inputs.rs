@@ -127,6 +127,16 @@ pub struct SaveFinding {
         schemars(with = "String", length(max = crate::reports::MAX_FINDING_TEXT_BYTES))
     )]
     pub proposed_comment: Option<String>,
+    /// When the proposed comment answers an existing GitLab comment, that comment's note ID
+    /// on this merge request, such as `123456`; leave it out for a new comment. It needs a
+    /// proposed comment, saved before or in the same call, and removing the comment removes
+    /// it. An empty string removes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(schema_with = "crate::scalar::reply_to_note_schema")
+    )]
+    pub reply_to_note: Option<String>,
     /// Markdown for diagrams, tables and longer reasoning, shown after the evidence. An empty
     /// string removes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]

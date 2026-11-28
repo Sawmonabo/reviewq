@@ -17,11 +17,11 @@ use crate::queue::{parse, text};
 /// The columns `finding` decodes, in order, from `ledger_changes c`.
 pub(super) const FINDING_COLUMNS: &str = "c.finding, c.revision, c.author, c.title, c.severity,
     c.blocking, c.kind, c.category, c.locations, c.issue, c.consequence, c.evidence_kind,
-    c.evidence, c.proposed_comment, c.details, c.conclusion, c.outcome_reason,
+    c.evidence, c.proposed_comment, c.reply_to_note, c.details, c.conclusion, c.outcome_reason,
     c.discussion_ids, c.checked_sha";
 
 /// How many columns `FINDING_COLUMNS` names.
-pub(super) const FINDING_WIDTH: usize = 19;
+pub(super) const FINDING_WIDTH: usize = 20;
 
 /// The columns `note` decodes, in order, from `ledger_changes c`.
 pub(super) const NOTE_COLUMNS: &str = "c.note_section, c.note_title, c.revision, c.body";
@@ -46,13 +46,13 @@ pub(super) fn line(row: &Row<'_>) -> Result<FindingLine, StoreError> {
 /// Decodes `FINDING_COLUMNS` starting at column `at`.
 pub(super) fn finding(row: &Row<'_>, at: usize) -> Result<FindingRecord, StoreError> {
     let author: Option<String> = row.get(at + 2)?;
-    let conclusion: Option<String> = row.get(at + 15)?;
+    let conclusion: Option<String> = row.get(at + 16)?;
     let outcome = match conclusion {
         Some(conclusion) => Some(FindingOutcome {
             conclusion: parse(&conclusion)?,
-            reason: row.get(at + 16)?,
-            discussion_ids: from_json(text(row, at + 17)?)?,
-            checked_sha: optional(row, at + 18)?,
+            reason: row.get(at + 17)?,
+            discussion_ids: from_json(text(row, at + 18)?)?,
+            checked_sha: optional(row, at + 19)?,
         }),
         None => None,
     };
@@ -72,7 +72,7 @@ pub(super) fn finding(row: &Row<'_>, at: usize) -> Result<FindingRecord, StoreEr
     })
 }
 
-/// Decodes the seven detail columns, `locations` through `details` in `FINDING_COLUMNS`
+/// Decodes the eight detail columns, `locations` through `details` in `FINDING_COLUMNS`
 /// order, starting at column `at`.
 fn details(row: &Row<'_>, at: usize) -> Result<FindingDetails, StoreError> {
     Ok(FindingDetails {
@@ -84,7 +84,8 @@ fn details(row: &Row<'_>, at: usize) -> Result<FindingDetails, StoreError> {
             text: row.get(at + 4)?,
         },
         proposed_comment: row.get(at + 5)?,
-        details: row.get(at + 6)?,
+        reply_to_note: row.get(at + 6)?,
+        details: row.get(at + 7)?,
     })
 }
 
@@ -209,6 +210,10 @@ pub(super) fn finding_changes(before: &FindingRecord, after: &FindingRecord) -> 
         (
             RecordField::ProposedComment,
             old_body.proposed_comment != new_body.proposed_comment,
+        ),
+        (
+            RecordField::ReplyToNote,
+            old_body.reply_to_note != new_body.reply_to_note,
         ),
         (RecordField::Details, old_body.details != new_body.details),
         (

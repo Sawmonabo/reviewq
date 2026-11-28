@@ -185,6 +185,7 @@ fn finding(item: Descriptor) -> Result<Value, AppError> {
         "consequence": details.consequence,
         "evidence": project_basis(details.evidence),
         "proposedComment": details.proposed_comment,
+        "replyToNote": details.reply_to_note,
         "card": source.map(|range| json!({"offset": range.offset, "length": range.length})),
     }))
 }

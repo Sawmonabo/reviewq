@@ -7,7 +7,7 @@ use jsonschema::{ValidationError, Validator, error::ValidationErrorKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::scalar::{FINDING_ID_PATTERN, GIT_SHA_PATTERN};
+use crate::scalar::{FINDING_ID_PATTERN, GIT_SHA_PATTERN, REPLY_TO_NOTE_PATTERN};
 
 /// Field errors one reply lists before a single summary of the rest, which keeps a refusal
 /// short enough to read and far below the ledger result limit.
@@ -120,6 +120,9 @@ fn pattern_message(pattern: &str) -> &'static str {
     match pattern {
         FINDING_ID_PATTERN => "Use a finding ID such as F-01.",
         GIT_SHA_PATTERN => "Use the full 40- or 64-character SHA of a commit.",
+        REPLY_TO_NOTE_PATTERN => {
+            "Use the GitLab note ID in digits only, such as 123456, or an empty string to remove it."
+        }
         _ => "Value does not match the required format.",
     }
 }

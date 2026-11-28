@@ -89,33 +89,64 @@ fn ledger_writes_are_idempotent() {
             .unwrap();
         assert_eq!(equal.receipt, first.receipt);
         let id = FindingId::FIRST;
-        let retitle = FindingPatch {
-            title: Some("Retry writes the invoice twice".into()),
+        // A comment and the note it replies to save in one call, a change of the note alone
+        // makes a revision, and removing the comment removes the note.
+        let reply = |note: &str| FindingPatch {
+            reply_to_note: Some(Some(note.into())),
             ..FindingPatch::default()
         };
-        let changed = store
-            .write_record(call("retitle"), change(RecordRevision::FIRST, retitle))
-            .await
-            .unwrap()
-            .unwrap();
+        let write = |name: &'static str, at: RecordRevision, patch| {
+            store.write_record(call(name), change(at, patch))
+        };
+        let commented = FindingPatch {
+            proposed_comment: Some(Some("Reuse the stored key.".into())),
+            ..reply("9001")
+        };
         let second = RecordRevision::FIRST.next().unwrap();
-        assert!(
-            matches!(changed.receipt, RecordReceipt::Finding { revision, .. } if revision == second)
-        );
+        let third = second.next().unwrap();
+        for (name, at, patch) in [
+            ("comment", RecordRevision::FIRST, commented),
+            ("reply", second, reply("9002")),
+        ] {
+            let changed = write(name, at, patch).await.unwrap().unwrap();
+            let next = at.next().unwrap();
+            assert!(
+                matches!(changed.receipt, RecordReceipt::Finding { revision, .. } if revision == next)
+            );
+        }
         let reseverity = FindingPatch {
             severity: Some(Severity::P2),
             ..FindingPatch::default()
         };
-        let stale = store
-            .write_record(call("stale"), change(RecordRevision::FIRST, reseverity))
-            .await
-            .unwrap();
+        let stale = write("stale", second, reseverity).await.unwrap();
         assert_eq!(
             stale,
             Err(WriteRefusal::StaleRevision {
-                current: second,
-                changed: vec![RecordField::Title],
+                current: third,
+                changed: vec![RecordField::ReplyToNote],
             })
+        );
+        let uncomment = FindingPatch {
+            proposed_comment: Some(None),
+            ..FindingPatch::default()
+        };
+        write("uncomment", third, uncomment).await.unwrap().unwrap();
+        let fourth = third.next().unwrap();
+        let alone = write("alone", fourth, reply("9003")).await.unwrap();
+        assert_eq!(alone, Err(WriteRefusal::ReplyWithoutComment));
+        let full = LedgerRead {
+            selection: LedgerSelection::Findings(vec![id]),
+            after: None,
+        };
+        let LedgerEntries::Full { findings, .. } =
+            store.read_ledger(lead(), full).await.unwrap().entries
+        else {
+            panic!("a read by ID returns records");
+        };
+        let body = &findings[0].fields.body;
+        assert_eq!(
+            (&body.proposed_comment, &body.reply_to_note),
+            (&None, &None)
         );
         file_notes(&store, &[NoteSection::Summary]).await;
         store.close(SqliteStore::CLOSE_DEADLINE).await.unwrap();
@@ -130,7 +161,7 @@ fn ledger_writes_are_idempotent() {
                 .iter()
                 .map(|line| (line.id, line.revision))
                 .collect::<Vec<_>>(),
-            [(id, second)]
+            [(id, fourth)]
         );
         assert_eq!(notes.len(), 1);
         assert_eq!(page.pass.map(|pass| pass.kind), Some(PassKind::FullReview));
@@ -520,6 +551,7 @@ fn fields() -> FindingFields {
                 text: "Replaying the request after a dropped reply inserted two rows.".into(),
             },
             proposed_comment: None,
+            reply_to_note: None,
             details: None,
         },
     }

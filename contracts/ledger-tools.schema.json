@@ -211,6 +211,11 @@
         "maxLength": 8192,
         "type": "string"
       },
+      "replyToNote": {
+        "description": "When the proposed comment answers an existing GitLab comment, that comment's note ID on this merge request, such as `123456`; leave it out for a new comment. It needs a proposed comment, saved before or in the same call, and removing the comment removes it. An empty string removes it.",
+        "pattern": "^([1-9][0-9]{0,18})?$",
+        "type": "string"
+      },
       "severity": {
         "$ref": "#/definitions/Severity"
       },

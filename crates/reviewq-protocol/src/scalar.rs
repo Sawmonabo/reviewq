@@ -14,6 +14,11 @@ const MAX_FINDING_ID_CHARS: usize = 11;
 pub(crate) const FINDING_ID_PATTERN: &str = "^F-(0[1-9]|[1-9][0-9]{1,8})$";
 /// The schema pattern of a full Git SHA, which field errors name in plain words.
 pub(crate) const GIT_SHA_PATTERN: &str = "^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$";
+/// Most digits of a GitLab note ID: a positive 64-bit number has at most 19.
+const MAX_NOTE_ID_DIGITS: usize = 19;
+/// The schema pattern of `save_finding`'s `replyToNote`, which field errors name in plain
+/// words: a note ID as `valid_note_id` accepts it, or an empty string, which removes it.
+pub(crate) const REPLY_TO_NOTE_PATTERN: &str = "^([1-9][0-9]{0,18})?$";
 
 const MAX_SQLITE_INTEGER: u64 = i64::MAX as u64;
 pub(crate) const MAX_JSON_INTEGER: u64 = 9_007_199_254_740_991;
@@ -110,6 +115,14 @@ string_dto!(
     DiscussionIdDto,
     |value: &str| bounded_text(value, MAX_DISCUSSION_ID_BYTES),
     "discussion_id_schema"
+);
+
+string_dto!(
+    /// A GitLab note ID on the merge request: its decimal digits, without a leading zero,
+    /// such as `123456`. Only its shape is checked.
+    NoteIdDto,
+    valid_note_id,
+    "note_id_schema"
 );
 
 string_dto!(
@@ -266,6 +279,14 @@ fn valid_finding_id(value: &str) -> bool {
     })
 }
 
+/// One to `MAX_NOTE_ID_DIGITS` ASCII digits without a leading zero, the strings
+/// `REPLY_TO_NOTE_PATTERN` accepts apart from the empty one.
+pub(crate) fn valid_note_id(value: &str) -> bool {
+    (1..=MAX_NOTE_ID_DIGITS).contains(&value.len())
+        && !value.starts_with('0')
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
 fn valid_review_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 512
@@ -313,6 +334,20 @@ fn finding_id_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         "pattern": FINDING_ID_PATTERN,
         "maxLength": MAX_FINDING_ID_CHARS,
     })
+}
+
+#[cfg(feature = "schema")]
+fn note_id_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "string",
+        "pattern": "^[1-9][0-9]{0,18}$",
+    })
+}
+
+/// `save_finding`'s `replyToNote`: a note ID, or an empty string to remove it.
+#[cfg(feature = "schema")]
+pub(crate) fn reply_to_note_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": "string", "pattern": REPLY_TO_NOTE_PATTERN })
 }
 
 #[cfg(feature = "schema")]

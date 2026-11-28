@@ -10,7 +10,7 @@ The retry reuses the request's idempotency key.
 
 The retry still creates a new key on one path, which can write a duplicate invoice.
 
-P0: 0 · P1: 1 · P2: 1 · P3: 1 · Blocking: 1 · Nonblocking: 2
+P0: 0 · P1: 2 · P2: 0 · P3: 1 · Blocking: 2 · Nonblocking: 1
 
 **Scope:** Full review
 
@@ -50,7 +50,7 @@ The author replied on D7 that the shared key landed in the second commit.
 | F-02 · `retry_key` is rebuilt on every attempt | **Still present.** `retry_key` is still called inside the loop. | [4f3c2b1a](https://gitlab.example.com/acme/billing/-/commit/4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a) |
 | F-03 · Two retry paths build separate keys | **Fixed.** Both paths now share one key \| verified by replay. | `D7` · [17a2b3c4](https://gitlab.example.com/acme/billing/-/commit/17a2b3c417a2b3c417a2b3c417a2b3c417a2b3c4) |
 
-## Functional findings
+## Findings
 
 ### F-01 · Retry writes the same invoice twice
 
@@ -77,27 +77,9 @@ Each <runner> keeps the body as a Vec<u8> until the write commits.
 
 > Reuse the key stored with the first attempt instead of building a new one.
 
-## Quality findings
-
-### F-02 · `retry_key` is rebuilt on every attempt
-
-**P2 · Reliability · Nonblocking**
-
-**Location:** [retry.rs:12](https://gitlab.example.com/acme/billing/-/blob/4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a/src/retry.rs#L12), [retry\`notes.md](https://gitlab.example.com/acme/billing/-/blob/4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a/docs/retry%60notes.md)
-
-**Issue:** `retry_key` is called inside the loop, so each attempt gets a new key.
-
-**Why it matters:** The server cannot tell a retry from a new request.
-
-**Confirmed:** The unit test `retries_reuse_key` fails at the reviewed commit.
-
-**Proposed comment — new comment at retry.rs:12:**
-
-> Build the key once, before the loop.
-
 ### F-04 · Retry delay is not configurable
 
-**P3 · Quality · Nonblocking**
+**P3 · Quality · Blocking**
 
 **Issue:** The delay between attempts is a constant.
 
@@ -111,6 +93,22 @@ Each <runner> keeps the body as a Vec<u8> until the write commits.
 >
 > - Read it from `RETRY_DELAY_MS`.
 > - Keep 200 ms as the default.
+
+### F-02 · `retry_key` is rebuilt on every attempt
+
+**P1 · Reliability · Nonblocking**
+
+**Location:** [retry.rs:12](https://gitlab.example.com/acme/billing/-/blob/4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a/src/retry.rs#L12), [retry\`notes.md](https://gitlab.example.com/acme/billing/-/blob/4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a4f3c2b1a/docs/retry%60notes.md)
+
+**Issue:** `retry_key` is called inside the loop, so each attempt gets a new key.
+
+**Why it matters:** The server cannot tell a retry from a new request.
+
+**Confirmed:** The unit test `retries_reuse_key` fails at the reviewed commit.
+
+**Proposed comment — new comment at retry.rs:12:**
+
+> Build the key once, before the loop.
 
 ## Open questions and decisions
 

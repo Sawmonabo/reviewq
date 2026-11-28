@@ -34,7 +34,7 @@ pub use hosts::{
 pub use scalar::{
     CheckpointIdDto, DiscussionIdDto, EventCursorDto, FileIdDto, FindingIdDto, GitShaDto,
     HistoryCursorDto, HistoryEntryIdDto, HistoryGenerationDto, HistoryTurnIdDto,
-    MergeRequestIidDto, PageCursorDto, PatchETagDto, PatchRevisionDto, ProjectIdDto, ResourceIdDto,
-    ReviewIdDto, RevisionDto, RunIdDto, SafeCountDto, SessionKeyDto, SubmissionIdDto, TicketKeyDto,
-    UpstreamIdDto,
+    MergeRequestIidDto, NoteIdDto, PageCursorDto, PatchETagDto, PatchRevisionDto, ProjectIdDto,
+    ResourceIdDto, ReviewIdDto, RevisionDto, RunIdDto, SafeCountDto, SessionKeyDto,
+    SubmissionIdDto, TicketKeyDto, UpstreamIdDto,
 };

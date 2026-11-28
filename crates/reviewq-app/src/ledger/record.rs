@@ -37,8 +37,9 @@ pub enum FindingInput {
 ///
 /// Fails with `InvalidFields` listing every Markdown field that breaks a rule, with nothing
 /// written; or with one field error for a store refusal: an unknown ID, a stale revision, a
-/// duplicate of an active finding, a run already at `MAX_ACTIVE_FINDINGS`, or a caller that is
-/// neither the run's lead nor a verified child of it. Other store errors pass through.
+/// duplicate of an active finding, a run already at `MAX_ACTIVE_FINDINGS`, a reply target on a
+/// finding left without a proposed comment, or a caller that is neither the run's lead nor a
+/// verified child of it. Other store errors pass through.
 pub async fn save_finding(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
@@ -361,6 +362,13 @@ fn refusal_error(
             format!(
                 "This review already holds {MAX_ACTIVE_FINDINGS} active findings. Fold this into a related finding, or retire findings that no longer apply with {}.",
                 Tool::SetFindingOutcome.as_str()
+            ),
+        ),
+        WriteRefusal::ReplyWithoutComment => FieldError::new(
+            "/replyToNote",
+            format!(
+                "{} has no proposed comment to send as this reply, so give proposedComment in the same call or leave out replyToNote.",
+                capitalized(&name),
             ),
         ),
         WriteRefusal::TooManyExtraNotes => FieldError::new(

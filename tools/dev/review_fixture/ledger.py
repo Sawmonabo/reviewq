@@ -68,7 +68,7 @@ def worked(head):
             "Replaying the request after a dropped reply inserted two rows.",
             locations=[{"path": "src/invoices.rs", "line": 74}])),
         call("save_finding", finding(
-            "`retry_key` is rebuilt on every attempt", "P2", True, "quality",
+            "`retry_key` is rebuilt on every attempt", "P1", True, "quality",
             "`retry_key` is called inside the loop, so each attempt gets a new key.",
             "The server cannot tell a retry from a new request.",
             "The unit test `retries_reuse_key` fails at the reviewed commit.",
@@ -116,7 +116,7 @@ def worked(head):
                                 "reason": "Both paths now share one key | verified by replay.",
                                 "discussionIds": ["D7"], "checkedSha": FIXED_AT}),
         call("save_finding", finding(
-            "Retry delay is not configurable", "P3", False, "quality",
+            "Retry delay is not configurable", "P3", True, "quality",
             "The delay between attempts is a constant.", "Operators cannot slow retries during an outage.",
             "The production retry settings were not available to check.", basis="gap",
             proposedComment="Make the delay a setting.\n\n- Read it from `RETRY_DELAY_MS`.\n"
@@ -275,54 +275,54 @@ def ledger_plans(reviews, sessions):
 # fixed; receipts, digests and the checked time differ on every run.
 LEDGER_VERSIONS = {
     "quiet": [
-        {"bytes": 3194, "lines": 105, "max_line_bytes": 251, "code_points": 3177, "findings": 3},
-        {"bytes": 4458, "lines": 131, "max_line_bytes": 251, "code_points": 4429, "findings": 3},
+        {"bytes": 3162, "lines": 103, "max_line_bytes": 251, "code_points": 3145, "findings": 3},
+        {"bytes": 4423, "lines": 129, "max_line_bytes": 251, "code_points": 4394, "findings": 3},
     ],
     "reader-report": [
-        {"bytes": 1756, "lines": 77, "max_line_bytes": 111, "code_points": 1744, "findings": 1,
-         "marker": {"text": "**one** &amp; two 🧪", "scalar": 1140, "byte": 1149}},
-        {"bytes": 1604, "lines": 64, "max_line_bytes": 213, "code_points": 1597, "findings": 0},
+        {"bytes": 1702, "lines": 73, "max_line_bytes": 111, "code_points": 1690, "findings": 1,
+         "marker": {"text": "**one** &amp; two 🧪", "scalar": 1129, "byte": 1138}},
+        {"bytes": 1539, "lines": 60, "max_line_bytes": 213, "code_points": 1532, "findings": 0},
     ],
     "specimen-bytes": [
-        {"bytes": 1077324, "lines": 832, "max_line_bytes": 2050, "code_points": 1077202, "findings": 22,
-         "marker": {"text": "**one** &amp; two 🧪", "scalar": 1077164, "byte": 1077283}},
+        {"bytes": 1077267, "lines": 828, "max_line_bytes": 2050, "code_points": 1077145, "findings": 22,
+         "marker": {"text": "**one** &amp; two 🧪", "scalar": 1077107, "byte": 1077226}},
     ],
     "specimen-lines": [
-        {"bytes": 131841, "lines": 10124, "max_line_bytes": 111, "code_points": 131835, "findings": 0,
-         "marker": {"text": "REPORT-LINES-TAIL", "scalar": 131817, "byte": 131823}},
+        {"bytes": 131776, "lines": 10120, "max_line_bytes": 111, "code_points": 131770, "findings": 0,
+         "marker": {"text": "REPORT-LINES-TAIL", "scalar": 131752, "byte": 131758}},
     ],
     "specimen-line": [
-        {"bytes": 27823, "lines": 72, "max_line_bytes": 26340, "code_points": 23014, "findings": 1,
-         "marker": {"text": "REPORT-LINE-TAIL", "scalar": 22997, "byte": 27806}},
+        {"bytes": 27766, "lines": 68, "max_line_bytes": 26340, "code_points": 22957, "findings": 1,
+         "marker": {"text": "REPORT-LINE-TAIL", "scalar": 22940, "byte": 27749}},
     ],
     "specimen-edges": [
-        {"bytes": 11692, "lines": 724, "max_line_bytes": 111, "code_points": 11683, "findings": 1,
-         "marker": {"text": "REPORT-EDGES-TAIL", "scalar": 11665, "byte": 11674}},
+        {"bytes": 11635, "lines": 720, "max_line_bytes": 111, "code_points": 11626, "findings": 1,
+         "marker": {"text": "REPORT-EDGES-TAIL", "scalar": 11608, "byte": 11617}},
     ],
     "specimen-characters": [
-        {"bytes": 33935, "lines": 120, "max_line_bytes": 593, "code_points": 33929, "findings": 0,
-         "marker": {"text": "REPORT-CHARACTERS-TAIL", "scalar": 33906, "byte": 33912}},
+        {"bytes": 33870, "lines": 116, "max_line_bytes": 593, "code_points": 33864, "findings": 0,
+         "marker": {"text": "REPORT-CHARACTERS-TAIL", "scalar": 33841, "byte": 33847}},
     ],
     "specimen-nodes": [
-        {"bytes": 100756, "lines": 138, "max_line_bytes": 8187, "code_points": 100732, "findings": 6,
-         "marker": {"text": "REPORT-NODES-TAIL", "scalar": 100714, "byte": 100738}},
+        {"bytes": 100699, "lines": 134, "max_line_bytes": 8187, "code_points": 100675, "findings": 6,
+         "marker": {"text": "REPORT-NODES-TAIL", "scalar": 100657, "byte": 100681}},
     ],
     "specimen-depth": [
-        {"bytes": 1742, "lines": 72, "max_line_bytes": 264, "code_points": 1733, "findings": 1,
-         "marker": {"text": "REPORT-DEPTH-TAIL", "scalar": 1715, "byte": 1724}},
+        {"bytes": 1685, "lines": 68, "max_line_bytes": 264, "code_points": 1676, "findings": 1,
+         "marker": {"text": "REPORT-DEPTH-TAIL", "scalar": 1658, "byte": 1667}},
     ],
     "specimen-windowed": [
-        {"bytes": 70213, "lines": 396, "max_line_bytes": 781, "code_points": 70123, "findings": 28,
-         "marker": {"text": "REPORT-WINDOWED-TAIL", "scalar": 70102, "byte": 70192}},
+        {"bytes": 70156, "lines": 392, "max_line_bytes": 781, "code_points": 70066, "findings": 28,
+         "marker": {"text": "REPORT-WINDOWED-TAIL", "scalar": 70045, "byte": 70135}},
     ],
     "specimen-changes": [
-        {"bytes": 30644, "lines": 204, "max_line_bytes": 781, "code_points": 30602, "findings": 12,
-         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 30582, "byte": 30624}},
-        {"bytes": 28441, "lines": 194, "max_line_bytes": 781, "code_points": 28401, "findings": 11,
-         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 28381, "byte": 28421}},
+        {"bytes": 30587, "lines": 200, "max_line_bytes": 781, "code_points": 30545, "findings": 12,
+         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 30525, "byte": 30567}},
+        {"bytes": 28384, "lines": 190, "max_line_bytes": 781, "code_points": 28344, "findings": 11,
+         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 28324, "byte": 28364}},
     ],
     "specimen-blocks": [
-        {"bytes": 100642, "lines": 2460, "max_line_bytes": 167, "code_points": 100036, "findings": 200,
-         "marker": {"text": "REPORT-BLOCKS-TAIL", "scalar": 100017, "byte": 100623}},
+        {"bytes": 100585, "lines": 2456, "max_line_bytes": 167, "code_points": 99979, "findings": 200,
+         "marker": {"text": "REPORT-BLOCKS-TAIL", "scalar": 99960, "byte": 100566}},
     ],
 }

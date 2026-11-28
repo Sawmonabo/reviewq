@@ -100,7 +100,7 @@ for name, expected in files.items():
     assert hashlib.sha256(data).hexdigest() == expected["sha256"], name
 provider = root / "provider"
 provider_manifest = (provider / "manifest.json").read_bytes()
-assert hashlib.sha256(provider_manifest).hexdigest() == "ce88dd1cfb1de24505049e8bf41ffbd48f76a8bb60d9db99dce4925f83a5f5a3"
+assert hashlib.sha256(provider_manifest).hexdigest() == "bfa6c87117bd1fc243c3a43b4a3d8f6bc96963af27384ba8c1535cd38928901b"
 companion = json.loads(provider_manifest)
 assert {p.relative_to(provider).as_posix() for p in provider.rglob("*") if p.is_file()} == {"manifest.json", *companion["files"]}
 for name, expected in companion["files"].items():
@@ -118,30 +118,30 @@ Generate `empty`, `busy`, `busy-filter`, `rich` and `reader` with the same comma
 | Preset | MRs / registrations / queued intents | Provider manifest SHA-256 |
 | --- | --- | --- |
 | `empty` | 0 / 0 / 0 | `e9fa6cc39852f216d32e056cba7677daa0ef93886f27d9ef1ce8ff7f3128e5c6` |
-| `worked` | 12 / 5 / 0 | `ce88dd1cfb1de24505049e8bf41ffbd48f76a8bb60d9db99dce4925f83a5f5a3` |
-| `busy` | 67 / 506 / 200 | `38fe34276c4afb3ae65c64bf1601ea17c5ee352acfd234e4077cf0aca4a7a637` |
-| `busy-filter` | 300 / 506 / 200 | `7294f6cc47a377a3721ad952ca33cba5aef0f863b5e5b330d0b173253b8622e7` |
-| `reader` | 12 / 9 / 0 | `fbb9d179ec423e57d5ea11f3d869d42dc7be0c782889e42990a940733c767a5b` |
-| `rich` | 12 / 19 / 0 | `44d643bfde53e7c72c5b46b2583d3d04aee5af8a9220c9b0bbac0f62f6d2d907` |
+| `worked` | 12 / 5 / 0 | `bfa6c87117bd1fc243c3a43b4a3d8f6bc96963af27384ba8c1535cd38928901b` |
+| `busy` | 67 / 506 / 200 | `5301362b69353c7af1e634541334f875f23153ce8d765aa196aea79866b3295e` |
+| `busy-filter` | 300 / 506 / 200 | `cd824364d9d065035a104d8a34046c025314d51e8c3027b390a60e16551b53b9` |
+| `reader` | 12 / 9 / 0 | `1ebbc8e4083a2109f6cfbaae8b8242c6754acccc4332dda9c839c0a30d5739a0` |
+| `rich` | 12 / 19 / 0 | `fd29791714d1b17b3cc9cc6d72f04fd39aa2531cfe94bdf71aa40ae4f2d94d45` |
 
-- Active's native source ID is `af785ec1-cf3a-56f6-8329-0a800b8ef407` and run ID is `9eeca80e-4e18-5c48-a465-5dc4acbbff92`. Its child uses the same run and names Active as its native parent. Quiet's native source ID is `ca43678e-b86c-593f-8e90-3dc74f835451`. It has one Claude assistant record containing `Quiet complete`. Its published versions measure 3,194 bytes in 105 lines, then 4,458 bytes in 131 lines, each with three findings. Large has 240 initial Codex items and its own run.
+- Active's native source ID is `af785ec1-cf3a-56f6-8329-0a800b8ef407` and run ID is `9eeca80e-4e18-5c48-a465-5dc4acbbff92`. Its child uses the same run and names Active as its native parent. Quiet's native source ID is `ca43678e-b86c-593f-8e90-3dc74f835451`. It has one Claude assistant record containing `Quiet complete`. Its published versions measure 3,162 bytes in 103 lines, then 4,423 bytes in 129 lines, each with three findings. Large has 240 initial Codex items and its own run.
 - Busy queues 200 distinct leads. `busy-5` has a pending native question. The two closed branch-only MRs use `feature/RQ-641-fix` and `feature/RQ-6410-fix`. Match only the first to Jira `RQ-641`. Busy-filter has 15 titles with the prefix `Review the parser ` and 200 Active messages of 12,000 ASCII bytes each.
 - Reader has 10,000 completed items and 400 matching command starts. Each 25th item is a user prompt, with equal text at 25 and 50 and distinct item IDs. The first, middle and last IDs are `reader-item-0`, `reader-item-5000` and `reader-item-9999`. Item 5's decoded output is exactly 327,680 bytes and ends with `READER-OUTPUT-TAIL`. The explicit page cue ends at `reader-item-10099`.
 - Rich's renamed mixed patch is 6,482 bytes with 244 physical lines. Its initial large review has 205 discussions, including 200 distributed over the mixed file. The `crlf-limit.patch` longest line is exactly 16,384 bytes before CRLF. `over-bytes.patch` is 2,249,289 bytes, `over-lines.patch` has 20,002 physical lines, and `unicode-line.patch` has a 16,819-byte line. The provider manifest records each document's digest, line measurements and exact final bytes.
-- Reader adds the Claude lead `reader-report` on Large. Its first version, 1,756 bytes, holds the five notes a first version needs and a finding whose issue contains `**one** &amp; two 🧪` at byte 1,149 (scalar 1,140), with visible text `one & two 🧪`, and whose details hold a blockquote and a Mermaid diagram. Its second version, 1,604 bytes, retires that finding as fixed and approves, so its digest differs.
+- Reader adds the Claude lead `reader-report` on Large. Its first version, 1,702 bytes, holds the five notes a first version needs and a finding whose issue contains `**one** &amp; two 🧪` at byte 1,138 (scalar 1,129), with visible text `one & two 🧪`, and whose details hold a blockquote and a Mermaid diagram. Its second version, 1,539 bytes, retires that finding as fixed and approves, so its digest differs.
 - Rich adds one Claude lead per reader limit on Large. Each version is composed from ledger records within the ledger's own limits, holds the five notes a first version needs, and ends in a unique marker. The server refuses the rich view of the first three; the browser parser counts 73,912 nodes in `specimen-nodes` and depth 132 in `specimen-depth`, and the diagrams hold 650 edges and 32,693 characters:
 
 | Lead | Limit crossed | Bytes / lines / longest line | Marker, byte (scalar) offset |
 | --- | --- | --- | --- |
-| `specimen-bytes` | 1 MiB | 1,077,324 / 832 / 2,050 | `**one** &amp; two 🧪` 1,077,283 (1,077,164), then `REPORT-BYTE-TAIL` |
-| `specimen-lines` | 10,000 lines | 131,841 / 10,124 / 111 | `REPORT-LINES-TAIL` 131,823 (131,817) |
-| `specimen-line` | 16 KiB line | 27,823 / 72 / 26,340 | `REPORT-LINE-TAIL` 27,806 (22,997) |
-| `specimen-edges` | 500 diagram edges | 11,692 / 724 / 111 | `REPORT-EDGES-TAIL` 11,674 (11,665) |
-| `specimen-characters` | 30,000 diagram characters | 33,935 / 120 / 593 | `REPORT-CHARACTERS-TAIL` 33,912 (33,906) |
-| `specimen-nodes` | 60,000 nodes | 100,756 / 138 / 8,187 | `REPORT-NODES-TAIL` 100,738 (100,714) |
-| `specimen-depth` | 128 nesting levels | 1,742 / 72 / 264 | `REPORT-DEPTH-TAIL` 1,724 (1,715) |
-| `specimen-windowed` | windowed reader at 64 KiB | 70,213 / 396 / 781 | `REPORT-WINDOWED-TAIL` 70,192 (70,102) |
-| `specimen-changes` | windowed reader at 24 KiB with changes | 30,644 / 204 / 781, then 28,441 / 194 / 781 after one finding is fixed | `REPORT-CHANGES-TAIL` 30,624 (30,582), then 28,421 (28,381) |
-| `specimen-blocks` | 512 display blocks | 100,642 / 2,460 / 167 | `REPORT-BLOCKS-TAIL` 100,623 (100,017) |
+| `specimen-bytes` | 1 MiB | 1,077,267 / 828 / 2,050 | `**one** &amp; two 🧪` 1,077,226 (1,077,107), then `REPORT-BYTE-TAIL` |
+| `specimen-lines` | 10,000 lines | 131,776 / 10,120 / 111 | `REPORT-LINES-TAIL` 131,758 (131,752) |
+| `specimen-line` | 16 KiB line | 27,766 / 68 / 26,340 | `REPORT-LINE-TAIL` 27,749 (22,940) |
+| `specimen-edges` | 500 diagram edges | 11,635 / 720 / 111 | `REPORT-EDGES-TAIL` 11,617 (11,608) |
+| `specimen-characters` | 30,000 diagram characters | 33,870 / 116 / 593 | `REPORT-CHARACTERS-TAIL` 33,847 (33,841) |
+| `specimen-nodes` | 60,000 nodes | 100,699 / 134 / 8,187 | `REPORT-NODES-TAIL` 100,681 (100,657) |
+| `specimen-depth` | 128 nesting levels | 1,685 / 68 / 264 | `REPORT-DEPTH-TAIL` 1,667 (1,658) |
+| `specimen-windowed` | windowed reader at 64 KiB | 70,156 / 392 / 781 | `REPORT-WINDOWED-TAIL` 70,135 (70,045) |
+| `specimen-changes` | windowed reader at 24 KiB with changes | 30,587 / 200 / 781, then 28,384 / 190 / 781 after one finding is fixed | `REPORT-CHANGES-TAIL` 30,567 (30,525), then 28,364 (28,324) |
+| `specimen-blocks` | 512 display blocks | 100,585 / 2,456 / 167 | `REPORT-BLOCKS-TAIL` 100,566 (99,960) |
 
-  A field line is limited to 8 KiB, so the only line over 16 KiB is the composed `**Location:**` line of eight long Unicode paths. A version opens in the windowed reader only when its display index fits 512 blocks. A composed card with a location and three short fields takes six blocks and a report with no notes takes 23 more, so such a report stays windowed through 81 findings (509 blocks) and falls back with `layout_budget` at 82, as measured through the window route. The five notes a first version needs add four blocks, so `specimen-windowed` (28 cards, 195 blocks) and the changed `specimen-changes` version (11 cards, 93 blocks) therefore reach their size thresholds with a few long cards and come back `ready`, while `specimen-blocks` keeps 200 short cards to cross the block budget on purpose and opens in the full reader. The manifest also records expected clipboard bytes, accessible reading order and viewport settings for the wide, narrow, wrapped and reduced-motion specimens. Record actual presentation through the browser.
+  A field line is limited to 8 KiB, so the only line over 16 KiB is the composed `**Location:**` line of eight long Unicode paths. A version opens in the windowed reader only when its display index fits 512 blocks. A composed card with a location and three short fields takes six blocks and a report with no notes takes 21 more, so such a report stays windowed through 81 findings (507 blocks) and falls back with `layout_budget` at 82, as measured through the window route. The five notes a first version needs add four blocks, so `specimen-windowed` (28 cards, 193 blocks) and the changed `specimen-changes` version (11 cards, 91 blocks) therefore reach their size thresholds with a few long cards and come back `ready`, while `specimen-blocks` keeps 200 short cards to cross the block budget on purpose and opens in the full reader. The manifest also records expected clipboard bytes, accessible reading order and viewport settings for the wide, narrow, wrapped and reduced-motion specimens. Record actual presentation through the browser.

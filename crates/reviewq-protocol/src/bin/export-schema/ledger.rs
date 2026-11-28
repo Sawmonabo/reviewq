@@ -159,7 +159,10 @@ fn examples() -> Result<Vec<(LedgerTool, Value)>, Box<dyn Error>> {
             kind: FindingBasisKind::Observed,
             text: "Replaying the request after a dropped reply inserted two rows.".into(),
         }),
-        proposed_comment: None,
+        proposed_comment: Some(
+            "Reuse the key stored with the first attempt instead of building a new one.".into(),
+        ),
+        reply_to_note: Some("9001".into()),
         details: None,
     };
     let set_finding_outcome = SetFindingOutcome {

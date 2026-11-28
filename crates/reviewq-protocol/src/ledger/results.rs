@@ -7,7 +7,7 @@ use crate::followups::ResultKind;
 use crate::reports::{
     FindingBasis, FindingConclusion, FindingKind, FindingLocation, ReportHashDto, Severity,
 };
-use crate::{DiscussionIdDto, FindingIdDto, GitShaDto, PageCursorDto, ResourceIdDto};
+use crate::{DiscussionIdDto, FindingIdDto, GitShaDto, NoteIdDto, PageCursorDto, ResourceIdDto};
 
 /// The result of `save_finding` and `set_finding_outcome`: `{id,revision,unpublished}`.
 #[derive(Debug, Deserialize, Serialize)]
@@ -135,6 +135,9 @@ pub struct FindingRecord {
     pub evidence: FindingBasis,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_comment: Option<String>,
+    /// The GitLab note the proposed comment answers, when one was named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to_note: Option<NoteIdDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<String>,
     /// The latest outcome `set_finding_outcome` recorded, if any.

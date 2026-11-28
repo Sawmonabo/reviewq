@@ -10,7 +10,7 @@ use reviewq_domain::identity::GitSha;
 use reviewq_domain::ledger::{FindingId, PassKind, PassState};
 use reviewq_protocol::ledger as dto;
 use reviewq_protocol::reports as report_dto;
-use reviewq_protocol::{DiscussionIdDto, FindingIdDto, GitShaDto, ResourceIdDto};
+use reviewq_protocol::{DiscussionIdDto, FindingIdDto, GitShaDto, NoteIdDto, ResourceIdDto};
 
 use super::{LedgerResult, cursor};
 use crate::entry::ServiceEndpoint;
@@ -164,6 +164,10 @@ fn finding_record(record: FindingRecord) -> Result<dto::FindingRecord, AppError>
         consequence: body.consequence,
         evidence: project_basis(body.evidence),
         proposed_comment: body.proposed_comment,
+        reply_to_note: body
+            .reply_to_note
+            .map(|note| NoteIdDto::new(note).ok_or(AppError::Internal))
+            .transpose()?,
         details: body.details,
         outcome: record
             .outcome
