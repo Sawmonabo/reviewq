@@ -186,8 +186,10 @@ async fn gate(
         entry
             .auth
             .bridge_command(&headers, &bytes, MAX_HOOK_BODY_BYTES)?;
+    let thread = parse(request.thread_id.as_str())?;
+    entry.codex_hook_reports.record(&thread);
     let request = GateRequest {
-        session: HookSession::Codex(parse(request.thread_id.as_str())?),
+        session: HookSession::Codex(thread),
         turn: request
             .turn_id
             .map(|turn| parse(turn.as_str()))
@@ -208,7 +210,9 @@ async fn read_back_route(
         entry
             .auth
             .bridge_command(&headers, &bytes, MAX_HOOK_BODY_BYTES)?;
-    let session = HookSession::Codex(parse(request.thread_id.as_str())?);
+    let thread = parse(request.thread_id.as_str())?;
+    entry.codex_hook_reports.record(&thread);
+    let session = HookSession::Codex(thread);
     let reply = read_back(&entry, Some(session)).await?;
     Ok(Json(success(reply, *entry.commits.borrow())?))
 }

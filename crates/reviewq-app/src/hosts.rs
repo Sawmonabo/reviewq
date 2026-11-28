@@ -195,6 +195,22 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
     /// what the host says of them. Cheap when nothing that decides trust changed since the
     /// last check. The host logs a failure.
     fn approve_hooks(&self) -> AppFuture<'_, HookApproval>;
+
+    /// Whether the open conversation `thread` runs ReviewQ's approved hooks now. A host that
+    /// holds it without them is asked once to reload them first.
+    fn hooks_live(&self, thread: NativeSessionId) -> AppFuture<'_, LiveHooks>;
+}
+
+/// What a host shows of ReviewQ's hooks in one open conversation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveHooks {
+    /// The host holds the conversation, and it runs each of ReviewQ's hooks.
+    Running,
+    /// The host holds the conversation, and it does not run them even after a reload.
+    NotRunning,
+    /// The host cannot show it: it does not hold the conversation, cannot be reached or
+    /// cannot list one conversation's hooks.
+    Unconfirmed,
 }
 
 /// What asking a host to trust ReviewQ's own hooks found.

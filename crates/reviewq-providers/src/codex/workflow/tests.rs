@@ -67,6 +67,13 @@ async fn only_followup_can_prepare_and_resume_the_exact_saved_lead() {
             let data = match request["method"].as_str().unwrap() {
                 "initialize" => json!({"codexHome":host_profile}),
                 "initialized" => continue,
+                // The connection's probe of whether the daemon lists one thread's hooks.
+                "hooks/list" => {
+                    let error = json!({"code":-32600,"message":"thread not found"});
+                    let reply = json!({"id":id,"error":error}).to_string();
+                    ws.send(Message::Text(reply.into())).await.unwrap();
+                    continue;
+                }
                 "thread/read" => {
                     assert_eq!(*params, json!({"threadId":thread_id,"includeTurns":false}));
                     json!({"thread":thread})

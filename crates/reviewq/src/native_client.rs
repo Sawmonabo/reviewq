@@ -100,10 +100,14 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
 /// hook has reported on this installation.
 pub(crate) const CODEX_HOOKS_PENDING: &str = "The ReviewQ hooks have not run in Codex yet: open /hooks in Codex to review and trust them. Until then ReviewQ still saves a review's findings and sections, the lead can still submit it, and a review that is not submitted still shows as unfinished; only the end-of-turn reminder and the reminder after compaction are missing.";
 
-/// Shown by `reviewq link` when Codex trusts ReviewQ's hooks but no Codex `Stop` hook has
-/// reported on this installation yet. A Codex conversation reads its hooks when Codex loads
-/// it, and Codex reloads no conversation for a change another process wrote.
-const CODEX_HOOKS_RESTART: &str = "ReviewQ's hooks are approved in Codex. A Codex conversation that was already open when they were approved runs them only once Codex loads it again, for example after Codex restarts; until then it misses the end-of-turn reminder and the reminder after compaction. New conversations run them.";
+/// Shown by `reviewq link` when Codex trusts ReviewQ's hooks but nothing shows the linked
+/// conversation running them: its daemon did not, even after one reload, and no ReviewQ hook
+/// has reported from it since the service started. A Codex conversation reads its hooks when
+/// Codex loads it, and ReviewQ can reload them only through the shared daemon. A conversation
+/// Codex runs in a process of its own may still have loaded them after they were approved,
+/// and ReviewQ has no `UserPromptSubmit` hook, so one linked in its first turn has not
+/// reported yet. The sentence names the restart only for one that was open before.
+const CODEX_HOOKS_RESTART: &str = "ReviewQ has not seen this Codex conversation run its hooks yet. If the conversation was open before the hooks were approved, it runs them only after Codex restarts; until then it misses the end-of-turn reminder and the reminder after compaction.";
 
 /// Whether the service behind `endpoint` has never had a Codex `Stop` hook report. A service
 /// that cannot say counts as never.

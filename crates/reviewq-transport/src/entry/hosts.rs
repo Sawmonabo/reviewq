@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use axum::Json;
 use axum::extract::State;
@@ -6,9 +7,10 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::{
-    ClaudeContext, HookApproval, NativeHost, NativeLink, link_codex, link_proven,
+    ClaudeContext, HookApproval, LiveHooks, NativeHost, NativeLink, link_codex, link_proven,
 };
 use reviewq_app::ledger::readback::RULE;
+use reviewq_domain::identity::NativeSessionId;
 use reviewq_domain::session::{AbsolutePath, LeadTarget};
 use reviewq_protocol::queue::ReviewSelection;
 use reviewq_protocol::{EventCursorDto, Failure, ReviewIdDto, RunIdDto, SessionKeyDto, Success};
@@ -51,7 +53,7 @@ pub(super) async fn link(
     protocol(command.protocol_version)?;
     let source = entry.source_reader().await?;
     let host = entry.host.as_deref().ok_or(AppError::Unavailable)?;
-    let thread = command
+    let thread: NativeSessionId = command
         .thread_id
         .parse()
         .map_err(|_| AppError::InvalidRequest)?;
@@ -59,12 +61,12 @@ pub(super) async fn link(
         entry.store.as_ref(),
         source.as_ref(),
         host,
-        thread,
+        thread.clone(),
         command.target,
     )
     .await?;
     let notice = match linked {
-        NativeLink::Linked(_) => codex_hooks_notice(&entry, host).await?,
+        NativeLink::Linked(_) => codex_hooks_notice(&entry, host, thread).await,
         NativeLink::Ambiguous(_) => None,
     };
     link_response(linked, notice)
@@ -216,8 +218,9 @@ struct Linked {
 enum HooksNotice {
     /// Codex does not trust them, and could not be made to.
     Pending,
-    /// Codex trusts them, but no Codex stop hook has reported on this installation yet, so a
-    /// Codex session opened before they were trusted does not run them.
+    /// Codex trusts them, but nothing shows the linked conversation running them: its daemon
+    /// holds it without them even after one reload, or cannot show its hooks while no ReviewQ
+    /// hook has reported from it.
     Restart,
 }
 
@@ -252,21 +255,57 @@ fn link_response(
     Ok(Json(response).into_response())
 }
 
-/// What a Codex link tells the person about ReviewQ's hooks, after asking `host` to trust
-/// them: `Pending` when Codex does not trust them, whatever reported before, and `Restart`
-/// when it does but no stop hook has ever reported.
+/// What a Codex link tells the person about ReviewQ's hooks in the conversation `thread`,
+/// after asking `host` to trust them: `Pending` when Codex does not trust them, and `Restart`
+/// when it does but neither the daemon nor a hook report from that conversation shows it
+/// running them. Asks Codex nothing more when the hooks are not trusted, and in the common
+/// case one hook list of the conversation.
 async fn codex_hooks_notice(
     entry: &Entry,
     host: &dyn NativeHost,
-) -> Result<Option<HooksNotice>, AppError> {
+    thread: NativeSessionId,
+) -> Option<HooksNotice> {
     let trusted = matches!(
         host.approve_hooks().await,
         Ok(HookApproval::Approved(_) | HookApproval::AlreadyTrusted)
     );
     if !trusted {
-        return Ok(Some(HooksNotice::Pending));
+        return Some(HooksNotice::Pending);
     }
-    Ok((!entry.store.codex_stop_hook_reported().await?).then_some(HooksNotice::Restart))
+    let running = match host.hooks_live(thread.clone()).await {
+        Ok(LiveHooks::Running) => true,
+        Ok(LiveHooks::NotRunning) => false,
+        Ok(LiveHooks::Unconfirmed) | Err(_) => entry.codex_hook_reports.contains(&thread),
+    };
+    (!running).then_some(HooksNotice::Restart)
+}
+
+/// The Codex conversations a ReviewQ hook has reported from since the service started, so a
+/// link can tell that a conversation the daemon cannot show, such as one Codex runs in its own
+/// process, runs the hooks. Kept in memory: after a restart a conversation counts again from
+/// its next hook. Past `LIMIT` conversations the record starts over, which can only bring
+/// back a notice.
+#[derive(Default)]
+pub(super) struct CodexHookReports(Mutex<HashSet<NativeSessionId>>);
+
+impl CodexHookReports {
+    const LIMIT: usize = 4096;
+
+    /// Notes that a ReviewQ hook ran in `thread`.
+    pub(super) fn record(&self, thread: &NativeSessionId) {
+        if let Ok(mut threads) = self.0.lock()
+            && !threads.contains(thread)
+        {
+            if threads.len() >= Self::LIMIT {
+                threads.clear();
+            }
+            threads.insert(thread.clone());
+        }
+    }
+
+    fn contains(&self, thread: &NativeSessionId) -> bool {
+        self.0.lock().is_ok_and(|threads| threads.contains(thread))
+    }
 }
 
 fn selection(target: &LeadTarget) -> Result<ReviewSelection, AppError> {

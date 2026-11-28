@@ -16,6 +16,7 @@ use tokio::time::timeout;
 
 use super::Codex;
 use super::connection::{FRAME_LIMIT, accept_initialize, initialize_params, rpc_result};
+use super::hook_reload::reload_open_conversations;
 
 const DEADLINE: Duration = Duration::from_secs(10);
 const EXIT_GRACE: Duration = Duration::from_secs(1);
@@ -23,7 +24,7 @@ const EXIT_GRACE: Duration = Duration::from_secs(1);
 /// One entry of `hooks/list`, as far as choosing ReviewQ's hooks needs it.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Hook {
+pub(super) struct Hook {
     key: String,
     source_path: Option<PathBuf>,
     source: Option<String>,
@@ -31,12 +32,23 @@ struct Hook {
     command: Option<String>,
     is_managed: Option<bool>,
     current_hash: Option<String>,
-    trust_status: Option<String>,
+    pub(super) trust_status: Option<String>,
 }
 
+/// A `hooks/list` reply.
 #[derive(Deserialize)]
-struct Listed {
+pub(super) struct Listed {
     data: Vec<DirectoryHooks>,
+}
+
+impl Listed {
+    /// The hooks of every working directory the reply covers.
+    pub(super) fn hooks(self) -> Vec<Hook> {
+        self.data
+            .into_iter()
+            .flat_map(|layer| layer.hooks)
+            .collect()
+    }
 }
 
 /// The hooks `hooks/list` reports for one working directory.
@@ -130,13 +142,14 @@ impl Codex {
 /// that are ReviewQ's own: `profile/hooks.json` user command hooks that run exactly
 /// `command`. Reports success only once Codex lists each of them as trusted. Fails when the
 /// server cannot be started or answers out of turn, refuses the write, or the exchange
-/// outlasts its deadline; the server is stopped and reaped either way.
+/// outlasts its deadline; the server is stopped and reaped either way. Once this wrote trust,
+/// the running Codex daemon is asked to reload it into its open conversations.
 pub async fn approve_hooks(
     executable: &Path,
     profile: &Path,
     command: &str,
 ) -> Result<HookApproval, AppError> {
-    exchange(executable, profile, async |server, hooks_file| {
+    let approval = exchange(executable, profile, async |server, hooks_file| {
         let Some(own) = own_hooks(&server.list().await?, hooks_file, command) else {
             return Ok(HookApproval::Unsupported);
         };
@@ -154,19 +167,25 @@ pub async fn approve_hooks(
             .await?;
         Ok(HookApproval::Approved(keys.len()))
     })
-    .await
+    .await?;
+    if let HookApproval::Approved(_) = approval {
+        reload_open_conversations(executable, profile).await;
+    }
+    Ok(approval)
 }
 
 /// Removes Codex's trust entries for ReviewQ's own hooks in `profile`, chosen as
 /// `approve_hooks` chooses them, while they are still listed, so a later hook in the same
 /// place starts untrusted. Codex removes an entry when its key is written as `null`. Reports
 /// success only once Codex lists each of them as untrusted, and fails as `approve_hooks` does.
+/// Once this removed trust, the running Codex daemon is asked to reload, so a conversation it
+/// holds open stops running hooks whose command the uninstall then removes.
 pub async fn revoke_hooks(
     executable: &Path,
     profile: &Path,
     command: &str,
 ) -> Result<HookRevocation, AppError> {
-    exchange(executable, profile, async |server, hooks_file| {
+    let revocation = exchange(executable, profile, async |server, hooks_file| {
         let Some(own) = own_hooks(&server.list().await?, hooks_file, command) else {
             return Ok(HookRevocation::Unsupported);
         };
@@ -187,7 +206,11 @@ pub async fn revoke_hooks(
             .await?;
         Ok(HookRevocation::Revoked(own.recorded.len()))
     })
-    .await
+    .await?;
+    if let HookRevocation::Revoked(_) = revocation {
+        reload_open_conversations(executable, profile).await;
+    }
+    Ok(revocation)
 }
 
 /// Runs `work` against a private `executable app-server` for the Codex home `profile` once
@@ -291,11 +314,7 @@ impl Server {
     async fn list(&mut self) -> Result<Vec<Hook>, AppError> {
         let listed: Listed = serde_json::from_value(self.call("hooks/list", json!({})).await?)
             .map_err(|_| AppError::Unavailable)?;
-        Ok(listed
-            .data
-            .into_iter()
-            .flat_map(|layer| layer.hooks)
-            .collect())
+        Ok(listed.hooks())
     }
 
     /// Sends one request and returns its reply, skipping notifications and server requests.
@@ -368,7 +387,7 @@ fn own_hooks(hooks: &[Hook], hooks_file: &Path, command: &str) -> Option<Own> {
 
 /// Whether `hook` is one ReviewQ installed: an unmanaged user command hook in `hooks_file`
 /// that runs exactly `command`.
-fn is_own(hook: &Hook, hooks_file: &Path, command: &str) -> bool {
+pub(super) fn is_own(hook: &Hook, hooks_file: &Path, command: &str) -> bool {
     hook.source_path.as_deref() == Some(hooks_file)
         && hook.source.as_deref() == Some("user")
         && hook.handler_type.as_deref() == Some("command")

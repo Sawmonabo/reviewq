@@ -173,6 +173,7 @@ pub(super) struct Entry {
     event_slots: Arc<Semaphore>,
     auth: Auth,
     checkpoints: Checkpoints,
+    codex_hook_reports: hosts::CodexHookReports,
 }
 
 #[derive(Serialize)]
@@ -267,6 +268,7 @@ pub fn router(
         event_slots: Arc::new(Semaphore::new(32)),
         auth: Auth::new(runtime.endpoint)?,
         checkpoints: Checkpoints::default(),
+        codex_hook_reports: hosts::CodexHookReports::default(),
     });
     let web = runtime.web;
     if let Some(interval) = runtime.source_poll_interval {

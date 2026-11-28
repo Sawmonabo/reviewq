@@ -4,7 +4,7 @@ use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::history::{HistorySession, NativeHistoryPage, NativePosition};
 use reviewq_app::hosts::{
     DeliveryObservation, DispatchGuard, FollowupResume, HookApproval, HostActivity, HostPhase,
-    HostProof, MessageBody, NativeHost, NativeSessionMetadata, ReportRef,
+    HostProof, LiveHooks, MessageBody, NativeHost, NativeSessionMetadata, ReportRef,
 };
 use reviewq_domain::identity::{DeliveryId, NativeSessionId};
 use reviewq_domain::session::{
@@ -198,6 +198,10 @@ impl NativeHost for Codex {
 
     fn approve_hooks(&self) -> AppFuture<'_, HookApproval> {
         Box::pin(self.approve_own_hooks())
+    }
+
+    fn hooks_live(&self, thread: NativeSessionId) -> AppFuture<'_, LiveHooks> {
+        Box::pin(async move { Ok(self.own_hooks_live(&thread).await) })
     }
 }
 

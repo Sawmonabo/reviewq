@@ -13,6 +13,7 @@ mod history;
 mod history_navigation;
 mod history_reads;
 mod history_search;
+mod hook_reload;
 mod hook_trust;
 mod launch;
 mod live;

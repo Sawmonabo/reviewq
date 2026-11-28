@@ -21,6 +21,12 @@ use tokio::time::{Instant, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 use tokio_tungstenite::{WebSocketStream, client_async_with_config};
 
+mod reach;
+
+pub(super) use reach::Reach;
+use reach::Sightings;
+
+use super::hook_reload::{scope_probe, scopes_by_thread};
 use super::live::Live;
 use super::questions::Questions;
 
@@ -37,68 +43,18 @@ pub(super) struct Connection {
     questions: Arc<Mutex<Questions>>,
     pub(super) live: Arc<Live>,
     reach: Arc<Mutex<Reach>>,
+    served: Arc<Mutex<Option<Served>>>,
 }
 
-/// What the latest attempt to connect learned about the profile's Codex daemon.
-#[derive(Clone, Copy, Default)]
-pub(super) enum Reach {
-    /// No daemon was reached. That alone does not show that none runs.
-    #[default]
-    Unknown,
-    /// A daemon accepted the connection on a socket bound this long ago, when its bind time is
-    /// readable.
-    Bound(Option<BoundAge>),
-}
-
-/// How long a daemon's socket has been bound: credited once when this connection first
-/// reaches that socket, and counted on the monotonic clock from then on.
-#[derive(Clone, Copy)]
-pub(super) struct BoundAge {
-    credit: Duration,
-    sighted: Instant,
-}
-
-impl BoundAge {
-    pub(super) fn elapsed(&self) -> Duration {
-        self.credit + self.sighted.elapsed()
-    }
-}
-
-/// The ages credited to the sockets this connection reached. The first credit is the smaller
-/// of the wall clock's age of the socket and its age on a clock that reads the wall clock
-/// once, when the connection was made, and runs on the monotonic clock after. So a clock set
-/// forward or back, or a wake from sleep, after the connection was made cannot make a socket
-/// look older than it is. A later sighting of the same socket keeps its credit, so a
-/// reconnect neither restarts nor shortens the count.
-struct Sightings {
-    wall: SystemTime,
-    steady: Instant,
-    last: Option<(SystemTime, BoundAge)>,
-}
-
-impl Sightings {
-    fn new() -> Self {
-        Self {
-            wall: SystemTime::now(),
-            steady: Instant::now(),
-            last: None,
-        }
-    }
-
-    fn age(&mut self, bound: SystemTime) -> BoundAge {
-        if let Some((seen, age)) = self.last
-            && seen == bound
-        {
-            return age;
-        }
-        let since = |now: SystemTime| now.duration_since(bound).unwrap_or_default();
-        let age = BoundAge {
-            credit: since(SystemTime::now()).min(since(self.wall + self.steady.elapsed())),
-            sighted: Instant::now(),
-        };
-        self.last = Some((bound, age));
-        age
-    }
+/// What the daemon this connection holds said of itself when it connected, which reading a
+/// conversation's hooks from it needs.
+#[derive(Clone)]
+pub(super) struct Served {
+    /// `hooks.json` in the daemon's Codex home, named as the daemon names its hooks.
+    pub(super) hooks_file: PathBuf,
+    /// Whether this daemon lists one conversation's hooks, as its answer to
+    /// `hook_reload::scope_probe` on this session showed.
+    pub(super) thread_scoped: bool,
 }
 
 enum CommandRequest {
@@ -215,17 +171,30 @@ impl Connection {
         let questions = Arc::new(Mutex::new(Questions::default()));
         let live = Arc::new(Live::default());
         let reach = Arc::new(Mutex::new(Reach::Unknown));
-        tokio::spawn(daemon.run(commands, questions.clone(), live.clone(), reach.clone()));
+        let served = Arc::new(Mutex::new(None));
+        tokio::spawn(daemon.run(
+            commands,
+            questions.clone(),
+            live.clone(),
+            reach.clone(),
+            served.clone(),
+        ));
         Self {
             sender,
             questions,
             live,
             reach,
+            served,
         }
     }
 
     pub(super) fn reach(&self) -> Reach {
         self.reach.lock().map_or(Reach::Unknown, |reach| *reach)
+    }
+
+    /// The daemon the latest connection reached, while that connection holds.
+    pub(super) fn served(&self) -> Option<Served> {
+        self.served.lock().ok().and_then(|served| served.clone())
     }
 
     pub(super) fn questions(
@@ -345,6 +314,7 @@ impl Daemon {
         questions: Arc<Mutex<Questions>>,
         live: Arc<Live>,
         reach: Arc<Mutex<Reach>>,
+        served: Arc<Mutex<Option<Served>>>,
     ) {
         let mut id = 1_u64;
         let mut sightings = Sightings::new();
@@ -361,7 +331,23 @@ impl Daemon {
             }
             let connected = timeout(DEADLINE, async {
                 let (stream, bound) = self.open().await?;
-                Ok((self.handshake(stream).await, bound))
+                let socket = match self.handshake(stream).await {
+                    Ok((mut socket, home)) => {
+                        let (method, params) = scope_probe();
+                        let reply = exchange(&mut socket, 2, method, params).await;
+                        let thread_scoped = reply.is_ok_and(|reply| scopes_by_thread(&reply));
+                        let hooks_file = home.join("hooks.json");
+                        Ok((
+                            socket,
+                            Served {
+                                hooks_file,
+                                thread_scoped,
+                            },
+                        ))
+                    }
+                    Err(error) => Err(error),
+                };
+                Ok((socket, bound))
             })
             .await;
             let (reached, connected) = match connected {
@@ -375,12 +361,15 @@ impl Daemon {
             if let Ok(mut current) = reach.lock() {
                 *current = reached;
             }
-            let Ok(mut socket) = connected else {
+            let Ok((mut socket, daemon)) = connected else {
                 let _ = request
                     .reply
                     .send(Err(CallError::BeforeSend(AppError::Unavailable)));
                 continue;
             };
+            if let Ok(mut current) = served.lock() {
+                *current = Some(daemon);
+            }
             multiplex(
                 &mut socket,
                 request,
@@ -391,6 +380,9 @@ impl Daemon {
             )
             .await;
             live.disconnect();
+            if let Ok(mut current) = served.lock() {
+                *current = None;
+            }
 
             if let Ok(mut cache) = questions.lock() {
                 cache.disconnect();
@@ -412,7 +404,8 @@ impl Daemon {
         Ok((stream, bound))
     }
 
-    async fn handshake(&self, stream: UnixStream) -> Result<Socket, AppError> {
+    /// Opens the session on `stream` and returns it with the Codex home the daemon names.
+    async fn handshake(&self, stream: UnixStream) -> Result<(Socket, PathBuf), AppError> {
         if stream.peer_cred().map_err(|_| AppError::Unavailable)?.uid() != self.owner {
             return Err(AppError::Forbidden);
         }
@@ -427,11 +420,11 @@ impl Daemon {
         let result = exchange(&mut ws, 1, "initialize", initialize_params())
             .await
             .map_err(|_| AppError::Unavailable)??;
-        let (_, initialized) = accept_initialize(result, &self.profile)?;
+        let (home, initialized) = accept_initialize(result, &self.profile)?;
         send(&mut ws, initialized)
             .await
             .map_err(|_| AppError::Unavailable)?;
-        Ok(ws)
+        Ok((ws, home))
     }
 
     async fn verified_socket(&self, locator: &Path) -> Result<PathBuf, AppError> {
@@ -513,6 +506,32 @@ impl Daemon {
         }
         Ok(discovery)
     }
+}
+
+/// Sends one request to the running daemon of the Codex home `profile`, a real path, on a
+/// session of its own, and returns the reply. For a caller with no `Connection`, such as the
+/// installer. Discovery starts no daemon, so with none running this fails at once.
+pub(super) async fn request_once(
+    executable: &Path,
+    profile: &Path,
+    method: &str,
+    params: Value,
+) -> Result<Value, AppError> {
+    let owner = std::fs::metadata(profile)
+        .map_err(|_| AppError::Unavailable)?
+        .uid();
+    let daemon = Daemon {
+        executable: executable.into(),
+        profile: profile.into(),
+        owner,
+    };
+    let (stream, _) = daemon.open().await?;
+    let (mut socket, _) = daemon.handshake(stream).await?;
+    let reply = exchange(&mut socket, 2, method, params)
+        .await
+        .map_err(|_| AppError::Unavailable)?;
+    let _ = socket.close(None).await;
+    reply
 }
 
 async fn multiplex(
