@@ -1,8 +1,8 @@
 use std::io::Read;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use reviewq_domain::identity::{NativeSessionId, ReviewId, RunId, SessionKey};
 use reviewq_domain::session::HostProvider;
 use reviewq_protocol::EventCursorDto;
@@ -20,6 +20,11 @@ pub(crate) use claude::{ClaudeBridgeOperation, claude_bridge, claude_hook};
 pub(crate) use codex_hook::codex_hook;
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
+
+/// The longest a link waits for Claude Code to write a conversation it stored a moment ago.
+/// The link returns as soon as the rows are there, about 100 ms later on an idle machine, so
+/// this is only how long a loaded one is given. The plugin's timeout for the call is longer.
+const NEW_CONVERSATION_WAIT: Duration = Duration::from_secs(30);
 
 #[derive(Deserialize)]
 struct Envelope<T> {
@@ -74,8 +79,9 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
     let body = serde_json::to_vec(&serde_json::json!({
         "protocolVersion": 1, "threadId": native.as_str(), "target": target
     }))?;
-    let linked =
-        link_result(bridge(&client, &endpoint, "/api/v1/native/codex/link", body).await?).await?;
+    let response = bridge(&client, &endpoint, "/api/v1/native/codex/link", body).await?;
+    let status = response.status();
+    let linked = link_result(status, &bounded(response, 16 * 1024).await?)?;
     println!("{}", link_text(&endpoint, &linked, HostProvider::Codex)?);
     if let Some(rule) = &linked.rule {
         println!("\n{rule}");
@@ -121,6 +127,7 @@ pub(crate) async fn claude(
     session_id: String,
     target: Option<String>,
     proof_stdin: bool,
+    new_conversation: bool,
 ) -> Result<(), Failure> {
     let native: NativeSessionId = session_id.parse()?;
     let proof = if proof_stdin {
@@ -150,17 +157,22 @@ pub(crate) async fn claude(
             Some(proof) => endpoint.companion_headers(proof)?,
             None => endpoint.bridge_headers()?,
         };
-        let linked = link_result(
-            bridge_as(
-                &client,
-                &endpoint,
-                "/api/v1/native/claude/link",
-                body,
-                headers,
-            )
-            .await?,
-        )
-        .await?;
+        // Claude Code writes a new conversation's rows a moment after it stores them, and
+        // until then the service answers that the conversation is not written: ask again.
+        let (waited, mut pause) = (Instant::now(), Duration::from_millis(100));
+        let linked = loop {
+            let (body, headers) = (body.clone(), headers.clone());
+            let link = "/api/v1/native/claude/link";
+            let response = bridge_as(&client, &endpoint, link, body, headers).await?;
+            let status = response.status();
+            let reply = bounded(response, 16 * 1024).await?;
+            let unwritten = new_conversation && unwritten(status, &reply);
+            if !unwritten || waited.elapsed() >= NEW_CONVERSATION_WAIT {
+                break link_result(status, &reply)?;
+            }
+            tokio::time::sleep(pause).await;
+            pause = (pause * 2).min(Duration::from_secs(1));
+        };
         (
             true,
             false,
@@ -252,15 +264,30 @@ pub(crate) async fn bridge_as(
         .await?)
 }
 
-async fn link_result(response: reqwest::Response) -> Result<Linked, Failure> {
-    let status = response.status();
-    let bytes = bounded(response, 16 * 1024).await?;
+/// Whether a refused link says the conversation is not in its native file yet.
+fn unwritten(status: StatusCode, reply: &[u8]) -> bool {
+    #[derive(Deserialize)]
+    struct Refusal {
+        error: Reason,
+    }
+    #[derive(Deserialize)]
+    struct Reason {
+        retryable: bool,
+    }
+    status == StatusCode::NOT_FOUND
+        && serde_json::from_slice::<Refusal>(reply).is_ok_and(|refusal| refusal.error.retryable)
+}
+
+fn link_result(status: StatusCode, bytes: &[u8]) -> Result<Linked, Failure> {
     if !status.is_success() {
         let message = match status.as_u16() {
             401 => "ReviewQ did not accept the credential for this link.",
+            404 if unwritten(status, bytes) => {
+                "This conversation has not been saved to disk yet. Send a message in it, then link again."
+            }
             404 => "The native conversation or requested review could not be verified.",
             409 => {
-                if let Ok(ambiguity) = serde_json::from_slice::<AmbiguousTarget>(&bytes) {
+                if let Ok(ambiguity) = serde_json::from_slice::<AmbiguousTarget>(bytes) {
                     return Err(format!(
                         "Choose one of these reviews and link its URL.\n{}",
                         ambiguity.candidates.join("\n")
@@ -274,7 +301,7 @@ async fn link_result(response: reqwest::Response) -> Result<Linked, Failure> {
         };
         return Err(message.into());
     }
-    Ok(serde_json::from_slice::<Envelope<Linked>>(&bytes)?.data)
+    Ok(serde_json::from_slice::<Envelope<Linked>>(bytes)?.data)
 }
 
 fn link_text(

@@ -104,6 +104,9 @@ enum Internal {
         /// Read the plugin's companion proof from standard input as `{"proof": ...}`.
         #[arg(long)]
         proof_stdin: bool,
+        /// The conversation was stored a moment ago: wait for its rows before giving up.
+        #[arg(long, requires = "target")]
+        new_conversation: bool,
     },
 }
 
@@ -294,12 +297,14 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
             session_id,
             target,
             proof_stdin,
+            new_conversation,
         })) => {
             native_client::claude(
                 &runtime::profile(options.profile)?,
                 session_id,
                 target,
                 proof_stdin,
+                new_conversation,
             )
             .await
         }
