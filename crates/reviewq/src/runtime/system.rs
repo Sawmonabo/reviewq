@@ -4,6 +4,7 @@
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::system::{SystemControl, SystemFacts, SystemMode, SystemRefusal};
@@ -11,6 +12,10 @@ use tokio::sync::watch;
 
 use crate::install::{self, data::Folders, paths::Paths};
 use crate::service;
+
+/// How long Quit waits for ReviewQ's own stop signal after the command that asked systemd
+/// for the stop ended without success.
+const STOP_SIGNAL: Duration = Duration::from_secs(2);
 
 pub(super) struct System {
     mode: SystemMode,
@@ -111,9 +116,27 @@ impl SystemControl for System {
                 Ok((_, lock)) => lock,
                 Err(refusal) => return Ok(Err(refusal)),
             };
-            // The listeners finish their open replies, this one included, and the process
-            // exits with status 0, which `Restart=on-failure` leaves stopped.
-            self.shutdown.send_replace(true);
+            // systemd makes the stop, so a start asked for while ReviewQ shuts down is queued
+            // behind it. The stop signals every process in the service, the command that
+            // asked included, so that command can die before it exits; ReviewQ's own stop
+            // signal then shows the stop is under way.
+            let mut stopping = self.shutdown.subscribe();
+            let asked = tokio::select! {
+                asked = service::stop_without_waiting() => asked,
+                () = signalled(&mut stopping) => Ok(()),
+            };
+            if let Err(error) = asked
+                && tokio::time::timeout(STOP_SIGNAL, signalled(&mut stopping))
+                    .await
+                    .is_err()
+            {
+                // systemd could not be asked. Exiting with status 0 is left stopped by
+                // `Restart=on-failure`, so Quit still quits.
+                eprintln!(
+                    "ReviewQ could not ask systemd to stop it and is exiting itself: {error}"
+                );
+                self.shutdown.send_replace(true);
+            }
             Ok(Ok(()))
         })
     }
@@ -136,6 +159,11 @@ impl SystemControl for System {
             }
         })
     }
+}
+
+/// Resolves once the service's shutdown has been tripped.
+async fn signalled(shutdown: &mut watch::Receiver<bool>) {
+    let _ = shutdown.wait_for(|stop| *stop).await;
 }
 
 /// Logs a lifecycle failure and reports it as the internal error it is.

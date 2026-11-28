@@ -412,8 +412,8 @@
 
         async function start() {
           show("starting");
-          // While ReviewQ is still shutting down after a Quit, systemd ignores a start. The
-          // request repeats every three seconds until the dashboard answers, so none is lost.
+          // systemd ignores a start made while ReviewQ still counts as running, just before a
+          // stop begins. The request repeats every three seconds until the dashboard answers.
           let reached = false;
           let asked = 0;
           const deadline = Date.now() + 30000;

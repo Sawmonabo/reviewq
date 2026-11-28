@@ -153,6 +153,12 @@ pub(crate) async fn start_without_waiting() -> Result<(), Failure> {
     Ok(())
 }
 
+/// Asks the user manager to stop `reviewq.service` and returns without waiting for the stop.
+pub(crate) async fn stop_without_waiting() -> Result<(), Failure> {
+    systemctl(&["--no-block", "stop", UNIT], false).await?;
+    Ok(())
+}
+
 pub(crate) enum StartupCheck {
     Identity,
     Recovered,
