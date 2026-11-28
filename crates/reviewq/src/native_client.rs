@@ -460,12 +460,25 @@ pub(crate) async fn signed_limit(
                 .bytes()
                 .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
         {
-            return Err(format!("ReviewQ returned {code}").into());
+            return Err(Refused(code.to_owned()).into());
         }
         return Err("ReviewQ rejected the operation".into());
     }
     Ok(bytes)
 }
+
+/// A request the service refused, with the error code it answered, so a caller can say what
+/// the code means for its own operation.
+#[derive(Debug)]
+pub(crate) struct Refused(pub(crate) String);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "ReviewQ returned {}", self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
 
 pub(crate) fn verify_ready(endpoint: &ServiceEndpoint, bytes: &[u8]) -> Result<(), Failure> {
     if !verify_service(endpoint, bytes)?.ready {

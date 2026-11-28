@@ -31,6 +31,9 @@ enum Command {
     Issue {
         address: Address,
     },
+    Retired {
+        verifier: String,
+    },
     Revoke {
         common_dir: PathBuf,
     },
@@ -69,6 +72,9 @@ enum GrantResponse {
         checkout: PathBuf,
         #[serde(rename = "commonDir")]
         common_dir: PathBuf,
+    },
+    Retired {
+        retired: bool,
     },
     Revoked {
         revoked: bool,
@@ -151,6 +157,15 @@ async fn apply(entry: &Entry, input: Command) -> Result<Success<GrantResponse>, 
             let stored = entry.store.confirm_grant_projection(actor, address).await?;
             success(project(stored.value, settings)?, stored.cursor)
         }
+        Command::Retired { verifier } => {
+            let stored = entry.store.retired_grant(actor, key(verifier)?).await?;
+            success(
+                GrantResponse::Retired {
+                    retired: stored.value,
+                },
+                stored.cursor,
+            )
+        }
         Command::Revoke { common_dir } => {
             let path =
                 AbsolutePath::from_canonical(common_dir).map_err(|_| AppError::InvalidRequest)?;
@@ -211,12 +226,17 @@ async fn read_address(address: Address) -> Result<GrantAddress, AppError> {
             .map_err(|_| AppError::InvalidRequest)?,
         checkout: directory(address.checkout).await?,
         common_dir: directory(address.common_dir).await?,
-        verifier: URL_SAFE_NO_PAD
-            .decode(address.verifier)
-            .ok()
-            .and_then(|bytes| bytes.try_into().ok())
-            .ok_or(AppError::InvalidRequest)?,
+        verifier: key(address.verifier)?,
     })
+}
+
+/// A checkout key's SHA-256, as the CLI sends it.
+fn key(verifier: String) -> Result<[u8; 32], AppError> {
+    URL_SAFE_NO_PAD
+        .decode(verifier)
+        .ok()
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or(AppError::InvalidRequest)
 }
 
 async fn directory(path: PathBuf) -> Result<AbsolutePath, AppError> {

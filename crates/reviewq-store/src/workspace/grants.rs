@@ -44,6 +44,18 @@ pub(super) fn exact(
     )
 }
 
+/// Whether `verifier` belongs to a withdrawn grant and to no active one. Such a key never
+/// authenticates again and is never issued again, so a checkout that still holds it needs a
+/// fresh key: the service's setup loop and `checkout setup` both ask this before issuing.
+pub(crate) fn retired(db: &Connection, verifier: &[u8; 32]) -> Result<bool, StoreError> {
+    Ok(db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM repo_grants WHERE active=0 AND verifier=?1)
+            AND NOT EXISTS(SELECT 1 FROM repo_grants WHERE active=1 AND verifier=?1)",
+        [verifier.as_slice()],
+        |row| row.get(0),
+    )?)
+}
+
 pub(super) fn issue(
     tx: &mut WriteTx<'_>,
     input: IssueGrant,
@@ -52,12 +64,7 @@ pub(super) fn issue(
         return Err(AppError::StaleRevision.into());
     }
     crate::settings::projection::check_issuance(&tx.sql, &input)?;
-    let retired = tx.sql.query_row(
-        "SELECT EXISTS(SELECT 1 FROM repo_grants WHERE active=0 AND verifier=?1)",
-        [input.verifier.as_slice()],
-        |row| row.get::<_, bool>(0),
-    )?;
-    if retired {
+    if retired(&tx.sql, &input.verifier)? {
         return Err(AppError::Conflict.into());
     }
     let project = &input.project;
@@ -177,4 +184,85 @@ pub(super) fn revoke(
         tx.emit(&[ResourceKey::Settings])?;
     }
     snapshot(&tx.sql, changed)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use reviewq_app::access::{Actor, AppError};
+    use reviewq_app::workspace::{ConfiguredProject, IssueGrant, WorkspaceStore};
+    use reviewq_domain::identity::{GitLabOrigin, ProjectId};
+    use reviewq_domain::session::AbsolutePath;
+
+    use crate::SqliteStore;
+
+    /// A checkout whose grant was withdrawn holds a retired key: it may never be issued again,
+    /// so setup must replace it. A key some active grant still holds is not retired, even when
+    /// an older withdrawn grant had it too, so setup never discards a working checkout's key.
+    #[test]
+    fn only_a_withdrawn_key_is_retired() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let temp = tempfile::tempdir().unwrap();
+                std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o700))
+                    .unwrap();
+                let path = temp.path().join("grants.sqlite3");
+                let store = SqliteStore::open(AbsolutePath::from_canonical(path).unwrap())
+                    .await
+                    .unwrap();
+                // Checkout a was revoked; checkout b was revoked and its key later restored by
+                // a workspace replacement; checkout c is set up.
+                let settings = store
+                    .write(|tx| {
+                        tx.sql.execute_batch(
+                            "INSERT INTO configured_projects VALUES('https://git.example',11);
+                             INSERT INTO repo_grants VALUES
+                              ('a-old','https://git.example',11,CAST('/work/a' AS BLOB),CAST('/work/a' AS BLOB),1,zeroblob(32),0),
+                              ('b-old','https://git.example',11,CAST('/work/b' AS BLOB),CAST('/work/b' AS BLOB),1,x'0200000000000000000000000000000000000000000000000000000000000000',0),
+                              ('b-new','https://git.example',11,CAST('/work/b' AS BLOB),CAST('/work/b' AS BLOB),2,x'0200000000000000000000000000000000000000000000000000000000000000',1),
+                              ('c','https://git.example',11,CAST('/work/c' AS BLOB),CAST('/work/c' AS BLOB),1,x'0300000000000000000000000000000000000000000000000000000000000000',1);",
+                        )?;
+                        super::settings_revision(&tx.sql)
+                    })
+                    .await
+                    .unwrap();
+                let key = |first: u8| {
+                    let mut key = [0; 32];
+                    key[0] = first;
+                    key
+                };
+                let retired = async |verifier| {
+                    let actor = Actor::local_operator();
+                    store.retired_grant(actor, verifier).await.unwrap().value
+                };
+                assert!(retired(key(0)).await);
+                assert!(!retired(key(2)).await);
+                assert!(!retired(key(3)).await);
+                assert!(!retired(key(4)).await);
+
+                let issue = |verifier| IssueGrant {
+                    settings,
+                    project: ConfiguredProject {
+                        origin: GitLabOrigin::from_canonical("https://git.example").unwrap(),
+                        project_id: ProjectId::try_from(11_i64).unwrap(),
+                    },
+                    checkout: AbsolutePath::from_canonical("/work/a".into()).unwrap(),
+                    common_dir: AbsolutePath::from_canonical("/work/a".into()).unwrap(),
+                    verifier,
+                    operator_requested: true,
+                };
+                let actor = Actor::local_operator();
+                let refused = store.issue_grant(actor.clone(), issue(key(0))).await;
+                assert!(matches!(refused, Err(AppError::Conflict)));
+                // The same checkout gets a grant for a fresh key.
+                let issued = store.issue_grant(actor, issue(key(4))).await.unwrap();
+                assert_eq!(issued.value.common_dir.as_path().to_str(), Some("/work/a"));
+                assert!(!retired(key(4)).await);
+                store.close(SqliteStore::CLOSE_DEADLINE).await.unwrap();
+            });
+    }
 }

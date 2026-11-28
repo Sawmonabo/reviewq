@@ -1,5 +1,4 @@
 use std::os::unix::fs::PermissionsExt;
-use std::time::Duration;
 
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::followups::{NextAction, ResultKind};
@@ -89,7 +88,7 @@ fn ledger_writes_are_idempotent() {
             })
         );
         file_notes(&store, &[NoteSection::Summary]).await;
-        store.close(Duration::from_secs(1)).await.unwrap();
+        store.close(SqliteStore::CLOSE_DEADLINE).await.unwrap();
 
         let store = open(path).await;
         let page = store.read_ledger(lead(), short()).await.unwrap();
@@ -105,7 +104,7 @@ fn ledger_writes_are_idempotent() {
         );
         assert_eq!(notes.len(), 1);
         assert_eq!(page.pass.map(|pass| pass.kind), Some(PassKind::FullReview));
-        store.close(Duration::from_secs(1)).await.unwrap();
+        store.close(SqliteStore::CLOSE_DEADLINE).await.unwrap();
     });
 }
 
@@ -343,7 +342,7 @@ fn publish_is_conditional() {
         reseverity(&store, "reseverity-2-again", 2, Severity::P1).await;
         let refused = untouched(&store, "close-after-answer").await;
         assert_eq!(refused, ["F-01", "F-03"]);
-        store.close(Duration::from_secs(1)).await.unwrap();
+        store.close(SqliteStore::CLOSE_DEADLINE).await.unwrap();
     });
 }
 
@@ -417,7 +416,7 @@ fn pass_hold_and_start_follow_lead_activity() {
         assert_eq!(settlements(&store).await, [Settlement::Nothing]);
         activity(&store, "idle").await;
         assert_eq!(settlements(&store).await, [Settlement::Unfinished]);
-        store.close(Duration::from_secs(1)).await.unwrap();
+        store.close(SqliteStore::CLOSE_DEADLINE).await.unwrap();
     });
 }
 

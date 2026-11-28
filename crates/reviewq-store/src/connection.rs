@@ -23,6 +23,9 @@ mod wal;
 pub use database::{StoppedStore, StoreIdentity};
 
 const QUEUE_CAPACITY: usize = 64;
+/// How long a call waits for room in a full worker queue before the store reports itself busy,
+/// the same bound the MCP server's waiting queue uses, so a short burst is absorbed.
+const QUEUE_WAIT: Duration = Duration::from_secs(2);
 
 type Job = Box<dyn FnOnce(&mut Connection, &Arc<profile::Profile>) + Send>;
 
@@ -57,6 +60,10 @@ pub(crate) struct WriteTx<'connection> {
 }
 
 impl SqliteStore {
+    /// How long `close` waits for accepted work to drain: a queued call may still be waiting
+    /// `QUEUE_WAIT` for room, and the writer ends with a checkpoint that syncs to disk.
+    pub const CLOSE_DEADLINE: Duration = Duration::from_secs(10);
+
     /// Creates or verifies and opens a private profile under its exclusive lock.
     pub async fn open(path: AbsolutePath) -> Result<Self, StoreError> {
         tokio::task::spawn_blocking(move || {
@@ -237,25 +244,32 @@ impl SqliteStore {
             + 'static,
     {
         let (response, receiver) = oneshot::channel();
-        {
+        // The lock only hands out the worker's sender; waiting for room happens without it.
+        // The channel serves waiters in arrival order, and a waiter that is dropped enqueues
+        // nothing. After `close` takes the stored sender no new call gets one, while a waiter
+        // already holding its copy finishes within `QUEUE_WAIT`.
+        let sender = {
             let workers = self.workers.lock().map_err(|_| AppError::Internal)?;
             let worker = if write {
                 &workers.writer
             } else {
                 &workers.reader
             };
-            let sender = worker.sender.as_ref().ok_or(AppError::Unavailable)?;
-            sender
-                .try_send(Box::new(move |connection, profile| {
-                    if write || !response.is_closed() {
-                        let _ = response.send(f(connection, profile));
-                    }
-                }))
-                .map_err(|error| match error {
-                    mpsc::error::TrySendError::Full(_) => AppError::Busy,
-                    mpsc::error::TrySendError::Closed(_) => AppError::Unavailable,
-                })?;
-        }
+            worker.sender.clone().ok_or(AppError::Unavailable)?
+        };
+        let job: Job = Box::new(move |connection, profile| {
+            if write || !response.is_closed() {
+                let _ = response.send(f(connection, profile));
+            }
+        });
+        sender
+            .send_timeout(job, QUEUE_WAIT)
+            .await
+            .map_err(|error| match error {
+                mpsc::error::SendTimeoutError::Timeout(_) => AppError::Busy,
+                mpsc::error::SendTimeoutError::Closed(_) => AppError::Unavailable,
+            })?;
+        drop(sender);
         receiver.await.map_err(|_| AppError::Unavailable)?
     }
 }

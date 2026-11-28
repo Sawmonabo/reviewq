@@ -79,11 +79,14 @@ impl Inventory {
         Ok(ready)
     }
 
+    /// Removes what the records say ReviewQ wrote. What was changed by hand stays, and the
+    /// error tells the user what to remove from which file, then `again`, what finishes it.
     pub(super) async fn cleanup(
         &self,
         path: &Path,
         common: &Path,
         bearer: &str,
+        again: &str,
     ) -> Result<(), Failure> {
         let mut unresolved = Self {
             urls: self.urls.clone(),
@@ -131,12 +134,21 @@ impl Inventory {
             return Ok(());
         }
         unresolved.save(path)?;
-        let paths = unresolved
+        // An exclusion waits only for the files it hides, so it needs no step of its own
+        // unless nothing else is left.
+        let edited = unresolved
             .entries
             .iter()
-            .map(|entry| entry.file().display().to_string())
-            .collect::<Vec<_>>();
-        let deferred = format!("Cleanup was deferred for {}.", paths.join(", "));
+            .filter(|entry| !matches!(entry, Owned::Exclusion { .. }));
+        let steps = if edited.clone().next().is_some() {
+            edited.map(Owned::removal).collect::<Vec<_>>()
+        } else {
+            unresolved.entries.iter().map(Owned::removal).collect()
+        };
+        let deferred = format!(
+            "ReviewQ left its management setup in place where it was changed by hand. To finish, {}. Then {again}",
+            steps.join("; ")
+        );
         match claude_error {
             Some(error) => Err(format!("{error} {deferred}").into()),
             None => Err(deferred.into()),
@@ -224,6 +236,29 @@ impl Owned {
             | Self::Codex { file }
             | Self::Skill { file, .. }
             | Self::Exclusion { file, .. } => file,
+        }
+    }
+
+    /// What the user removes by hand when cleanup left this entry because it was edited.
+    fn removal(&self) -> String {
+        match self {
+            Self::Codex { file } => format!(
+                "remove the [mcp_servers.reviewq] table from {}",
+                file.display()
+            ),
+            Self::Claude { file, checkout } => format!(
+                "remove the reviewq-manage MCP server of {} from {}",
+                checkout.display(),
+                file.display()
+            ),
+            Self::Skill { file, .. } => format!(
+                "delete the folder {}",
+                file.parent().unwrap_or(file).display()
+            ),
+            Self::Exclusion { file, .. } => format!(
+                "remove the lines from \"# ReviewQ checkout files\" to \"# End ReviewQ checkout files\" in {}",
+                file.display()
+            ),
         }
     }
 }

@@ -264,6 +264,15 @@ impl WorkspaceStore for SqliteStore {
         })
     }
 
+    fn retired_grant(&self, actor: Actor, verifier: [u8; 32]) -> AppFuture<'_, Snapshot<bool>> {
+        Box::pin(async move {
+            operator(&actor).map_err(StoreError::app)?;
+            self.read(move |db| snapshot(db, grants::retired(db, &verifier)?))
+                .await
+                .map_err(StoreError::app)
+        })
+    }
+
     fn issue_grant(
         &self,
         actor: Actor,

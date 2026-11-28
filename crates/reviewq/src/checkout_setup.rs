@@ -20,6 +20,11 @@ pub(crate) mod reconcile;
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 const GRANT: &str = "/api/v1/checkout/grant";
+/// What finishes each command's cleanup once the user removed what they had edited.
+const SETUP_AGAIN: &str = "run the same `reviewq checkout setup` command again.";
+const REVOKE_AGAIN: &str = "run `reviewq checkout revoke` again.";
+const UNINSTALL_AGAIN: &str = "run `reviewq uninstall` again.";
+const SERVICE_AGAIN: &str = "ReviewQ tries again on its own.";
 
 pub(crate) async fn worktree(
     profile: &Path,
@@ -59,6 +64,16 @@ pub(crate) async fn install(
     let url = format!("http://{}/mcp", endpoint.native());
     let claude = projection::claude_config(claude_home.as_deref())?;
     let lock = files::hold(profile, &checkout.common)?;
+    // A key whose grant was withdrawn, by a revoke, a settings change or an uninstall whose
+    // cleanup did not finish, is never issued again: remove what it set up and make a new one.
+    if let Some(key) = files::existing_credential(profile, &checkout.common)? {
+        let verifier = URL_SAFE_NO_PAD.encode(Sha256::digest(key));
+        let body = serde_json::to_vec(&json!({"action":"retired","verifier":verifier}))?;
+        let bytes = native_client::signed(&client, &endpoint, "POST", GRANT, &body).await?;
+        if retired(&bytes)? {
+            clean_owned(profile, &checkout.common, SETUP_AGAIN).await?;
+        }
+    }
     let mut changes = prepare(profile, checkout, &url, claude, lock).await?;
     let address = json!({
         "settingsRevision":revision, "projectId":project.to_string(),
@@ -68,12 +83,19 @@ pub(crate) async fn install(
     let request = serde_json::to_vec(&json!({"action":"issue","address":address}))?;
     let confirm = serde_json::to_vec(&json!({"action":"status","address":address}))?;
     let applied = serde_json::to_vec(&json!({"action":"applied","address":address}))?;
-    let issued = native_client::signed(&client, &endpoint, "POST", GRANT, &request).await;
-    if let Ok(bytes) = issued {
-        verify_binding(&bytes, &changes.checkout, project, revision)?;
-    }
-    let bytes=native_client::signed(&client,&endpoint,"POST",GRANT,&confirm).await
-        .map_err(|_|"ReviewQ could not confirm management access for this exact checkout and settings revision.")?;
+    // A grant issued by an earlier attempt whose reply was lost still counts, so a refused
+    // issue is reported only when no grant for this key is in place either.
+    let refusal = match native_client::signed(&client, &endpoint, "POST", GRANT, &request).await {
+        Ok(bytes) => {
+            verify_binding(&bytes, &changes.checkout, project, revision)?;
+            None
+        }
+        Err(error) => Some(error),
+    };
+    let bytes = match native_client::signed(&client, &endpoint, "POST", GRANT, &confirm).await {
+        Ok(bytes) => bytes,
+        Err(_) => return Err(refused(refusal, project).into()),
+    };
     verify_binding(&bytes, &changes.checkout, project, revision)?;
     changes.apply().await?;
     match native_client::signed(&client, &endpoint, "POST", GRANT, &applied)
@@ -210,12 +232,46 @@ pub(crate) async fn revoke(profile: &Path, directory: Option<PathBuf>) -> Result
     let _lock = files::hold(profile, &common)?;
     let body = serde_json::to_vec(&json!({"action":"revoke","commonDir":common}))?;
     native_client::signed(&client, &endpoint, "POST", GRANT, &body).await?;
-    clean_owned(profile, &common).await?;
+    clean_owned(profile, &common, REVOKE_AGAIN)
+        .await
+        .map_err(|error| {
+            format!("ReviewQ revoked management access for this repository. {error}")
+        })?;
     println!("ReviewQ management access was revoked for this repository.");
     Ok(())
 }
 
-async fn clean_owned(profile: &Path, common: &Path) -> Result<(), Failure> {
+fn retired(bytes: &[u8]) -> Result<bool, Failure> {
+    #[derive(Deserialize)]
+    struct Envelope {
+        data: Retired,
+    }
+    #[derive(Deserialize)]
+    struct Retired {
+        retired: bool,
+    }
+    Ok(serde_json::from_slice::<Envelope>(bytes)?.data.retired)
+}
+
+/// Says why ReviewQ refused a grant, from the code the refused issue returned.
+fn refused(refusal: Option<Failure>, project: ProjectId) -> String {
+    let code = refusal
+        .as_ref()
+        .and_then(|error| error.downcast_ref::<native_client::Refused>())
+        .map(|refused| refused.0.as_str());
+    match code {
+        Some("stale_revision") => "ReviewQ's settings changed during setup. Run the same `reviewq checkout setup` command again.".into(),
+        Some("not_found") => format!("ReviewQ has no configured project {project} whose Git remote is this checkout's origin. Check the project ID, or add the project in ReviewQ's settings."),
+        Some("conflict") => format!("ReviewQ's settings bind project {project} to another checkout, or this checkout already has management access for another project. Change the checkout in ReviewQ's settings, or run `reviewq checkout revoke` here first."),
+        Some("unavailable") => "ReviewQ could not check this checkout's remote with GitLab. Try again when GitLab is reachable.".into(),
+        _ => match refusal {
+            Some(cause) => format!("ReviewQ refused management access for this checkout: {cause}."),
+            None => "ReviewQ could not confirm management access for this exact checkout and settings revision.".into(),
+        },
+    }
+}
+
+async fn clean_owned(profile: &Path, common: &Path, again: &str) -> Result<(), Failure> {
     let hooks = hooks::cleanup(profile, common);
     let inventory = files::inventory(profile, common)?;
     let previous = projection::Inventory::load(&inventory)?;
@@ -225,6 +281,7 @@ async fn clean_owned(profile: &Path, common: &Path) -> Result<(), Failure> {
             &inventory,
             common,
             &key.map_or_else(String::new, |key| URL_SAFE_NO_PAD.encode(key)),
+            again,
         )
         .await?;
     files::forget(profile, common)?;
@@ -249,7 +306,7 @@ pub(crate) async fn remove_installation(
             let cleanup = async {
                 if files::owned_setup_exists(profile, common)? {
                     let _lock = files::hold(profile, common)?;
-                    clean_owned(profile, common).await?;
+                    clean_owned(profile, common, UNINSTALL_AGAIN).await?;
                 }
                 Ok::<_, Failure>(())
             };

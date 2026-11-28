@@ -78,11 +78,6 @@ pub trait RepositoryChatProjectionStore: Send + Sync {
         after: Option<AbsolutePath>,
     ) -> AppFuture<'_, Vec<CheckoutProjection>>;
     fn check_checkout_projection(&self, job: CheckoutProjection) -> AppFuture<'_, ()>;
-    fn retired_checkout_verifier(
-        &self,
-        job: CheckoutProjection,
-        verifier: [u8; 32],
-    ) -> AppFuture<'_, bool>;
     fn finish_checkout_projection(
         &self,
         job: CheckoutProjection,
@@ -103,6 +98,9 @@ pub trait WorkspaceStore: Send + Sync {
         actor: Actor,
         expected: GrantAddress,
     ) -> AppFuture<'_, Snapshot<GrantBinding>>;
+    /// Whether `verifier` is the key of a withdrawn grant, which is never issued again, so the
+    /// checkout holding it must replace it before asking for a grant.
+    fn retired_grant(&self, actor: Actor, verifier: [u8; 32]) -> AppFuture<'_, Snapshot<bool>>;
     fn issue_grant(&self, actor: Actor, input: IssueGrant)
     -> AppFuture<'_, Snapshot<GrantBinding>>;
     fn revoke_grant(&self, actor: Actor, common_dir: AbsolutePath)

@@ -466,7 +466,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         let _ = worker.await;
     }
     fs::remove_file(profile.join(RUNTIME))?;
-    store.close(Duration::from_secs(10)).await?;
+    store.close(SqliteStore::CLOSE_DEADLINE).await?;
     if options.managed {
         install::bridge::clear(&endpoint)?;
     }

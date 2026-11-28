@@ -124,7 +124,7 @@ async fn one(
     let lock = files::hold(profile, common)?;
     store.check_checkout_projection(job.clone()).await?;
     if !job.desired {
-        clean_owned(profile, common).await?;
+        clean_owned(profile, common, super::SERVICE_AGAIN).await?;
         store
             .finish_checkout_projection(job.clone(), ProjectionOutcome::Removed)
             .await?;
@@ -140,10 +140,11 @@ async fn one(
     }
     if let Some(key) = files::existing_credential(profile, common)?
         && store
-            .retired_checkout_verifier(job.clone(), Sha256::digest(key).into())
+            .retired_grant(Actor::local_operator(), Sha256::digest(key).into())
             .await?
+            .value
     {
-        clean_owned(profile, common).await?;
+        clean_owned(profile, common, super::SERVICE_AGAIN).await?;
     }
     let claude = projection::claude_config(claude_profile)?;
     let mut changes = prepare(profile, checkout, url, claude, lock).await?;

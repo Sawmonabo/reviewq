@@ -252,7 +252,9 @@ async fn remove(paths: &mut Paths, options: &Options) -> Result<Vec<Left>, Failu
         return Err("ReviewQ opened a different store while uninstalling.".into());
     }
     let removed = crate::checkout_setup::remove_installation(&paths.profile, &store).await;
-    store.close(std::time::Duration::from_secs(10)).await?;
+    store
+        .close(reviewq_store::SqliteStore::CLOSE_DEADLINE)
+        .await?;
     removed?;
     let kept_hooks = retire_codex_hooks(paths).await?;
     claude::remove(paths, &active).await?;

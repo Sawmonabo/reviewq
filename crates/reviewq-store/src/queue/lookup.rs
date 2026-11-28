@@ -202,7 +202,6 @@ fn known_review(
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::PermissionsExt;
-    use std::time::Duration;
 
     use reviewq_app::queue::ReviewLookup;
     use reviewq_app::sources::MergeRequestAddress;
@@ -268,7 +267,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(known("billing/api", "7").await, None);
-            store.close(Duration::from_secs(1)).await.unwrap();
+            store.close(SqliteStore::CLOSE_DEADLINE).await.unwrap();
         });
     }
 }

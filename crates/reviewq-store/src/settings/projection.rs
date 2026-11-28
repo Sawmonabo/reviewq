@@ -66,22 +66,6 @@ impl RepositoryChatProjectionStore for SqliteStore {
         })
     }
 
-    fn retired_checkout_verifier(
-        &self,
-        job: CheckoutProjection,
-        verifier: [u8; 32],
-    ) -> AppFuture<'_, bool> {
-        Box::pin(async move {
-            self.read(move |db| {
-                check(db, &job)?;
-                Ok(db.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM repo_grants WHERE active=0 AND common_dir=?1 AND verifier=?2)",
-                    params![bytes(&job.checkout.common_dir), verifier.as_slice()], |row| row.get(0),
-                )?)
-            }).await.map_err(StoreError::app)
-        })
-    }
-
     fn finish_checkout_projection(
         &self,
         job: CheckoutProjection,
