@@ -1,7 +1,8 @@
 //! The one sentence for checkout setup or cleanup that left something for the user: why each
 //! part stays, what the user does about it, then the step that finishes the command.
 
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 use super::Failure;
 
@@ -13,6 +14,8 @@ pub(crate) struct Unfinished {
     edited: Vec<String>,
     /// A sentence each for anything else, with its cause and, where the user acts, the step.
     others: Vec<Other>,
+    /// The files a sentence names as left unchanged or failed, so no other part names them again.
+    files: BTreeSet<PathBuf>,
     again: String,
 }
 
@@ -28,6 +31,7 @@ impl Unfinished {
         Self {
             edited: Vec::new(),
             others: Vec::new(),
+            files: BTreeSet::new(),
             again: again.to_owned(),
         }
     }
@@ -50,17 +54,24 @@ impl Unfinished {
         });
     }
 
-    /// A file setup left as it is: `cause` says why, in a clause about the file such as "it is
-    /// not valid JSON", and `step` what the user changes there.
+    /// A file setup or cleanup left as it is: `cause` says why, in a clause about the file such
+    /// as "it is not valid JSON", and `step` what the user changes there.
     pub(super) fn unchanged(&mut self, file: &Path, cause: &str, step: &str) {
+        self.files.insert(file.to_owned());
         self.step(format!(
-            "ReviewQ setup left {} unchanged because {cause}. To finish, {step}.",
+            "ReviewQ left {} unchanged because {cause}. To finish, {step}.",
             file.display()
         ));
     }
 
+    /// Whether a sentence already names `file` as left unchanged or failed.
+    pub(super) fn names(&self, file: &Path) -> bool {
+        self.files.contains(file)
+    }
+
     /// A failure at `file`, with its cause, for the user to fix.
     pub(super) fn failed(&mut self, action: &str, file: &Path, error: &Failure) {
+        self.files.insert(file.to_owned());
         self.others.push(Other {
             sentence: format!(
                 "ReviewQ could not {action} {}: {}.",
@@ -77,6 +88,7 @@ impl Unfinished {
             Ok(other) => {
                 self.edited.extend(other.edited);
                 self.others.extend(other.others);
+                self.files.extend(other.files);
             }
             Err(error) => self.failed("finish its setup for the Git folder", common, &error),
         }
@@ -134,6 +146,17 @@ impl Unfinished {
             .chars()
             .filter(|ch| !ch.is_control())
             .collect()
+    }
+
+    /// The desktop notice for this, after `head`, such as "ReviewQ couldn't finish
+    /// uninstalling". Windows shows at most four lines of a notice's body, so it names no path:
+    /// only how many steps are left, `details`, where the full sentence is, then `again`.
+    pub(crate) fn notice(&self, head: &str, details: &str) -> String {
+        let steps = match self.edited.len() + self.others.len() {
+            1 => "the checkout step".to_owned(),
+            count => format!("the {count} checkout steps"),
+        };
+        format!("{head}. Do {steps} {details} lists, then {}.", self.again)
     }
 }
 

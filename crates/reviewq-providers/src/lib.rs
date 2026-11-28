@@ -13,7 +13,7 @@ mod settings;
 mod terminal;
 mod workflow;
 
-pub use checkout::git_output;
+pub use checkout::{GitRefusal, git_output, git_run};
 pub use claude::{Claude, ClaudeCli, ClaudeWorkflow};
 pub use codex::{
     Codex, HookRevocation, approve_hooks as approve_codex_hooks, revoke_hooks as revoke_codex_hooks,

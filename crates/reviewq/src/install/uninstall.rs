@@ -195,7 +195,7 @@ pub(super) async fn finish(paths: &Paths) -> Result<(), Failure> {
     remove(
         &mut paths,
         &options,
-        "run the same `reviewq install` command again",
+        "run the same `bin/reviewq install --from <release folder>` command again",
     )
     .await?;
     Ok(())
@@ -473,8 +473,10 @@ fn finishing(delete_data: bool) -> &'static str {
     }
 }
 
-/// Reports `error`, in a desktop notification for the dashboard's job, and returns it. An
-/// unfinished checkout cleanup already ends with the step that finishes the uninstall.
+/// Reports `error`, in a desktop notification for the dashboard's job, and returns it.
+/// Windows shows at most four lines of a notification's body, so the next step comes before
+/// the reason, cut to 300 bytes, and an unfinished checkout cleanup, whose steps name files,
+/// points to the job's journal, which has the whole sentence.
 async fn failed(
     paths: &Paths,
     delete_data: bool,
@@ -482,19 +484,22 @@ async fn failed(
     job: bool,
 ) -> Result<(), Failure> {
     if job {
-        let reason = error.to_string();
-        let body = if error.is::<crate::checkout_setup::Unfinished>() {
-            format!("ReviewQ couldn't finish uninstalling: {reason}")
-        } else {
-            let next = if !paths::exists(&paths.launcher).unwrap_or(false) {
-                "`journalctl --user -u reviewq-uninstall` has the details.".to_owned()
-            } else {
-                format!("Run {} to finish.", finishing(delete_data))
-            };
-            format!(
-                "ReviewQ couldn't finish uninstalling: {}. {next}",
-                reason.trim_end_matches('.')
-            )
+        const HEAD: &str = "ReviewQ couldn't finish uninstalling";
+        let body = match error.downcast_ref::<crate::checkout_setup::Unfinished>() {
+            Some(left) => left.notice(HEAD, "`journalctl --user -u reviewq-uninstall`"),
+            None => {
+                let next = if !paths::exists(&paths.launcher).unwrap_or(false) {
+                    "`journalctl --user -u reviewq-uninstall` has the details.".to_owned()
+                } else {
+                    format!("Run {} to finish.", finishing(delete_data))
+                };
+                // The journal keeps the whole reason; the notice keeps it short.
+                let reason = format!("{}.", error.to_string().trim_end_matches('.'));
+                format!(
+                    "{HEAD}. {next} {}",
+                    crate::checkout_setup::clip(reason, 300)
+                )
+            }
         };
         notify(paths, &body).await;
     }
@@ -502,7 +507,7 @@ async fn failed(
 }
 
 /// The sentence for an uninstall that finished but left `left` in place. The notification
-/// names at most three and points to the job's journal for the reasons.
+/// points to the job's journal for the reasons first, then names at most three.
 fn left_in_place(left: &[Left], notice: bool) -> String {
     let kept = left
         .iter()
@@ -519,7 +524,7 @@ fn left_in_place(left: &[Left], notice: bool) -> String {
         named.push_str(&format!(" and {} more", kept.len() - 3));
     }
     format!(
-        "ReviewQ is uninstalled, but left in place: {named}. `journalctl --user -u reviewq-uninstall` says why."
+        "ReviewQ is uninstalled. `journalctl --user -u reviewq-uninstall` says why it left these in place: {named}."
     )
 }
 

@@ -4,7 +4,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use reviewq_app::access::AppError;
-use reviewq_providers::git_output;
+use reviewq_providers::git_run;
 
 use super::Failure;
 
@@ -21,7 +21,7 @@ pub(super) async fn discover(directory: Option<&Path>) -> Result<Checkout, Failu
     let directory = selected(directory)?;
     let worktree = repo_path(&directory, "--show-toplevel").await?;
     let common = repo_path(&worktree, "--git-common-dir").await?;
-    let locations = git_output(&worktree, &["worktree", "list", "--porcelain", "-z"]).await?;
+    let locations = answer(&worktree, &["worktree", "list", "--porcelain", "-z"]).await?;
     let mut entries = locations
         .split(|byte| *byte == 0)
         .filter_map(|line| line.strip_prefix(b"worktree "));
@@ -53,7 +53,7 @@ pub(super) async fn discover(directory: Option<&Path>) -> Result<Checkout, Failu
     }
     let mut materialized = Vec::with_capacity(members.len());
     for root in members {
-        let index = git_output(
+        let index = answer(
             &root,
             &["rev-parse", "--path-format=absolute", "--git-path", "index"],
         )
@@ -93,27 +93,53 @@ pub(super) async fn require_untracked(root: &Path, paths: &[&str]) -> Result<(),
 async fn tracked(root: &Path, paths: &[&str]) -> Result<bool, Failure> {
     let mut args = vec!["--literal-pathspecs", "ls-files", "-z", "--"];
     args.extend(paths);
-    Ok(!git_output(root, &args).await?.is_empty())
+    let unsure = |cause: &dyn std::fmt::Display| {
+        format!(
+            "Git could not say whether it tracks {} in {}: {cause}",
+            paths.join(" or "),
+            root.display()
+        )
+    };
+    match git_run(root, &args).await {
+        Ok(Ok(listed)) => Ok(!listed.is_empty()),
+        Ok(Err(refusal)) => Err(unsure(&refusal).into()),
+        Err(error) => Err(unsure(&unanswered(&error)).into()),
+    }
 }
 
 /// Whether `root` is still a worktree of the repository at `common`, its top level. It is not
-/// when Git says the folder is no repository or names another; when Git cannot answer, such as
-/// for a timeout, that is an error.
+/// when Git names another, or when the folder is gone or holds no `.git`, so no repository can
+/// be there. Any other failure, such as a timeout or a bad line in a Git config, is an error
+/// with Git's words.
 pub(super) async fn belongs(root: &Path, common: &Path) -> Result<bool, Failure> {
     for (name, expected) in [("--git-common-dir", common), ("--show-toplevel", root)] {
-        match repo_path(root, name).await {
-            Ok(found) if found == expected => (),
-            Ok(_) => return Ok(false),
-            Err(error) if matches!(error.downcast_ref(), Some(AppError::NotFound)) => {
-                return Ok(false);
+        let unsure = |cause: &dyn std::fmt::Display| {
+            format!(
+                "Git could not say whether {} is still a worktree of this repository: {cause}",
+                root.display()
+            )
+        };
+        let output = git_run(root, &["rev-parse", "--path-format=absolute", name]).await;
+        match output {
+            Ok(Ok(output)) => match path(output.strip_suffix(b"\n").unwrap_or(&output)) {
+                Ok(found) if found == expected => (),
+                Ok(_) => return Ok(false),
+                Err(error) => return Err(unsure(&error).into()),
+            },
+            Ok(Err(refusal)) => {
+                return match root.join(".git").symlink_metadata() {
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::NotFound | ErrorKind::NotADirectory
+                        ) =>
+                    {
+                        Ok(false)
+                    }
+                    _ => Err(unsure(&refusal).into()),
+                };
             }
-            Err(_) => {
-                return Err(format!(
-                    "Git could not say whether {} is still a worktree of this repository",
-                    root.display()
-                )
-                .into());
-            }
+            Err(error) => return Err(unsure(&unanswered(&error)).into()),
         }
     }
     Ok(true)
@@ -121,15 +147,30 @@ pub(super) async fn belongs(root: &Path, common: &Path) -> Result<bool, Failure>
 
 pub(super) async fn require_ignored(root: &Path, paths: &[&str]) -> Result<(), Failure> {
     for path in paths {
-        if git_output(root, &["check-ignore", "--no-index", "--quiet", "--", path])
-            .await
-            .is_err()
-        {
-            return Err(format!(
-                "Checkout setup requires Git to ignore {}.",
-                root.join(path).display()
-            )
-            .into());
+        let file = root.join(path);
+        match git_run(root, &["check-ignore", "--no-index", "--quiet", "--", path]).await {
+            Ok(Ok(_)) => (),
+            // Exit code 1 is Git's answer that it does not ignore the path.
+            Ok(Err(refusal)) if refusal.code == Some(1) => {
+                return Err(
+                    format!("Checkout setup requires Git to ignore {}.", file.display()).into(),
+                );
+            }
+            Ok(Err(refusal)) => {
+                return Err(format!(
+                    "Git could not say whether it ignores {}: {refusal}",
+                    file.display()
+                )
+                .into());
+            }
+            Err(error) => {
+                return Err(format!(
+                    "Git could not say whether it ignores {}: {}",
+                    file.display(),
+                    unanswered(&error)
+                )
+                .into());
+            }
         }
     }
     Ok(())
@@ -185,10 +226,7 @@ pub(super) async fn destination(
     };
     Ok(if !belongs(worktree, common).await? {
         Destination::Elsewhere
-    } else if tracked(worktree, &[relative])
-        .await
-        .map_err(|_| format!("Git could not say whether it tracks {}", file.display()))?
-    {
+    } else if tracked(worktree, &[relative]).await? {
         Destination::Tracked
     } else {
         Destination::Owned
@@ -203,8 +241,26 @@ fn selected(directory: Option<&Path>) -> Result<PathBuf, Failure> {
 }
 
 async fn repo_path(directory: &Path, name: &str) -> Result<PathBuf, Failure> {
-    let output = git_output(directory, &["rev-parse", "--path-format=absolute", name]).await?;
+    let output = answer(directory, &["rev-parse", "--path-format=absolute", name]).await?;
     path(output.strip_suffix(b"\n").unwrap_or(&output))
+}
+
+/// Git's output, or an error with Git's own words about `directory`.
+async fn answer(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, Failure> {
+    let cause = match git_run(directory, arguments).await {
+        Ok(Ok(output)) => return Ok(output),
+        Ok(Err(refusal)) => refusal.to_string(),
+        Err(error) => unanswered(&error).to_owned(),
+    };
+    Err(format!("Git could not read {}: {cause}", directory.display()).into())
+}
+
+/// Why Git gave no answer, when it did not run to the end.
+fn unanswered(error: &AppError) -> &'static str {
+    match error {
+        AppError::PayloadTooLarge => "its answer was too long",
+        _ => "it did not start or did not answer within 4 seconds",
+    }
 }
 
 fn raw_path(value: &[u8]) -> Result<&Path, Failure> {

@@ -19,7 +19,7 @@ mod projection;
 pub(crate) mod reconcile;
 mod unfinished;
 
-pub(crate) use unfinished::Unfinished;
+pub(crate) use unfinished::{Unfinished, clip};
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 const GRANT: &str = "/api/v1/checkout/grant";
@@ -60,7 +60,7 @@ pub(crate) async fn install(
     project: ProjectId,
     claude_home: Option<PathBuf>,
 ) -> Result<(), Failure> {
-    let checkout = git::discover(directory.as_deref()).await?;
+    let checkout = discover(directory.as_deref(), SETUP_AGAIN).await?;
     let endpoint = runtime::read_endpoint(profile)?;
     let client = native_client::client()?;
     let revision = settings_revision(&client, &endpoint).await?;
@@ -114,6 +114,21 @@ pub(crate) async fn install(
     changes.finish()?;
     println!("ReviewQ management access is ready for this checkout.");
     Ok(())
+}
+
+/// The checkout Git finds at `directory`, the current folder when `None`. When Git cannot
+/// say, such as for a bad line in a worktree's Git config, the error gives Git's words and
+/// ends with `again`, the step that finishes the command once that is fixed.
+async fn discover(directory: Option<&Path>, again: &str) -> Result<git::Checkout, Failure> {
+    git::discover(directory).await.map_err(|error| {
+        let folder = directory
+            .map(Path::to_owned)
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let mut left = Unfinished::new(again);
+        left.failed("read the Git checkout at", &folder, &error);
+        Box::new(left) as Failure
+    })
 }
 
 async fn settings_revision(
@@ -334,5 +349,66 @@ pub(crate) async fn remove_installation(
                 left.absorb(error, common);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::process::Command;
+
+    use super::*;
+
+    fn git(directory: &Path, arguments: &[&str]) {
+        let status = Command::new("git")
+            .current_dir(directory)
+            .args(arguments)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "ReviewQ")
+            .env("GIT_AUTHOR_EMAIL", "reviewq@example.invalid")
+            .env("GIT_COMMITTER_NAME", "ReviewQ")
+            .env("GIT_COMMITTER_EMAIL", "reviewq@example.invalid")
+            .status()
+            .expect("git runs");
+        assert!(status.success(), "git {arguments:?}");
+    }
+
+    /// A Git config with a bad line makes Git fail just as it does for a folder with no
+    /// repository. Cleanup must not take the checkout for someone else's then, report success
+    /// and forget the key while the Codex config there still holds its bearer.
+    #[tokio::test]
+    async fn cleanup_keeps_no_bearer_when_git_cannot_answer() -> Result<(), Failure> {
+        let scratch = tempfile::tempdir()?;
+        let root = scratch.path().canonicalize()?;
+        let (profile, repo) = (root.join("profile"), root.join("repo"));
+        std::fs::create_dir(&profile)?;
+        git(&root, &["init", "-q", "repo"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "start"]);
+        let checkout = git::discover(Some(&repo)).await?;
+        let common = checkout.common.clone();
+        let lock = files::hold(&profile, &common)?;
+        let url = "http://127.0.0.1:9/mcp";
+        let mut changes = prepare(&profile, checkout, url, None, lock, SETUP_AGAIN).await?;
+        changes
+            .plan
+            .apply(&changes.inventory, &changes.checkout, None)
+            .await?;
+        changes.finish()?;
+        let key = files::existing_credential(&profile, &common)?.ok_or("no key")?;
+        let bearer = URL_SAFE_NO_PAD.encode(key);
+        let config = repo.join(".codex/config.toml");
+        assert!(std::fs::read_to_string(&config)?.contains(&bearer));
+
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(common.join("config"))?
+            .write_all(b"[broken\n")?;
+        let error = clean_owned(&profile, &common, "run `reviewq uninstall`")
+            .await
+            .expect_err("cleanup stops while Git cannot answer");
+        assert!(error.to_string().contains("Git could not say"), "{error}");
+        assert!(!std::fs::read_to_string(&config).is_ok_and(|text| text.contains(&bearer)));
+        assert!(files::existing_credential(&profile, &common)?.is_some());
+        Ok(())
     }
 }

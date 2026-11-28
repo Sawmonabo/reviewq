@@ -70,6 +70,7 @@ pub(super) fn edit(
         changed(
             "it is not valid JSON".into(),
             "correct the JSON there".into(),
+            false,
         )
     };
     let source = source(before.unwrap_or(b"{}\n")).map_err(|_| invalid())?;
@@ -90,6 +91,7 @@ pub(super) fn edit(
                             checkout.display()
                         ),
                         "remove that MCP server there".into(),
+                        true,
                     ))
                 };
             };
@@ -120,6 +122,7 @@ pub(super) fn edit(
                 format!(
                     "make \"projects\", its entry for {checkout} and that entry's \"mcpServers\" JSON objects"
                 ),
+                false,
             ));
         }
     };
@@ -181,6 +184,6 @@ fn read_server(source: &str, value: &Range<usize>) -> Result<Server, Failure> {
     Ok(serde_json::from_str(&source[value.clone()]).map_err(|_| ENTRY)?)
 }
 
-fn changed(cause: String, step: String) -> Failure {
-    Failure::from(Changed { cause, step })
+fn changed(cause: String, step: String, entry: bool) -> Failure {
+    Failure::from(Changed { cause, step, entry })
 }

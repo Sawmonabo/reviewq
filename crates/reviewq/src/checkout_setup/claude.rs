@@ -19,11 +19,13 @@ pub(super) struct Edit {
 
 /// The Claude config no longer reads as ReviewQ left it, such as an entry changed by hand,
 /// rather than a failure to read, lock or write it. `cause` is a clause about the file, such
-/// as "it is not valid JSON", and `step` what the user changes there.
+/// as "it is not valid JSON", and `step` what the user changes there. `entry` says the cause
+/// is the checkout's MCP server itself, not the file around it.
 #[derive(Debug)]
 pub(super) struct Changed {
     pub(super) cause: String,
     pub(super) step: String,
+    pub(super) entry: bool,
 }
 
 impl std::fmt::Display for Changed {

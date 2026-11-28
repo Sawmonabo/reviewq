@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use super::observe::{Observers, Topology};
 use super::unfinished::clip;
-use super::{Failure, Unfinished, clean_owned, files, git, prepare, projection};
+use super::{Failure, Unfinished, clean_owned, files, prepare, projection};
 
 const ISSUE_LIMIT: usize = 1024;
 
@@ -138,7 +138,7 @@ async fn one(
         return Ok(None);
     }
     let topology = Topology::read(common)?;
-    let checkout = git::discover(Some(job.checkout.root.as_path())).await?;
+    let checkout = super::discover(Some(job.checkout.root.as_path()), super::SERVICE_AGAIN).await?;
     if checkout.root != job.checkout.root.as_path() || checkout.common != common {
         return Err("The local Git checkout has changed. Update its binding in Settings.".into());
     }

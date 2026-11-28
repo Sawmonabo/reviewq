@@ -139,17 +139,24 @@ impl Inventory {
         let removed = claude::Edit::prepare(file, &[checkout], None, &self.urls, bearer)
             .await
             .and_then(|mut edit| edit.apply());
-        match removed {
-            Ok(()) => Ok(()),
+        let Err(error) = removed else {
+            return Ok(());
+        };
+        match error.downcast::<claude::Changed>() {
             // The entry names the checkout's folder. Once that folder holds another repository,
             // or none, an entry there that is not ReviewQ's belongs to someone else.
-            Err(error) if error.is::<claude::Changed>() => {
+            Ok(changed) if changed.entry => {
                 if git::belongs(checkout, common).await? {
                     Err(Kept::Edited)
                 } else {
                     Ok(())
                 }
             }
+            // The file itself, such as JSON that does not parse, may still hold ReviewQ's entry.
+            Ok(changed) => Err(Kept::Unchanged {
+                cause: changed.cause,
+                step: changed.step,
+            }),
             Err(error) => Err(Kept::Failed(error)),
         }
     }
@@ -157,7 +164,10 @@ impl Inventory {
     /// The edit that removes what ReviewQ wrote at a file in the checkout, or `None` when
     /// nothing of ReviewQ's is left there: the file is gone or is no longer the one setup
     /// wrote, its folder is no longer a worktree of the checkout, or it no longer holds
-    /// ReviewQ's part. Nothing is read from a folder that is no longer the checkout's.
+    /// ReviewQ's part. Nothing is read from a folder that is no longer the checkout's. When Git
+    /// cannot say where a Codex config stands, ReviewQ still removes its table there, which its
+    /// marker, a recorded URL and this key's bearer prove ReviewQ wrote, so the bearer never
+    /// outlives the record; anything else waits for Git's answer.
     async fn local_removal(
         &self,
         owned: &Owned,
@@ -180,14 +190,16 @@ impl Inventory {
             Owned::Claude { .. } => return Ok(None),
         };
         let tracked = match relative {
-            Some(relative) => match git::destination(file, common, relative).await? {
-                git::Destination::Elsewhere => return Ok(None),
+            Some(relative) => match git::destination(file, common, relative).await {
+                Ok(git::Destination::Elsewhere) => return Ok(None),
                 // A skill Git tracks is a copy the repository keeps, with no key in it.
-                git::Destination::Tracked if matches!(owned, Owned::Skill { .. }) => {
+                Ok(git::Destination::Tracked) if matches!(owned, Owned::Skill { .. }) => {
                     return Ok(None);
                 }
-                git::Destination::Tracked => true,
-                git::Destination::Owned => false,
+                Ok(git::Destination::Tracked) => true,
+                Ok(git::Destination::Owned) => false,
+                Err(_) if matches!(owned, Owned::Codex { .. }) => false,
+                Err(error) => return Err(Kept::Failed(error)),
             },
             None => false,
         };
@@ -195,9 +207,19 @@ impl Inventory {
             return Ok(None);
         };
         let updated = match owned {
-            Owned::Codex { .. } => codex(Some(&before), &self.urls, bearer, None)
-                .map_err(|_| Kept::Edited)?
-                .unwrap_or_else(|| before.bytes.clone()),
+            Owned::Codex { .. } => match codex(Some(&before), &self.urls, bearer, None) {
+                Ok(updated) => updated.unwrap_or_else(|| before.bytes.clone()),
+                Err(Refusal::Entry) => return Err(Kept::Edited),
+                // An `mcp_servers` that is no table holds no table of ReviewQ's.
+                Err(Refusal::Servers) => return Ok(None),
+                Err(refusal) => {
+                    let (cause, step) = refusal.words(true);
+                    return Err(Kept::Unchanged {
+                        cause,
+                        step: step.to_owned(),
+                    });
+                }
+            },
             Owned::Skill { digest, .. } => {
                 let actual: [u8; 32] = Sha256::digest(&before.bytes).into();
                 if actual != *digest
@@ -288,6 +310,9 @@ impl Owned {
 enum Kept {
     /// What ReviewQ wrote there was changed by hand.
     Edited,
+    /// The file around it no longer reads, such as a line that is not valid TOML, so ReviewQ
+    /// cannot tell what of it is ReviewQ's. `cause` and `step` are as for `Unfinished::unchanged`.
+    Unchanged { cause: String, step: String },
     /// Git now tracks the file, which still holds what ReviewQ wrote, so ReviewQ leaves it.
     Tracked,
     /// Anything else, such as a file that could not be read or written, or Git not answering.
@@ -305,6 +330,7 @@ impl Kept {
     fn add_to(self, owned: &Owned, left: &mut Unfinished) {
         match self {
             Self::Edited => left.edited(owned.removal()),
+            Self::Unchanged { cause, step } => left.unchanged(owned.file(), &cause, &step),
             Self::Tracked => left.step(format!(
                 "Git tracks {}, so ReviewQ left its management setup there. To finish, {}.",
                 owned.file().display(),
@@ -410,16 +436,19 @@ impl Plan {
             });
             setup.skill(checkout.primary.join(CLAUDE[0]), skill);
         }
-        for owned in previous
+        // A file setup already left unchanged, and said why, is not named a second time.
+        let dropped = previous
             .entries
             .difference(&current.entries)
             .filter(|entry| {
-                !current.entries.iter().any(|other| {
-                    other.file() == entry.file()
-                        && matches!((other, entry), (Owned::Skill { .. }, Owned::Skill { .. }))
-                })
+                !left.names(entry.file())
+                    && !current.entries.iter().any(|other| {
+                        other.file() == entry.file()
+                            && matches!((other, entry), (Owned::Skill { .. }, Owned::Skill { .. }))
+                    })
             })
-        {
+            .collect::<Vec<_>>();
+        for owned in dropped {
             if let Owned::Claude { file, checkout } = owned {
                 claude_changes.entry(file).or_default().push(checkout);
                 continue;
@@ -575,7 +604,7 @@ pub(super) fn skill(profile: &Path, again: &str) -> Result<Cow<'static, [u8]>, F
     match read_limited(&path, 32 * 1024) {
         Ok(Some(owned)) if owned.bytes == SKILL => return Ok(Cow::Owned(owned.bytes)),
         Ok(_) => left.step(format!(
-            "The installed ReviewQ's checkout skill at {} is not the one this `reviewq` program carries. To finish, run setup with the installed `reviewq`, or install this one with `reviewq install`.",
+            "The installed ReviewQ's checkout skill at {} is not the one this `reviewq` program carries. To finish, use the installed `reviewq` on your PATH, or install the release this program came from with `<release folder>/bin/reviewq install --from <release folder>`.",
             path.display()
         )),
         Err(error) => left.failed("read its installed checkout skill", &path, &error),
@@ -663,9 +692,15 @@ fn codex(
     if url.is_none() && configuration.get("mcp_servers").is_none() {
         return Ok(None);
     }
+    // An `mcp_servers` table setup adds is implicit, with no header of its own, so removing
+    // ReviewQ's table removes it too and leaves no `[mcp_servers]` line behind.
     let servers = configuration
         .entry("mcp_servers")
-        .or_insert(Item::Table(Table::new()))
+        .or_insert_with(|| {
+            let mut servers = Table::new();
+            servers.set_implicit(true);
+            Item::Table(servers)
+        })
         .as_table_like_mut()
         .ok_or(Refusal::Servers)?;
     let authorization = format!("Bearer {bearer}");

@@ -2,8 +2,7 @@ use std::collections::BTreeSet;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use reviewq_app::access::AppError;
-use reviewq_providers::git_output;
+use reviewq_providers::git_run;
 use sha2::{Digest, Sha256};
 
 use super::files::{self, Edit, read};
@@ -23,10 +22,11 @@ pub(super) async fn reconcile(
     let Some(launcher) = launcher().filter(|launcher| launcher.is_file()) else {
         return Ok(());
     };
-    // Git applies includes and per-worktree overrides in their native scope.
+    // Git applies includes and per-worktree overrides in their native scope. Exit code 1 is
+    // Git's answer that the key is not set; anything else leaves the hooks folder alone.
     for root in &checkout.worktrees {
-        match git_output(root, &["config", "--get", "core.hooksPath"]).await {
-            Err(AppError::NotFound) => (),
+        match git_run(root, &["config", "--get", "core.hooksPath"]).await {
+            Ok(Err(refusal)) if refusal.code == Some(1) => (),
             _ => return Ok(()),
         }
     }
@@ -55,11 +55,11 @@ pub(super) async fn reconcile(
 }
 
 /// Removes the hook ReviewQ wrote. With a record, one whose bytes are none ReviewQ wrote but
-/// that still holds ReviewQ's marker no longer matches what ReviewQ wrote: it stays, and the
-/// error says which lines to remove, then `again`, the step that finishes the command. One
-/// with neither is no longer ReviewQ's, as setup also leaves it alone: the record goes and
-/// the file stays. Without a record only the script ReviewQ writes for this checkout goes,
-/// since another profile's hook also holds the marker.
+/// that still holds ReviewQ's marker and names this profile and this checkout's Git folder was
+/// changed by hand: it stays, and the error says which lines to remove, then `again`, the step
+/// that finishes the command. Any other, such as another profile's hook, which also holds the
+/// marker, is not this profile's, as setup also leaves it alone: the record goes and the file
+/// stays. Without a record only the script ReviewQ writes for this checkout goes.
 pub(super) fn cleanup(profile: &Path, common: &Path, again: &str) -> Result<(), Failure> {
     let inventory = files::hook_inventory(profile, common)?;
     let recorded = load(&inventory, again)?;
@@ -77,13 +77,7 @@ pub(super) fn cleanup(profile: &Path, common: &Path, again: &str) -> Result<(), 
                 left.failed("remove its Git hook", &path, &error);
             }
         }
-        Ok(Some(file))
-            if recorded.is_some()
-                && file
-                    .bytes
-                    .split(|byte| *byte == b'\n')
-                    .any(|line| line == MARKER.as_bytes()) =>
-        {
+        Ok(Some(file)) if recorded.is_some() && edited(&file.bytes, profile, common) => {
             left.step(format!(
                 "ReviewQ left its Git hook in place in {} because it no longer matches what ReviewQ wrote. To finish, remove the line \"{MARKER}\" there and the `if` line after it.",
                 path.display()
@@ -98,6 +92,23 @@ pub(super) fn cleanup(profile: &Path, common: &Path, again: &str) -> Result<(), 
         Edit::remove(inventory, file).apply()?;
     }
     Ok(())
+}
+
+/// Whether `bytes` are this profile's hook for the checkout at `common` changed by hand: they
+/// still hold ReviewQ's marker line and the arguments that name both.
+fn edited(bytes: &[u8], profile: &Path, common: &Path) -> bool {
+    let named = |argument: Result<String, Failure>| {
+        argument.is_ok_and(|argument| {
+            bytes
+                .windows(argument.len())
+                .any(|piece| piece == argument.as_bytes())
+        })
+    };
+    bytes
+        .split(|byte| *byte == b'\n')
+        .any(|line| line == MARKER.as_bytes())
+        && named(profile_argument(profile))
+        && named(common_argument(common))
 }
 
 /// Whether `bytes` are a hook ReviewQ wrote: one the record names, or the script ReviewQ
@@ -153,12 +164,22 @@ fn launcher() -> Option<PathBuf> {
 fn script(launcher: &Path, profile: &Path, common: &Path) -> Result<String, Failure> {
     let settings = crate::runtime_settings::config_path(profile, false);
     Ok(format!(
-        "#!/bin/sh\n{MARKER}\nif [ \"${{3-}}\" = 1 ]; then {} --profile {} internal setup-worktree --settings {} --common-dir {} </dev/null >/dev/null || :; fi\n",
+        "#!/bin/sh\n{MARKER}\nif [ \"${{3-}}\" = 1 ]; then {} {} internal setup-worktree --settings {} {} </dev/null >/dev/null || :; fi\n",
         literal(launcher)?,
-        literal(profile)?,
+        profile_argument(profile)?,
         literal(&settings)?,
-        literal(common)?,
+        common_argument(common)?,
     ))
+}
+
+/// The hook's argument naming the profile, quoted, so one profile's never matches another's.
+fn profile_argument(profile: &Path) -> Result<String, Failure> {
+    Ok(format!("--profile {}", literal(profile)?))
+}
+
+/// The hook's argument naming the checkout's Git folder, quoted as `profile_argument`.
+fn common_argument(common: &Path) -> Result<String, Failure> {
+    Ok(format!("--common-dir {}", literal(common)?))
 }
 
 fn literal(path: &Path) -> Result<String, Failure> {
