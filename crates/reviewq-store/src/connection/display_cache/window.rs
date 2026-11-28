@@ -336,15 +336,18 @@ fn publish_index(
     key: &IndexKey,
     source: String,
 ) -> Result<(), StoreError> {
-    let mut cache = open(profile, store_id, heal, true)?.ok_or(AppError::Internal)?;
+    // Each connection holds off a cache swap, so none stays open through the parse.
+    let cache = open(profile, store_id, heal, true)?.ok_or(AppError::Internal)?;
     if cache_entry(&cache, key)?.is_some() {
         return Ok(());
     }
+    drop(cache);
     if ReportHash::from_sha256(Sha256::digest(source.as_bytes()).into()) != key.hash {
         return Err(AppError::PreconditionFailed.into());
     }
     let index = std::panic::catch_unwind(|| build_report_display_index(&source))
         .unwrap_or(DisplayIndex::Fallback(DisplayFallback::ParserFailed));
+    let mut cache = open(profile, store_id, heal, true)?.ok_or(AppError::Internal)?;
     publish(
         &mut cache,
         &key.artifact,

@@ -5,8 +5,9 @@ mod window;
 
 pub(super) use window::Builds;
 
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{OnceLock, RwLock, RwLockReadGuard};
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
@@ -111,13 +112,38 @@ impl SqliteStore {
 /// The one owner of discarding the cache file. A file this build cannot use (one written
 /// for another schema or store, one SQLite cannot read, or WAL files ReviewQ never writes)
 /// is replaced by a fresh cache that has already passed the same check, so nothing is
-/// discarded unless a usable cache takes its place. The swap is serialized, and happens at
-/// most once per `HEAL_INTERVAL`, so a file that keeps failing costs one rebuild per
-/// interval and otherwise answers `cache_unavailable`. Only the four cache file names are
-/// ever touched, never the main database.
+/// discarded unless a usable cache takes its place. The swap happens at most once per
+/// `HEAL_INTERVAL`, so a file that keeps failing costs one rebuild per interval and otherwise
+/// answers `cache_unavailable`. Only the four cache file names are ever touched, never the
+/// main database.
+///
+/// Every open cache connection holds the lock for reading, and a swap holds it for writing,
+/// so no connection to the old file is left to write a journal beside the new one. The
+/// standard lock on Linux prefers a waiting writer: a swap waits only for the connections
+/// already open, and connections asked for meanwhile wait for the swap.
 #[derive(Default)]
 pub(super) struct Heal {
-    last_replaced: Mutex<Option<Instant>>,
+    last_replaced: RwLock<Option<Instant>>,
+}
+
+/// An open cache connection, holding `Heal` for reading until it closes.
+pub(super) struct Cache<'a> {
+    connection: Connection,
+    _held: RwLockReadGuard<'a, Option<Instant>>,
+}
+
+impl Deref for Cache<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        &self.connection
+    }
+}
+
+impl DerefMut for Cache<'_> {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.connection
+    }
 }
 
 enum Check {
@@ -125,16 +151,32 @@ enum Check {
     Unusable,
 }
 
-fn open(
+fn open<'a>(
     profile: &Profile,
     store_id: Uuid,
-    heal: &Heal,
+    heal: &'a Heal,
     create: bool,
-) -> Result<Option<Connection>, StoreError> {
+) -> Result<Option<Cache<'a>>, StoreError> {
+    let held = heal.read()?;
     match inspect(profile, store_id)? {
-        Some(Check::Usable(connection)) => Ok(Some(connection)),
-        None if !create => Ok(None),
-        _ => heal.replace(profile, store_id, false).map(Some),
+        Some(Check::Usable(connection)) => {
+            return Ok(Some(Cache {
+                connection,
+                _held: held,
+            }));
+        }
+        None if !create => return Ok(None),
+        _ => {}
+    }
+    drop(held);
+    heal.replace(profile, store_id, false)?;
+    let held = heal.read()?;
+    match inspect(profile, store_id)? {
+        Some(Check::Usable(connection)) => Ok(Some(Cache {
+            connection,
+            _held: held,
+        })),
+        _ => Err(AppError::Conflict.into()),
     }
 }
 
@@ -149,17 +191,17 @@ impl Heal {
         }
     }
 
-    /// `damaged` replaces a file that passed `inspect` but failed a later read or write.
-    fn replace(
-        &self,
-        profile: &Profile,
-        store_id: Uuid,
-        damaged: bool,
-    ) -> Result<Connection, StoreError> {
-        let mut last = self.last_replaced.lock().map_err(|_| AppError::Internal)?;
+    fn read(&self) -> Result<RwLockReadGuard<'_, Option<Instant>>, StoreError> {
+        Ok(self.last_replaced.read().map_err(|_| AppError::Internal)?)
+    }
+
+    /// `damaged` replaces a file that passed `inspect` but failed a later read or write. The
+    /// caller must not hold a `Cache`, which would wait on itself.
+    fn replace(&self, profile: &Profile, store_id: Uuid, damaged: bool) -> Result<(), StoreError> {
+        let mut last = self.last_replaced.write().map_err(|_| AppError::Internal)?;
         // Another caller may have created or replaced the file while this one waited.
         let found = match inspect(profile, store_id)? {
-            Some(Check::Usable(connection)) if !damaged => return Ok(connection),
+            Some(Check::Usable(_)) if !damaged => return Ok(()),
             found => found.is_some(),
         };
         if found && last.is_some_and(|at| at.elapsed() < HEAL_INTERVAL) {
@@ -179,10 +221,7 @@ impl Heal {
             }
         }
         profile.replace_sibling(&stage.database, SUFFIX)?;
-        match verify(&cache_path(profile), store_id)? {
-            Check::Usable(connection) => Ok(connection),
-            Check::Unusable => Err(AppError::Conflict.into()),
-        }
+        Ok(())
     }
 }
 
