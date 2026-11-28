@@ -33,34 +33,36 @@ async fn rate_window_pauses_only_when_spent() {
     let waited = network
         .bounded_response(Service::GitLab, url, HeaderMap::new(), 64, None)
         .await;
-    assert_eq!(
-        waited.err(),
-        Some(AppError::Source(SourceProblem::Wait(Service::GitLab)))
-    );
+    let Some(AppError::Source(SourceProblem::Wait(Service::GitLab, Some(left)))) = waited.err()
+    else {
+        panic!("the paused call did not fail with GitLab's wait and its length");
+    };
+    assert!(left > Duration::from_secs(500));
     assert_eq!(served.load(Ordering::SeqCst), 2);
 }
 
-/// Calls that wait out one origin's pause hold none of the four shared permits, so another
-/// service's call goes out at once.
+/// Jira's quota field that names a used-up quota pauses its origin, and calls that wait out
+/// that pause hold none of the four shared permits, so another service's call goes out at once.
 #[tokio::test]
 async fn paused_origin_holds_no_permit() {
-    let (gitlab, _) = serve(vec![format!(
-        "HTTP/1.1 200 OK\r\n{}ratelimit-remaining: 0\r\n",
-        window(10)
-    )])
+    let (jira, _) = serve(vec![
+        "HTTP/1.1 200 OK\r\nratelimit: \"jira-burst-based\";r=90;t=1, \"global-app-quota\";r=0;t=10\r\n"
+            .into(),
+    ])
     .await;
-    let (jira, served) = serve(vec!["HTTP/1.1 200 OK\r\n".into()]).await;
+    let (gitlab, served) = serve(vec!["HTTP/1.1 200 OK\r\n".into()]).await;
     let network = Arc::new(SourceNetwork::new().unwrap());
     network
-        .bounded_response(Service::GitLab, gitlab.clone(), HeaderMap::new(), 64, None)
+        .bounded_response(Service::Jira, jira.clone(), HeaderMap::new(), 64, None)
         .await
         .unwrap();
+    assert!(network.paused_for(&jira) > Duration::from_secs(5));
     let waiting: Vec<_> = (0..6)
         .map(|_| {
-            let (network, url) = (network.clone(), gitlab.clone());
+            let (network, url) = (network.clone(), jira.clone());
             tokio::spawn(async move {
                 network
-                    .bounded_response(Service::GitLab, url, HeaderMap::new(), 64, None)
+                    .bounded_response(Service::Jira, url, HeaderMap::new(), 64, None)
                     .await
             })
         })
@@ -70,10 +72,10 @@ async fn paused_origin_holds_no_permit() {
     let started = Instant::now();
     timeout(
         Duration::from_secs(2),
-        network.bounded_response(Service::Jira, jira, HeaderMap::new(), 64, None),
+        network.bounded_response(Service::GitLab, gitlab, HeaderMap::new(), 64, None),
     )
     .await
-    .expect("Jira waited behind GitLab's pause")
+    .expect("GitLab waited behind Jira's pause")
     .unwrap();
     assert!(started.elapsed() < Duration::from_secs(2));
     assert_eq!(served.load(Ordering::SeqCst), 1);

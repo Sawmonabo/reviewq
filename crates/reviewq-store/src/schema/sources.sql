@@ -61,7 +61,10 @@ CREATE TABLE source_refresh_receipts (
     state TEXT NOT NULL CHECK (state IN ('running', 'succeeded', 'failed', 'superseded')),
     finished_at_ms INTEGER,
     total_rows INTEGER CHECK (total_rows >= 0),
-    error TEXT CHECK (error IN ('unavailable', 'too_large', 'interrupted')),
+    error TEXT CHECK (error IN ('unavailable', 'too_large', 'interrupted',
+        'gitlab_refused', 'jira_refused', 'gitlab_wrong_address', 'jira_wrong_address', 'jira_gateway_page',
+        'gitlab_bot_check', 'jira_bot_check', 'gitlab_refused_page', 'jira_refused_page',
+        'gitlab_wait', 'jira_wait')),
     CHECK ((finished_at_ms IS NULL) = (state = 'running')),
     CHECK ((total_rows IS NOT NULL) = (state = 'succeeded')),
     CHECK ((error IS NOT NULL) = (state = 'failed'))

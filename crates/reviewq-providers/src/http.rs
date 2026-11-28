@@ -19,6 +19,8 @@ const MAX_ORIGINS: usize = 64;
 const BODY_LIMIT: usize = 32 * 1024 * 1024;
 /// The name ReviewQ gives every outside service, so the service can tell its requests apart.
 const USER_AGENT: &str = concat!("ReviewQ/", env!("CARGO_PKG_VERSION"));
+/// Atlassian's API gateway, which a scoped Jira token reads Jira through instead of the site.
+pub(crate) const ATLASSIAN_GATEWAY: &str = "api.atlassian.com";
 
 /// Common concurrency, cooldown and connection pooling for provider reads and settings probes.
 pub struct SourceNetwork {
@@ -82,9 +84,9 @@ impl SourceNetwork {
     /// outlasts the deadline: `SourceProblem::Wait` when the service asked for it. A 429 waits
     /// for `Retry-After`, else the rate-limit reset, else a jittered backoff; a 408 or 5xx
     /// waits for `Retry-After`, else the backoff. A 200 that spends the window's last request
-    /// pauses the origin until the reset. A redirect, which ReviewQ never follows, or a web
-    /// page where the API answers JSON fails as `SourceProblem::WrongAddress`, and a bot-check
-    /// page as `SourceProblem::BotCheck`.
+    /// pauses the origin until the reset. Any 401 and a JSON 403 fail as `Forbidden`; other
+    /// answers that are not the API's fail as [`not_api`] names them, with a web page from
+    /// Atlassian's gateway, which the saved site did not send, as `SourceProblem::GatewayPage`.
     pub(crate) async fn get(
         &self,
         service: Service,
@@ -93,6 +95,7 @@ impl SourceNetwork {
         lease: Option<&SourceLease>,
     ) -> Result<Response, AppError> {
         let origin = url.origin().ascii_serialization();
+        let gateway = service == Service::Jira && url.host_str() == Some(ATLASSIAN_GATEWAY);
         let local = match url.host() {
             Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
             Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
@@ -120,8 +123,11 @@ impl SourceNetwork {
             {
                 Ok(response) => {
                     let status = response.status();
-                    if let Some(problem) = not_api(status, response.headers()) {
-                        return Err(AppError::Source(problem(service)));
+                    if let Some(problem) = not_api(service, status, response.headers()) {
+                        return Err(AppError::Source(match problem {
+                            SourceProblem::WrongAddress(_) if gateway => SourceProblem::GatewayPage,
+                            problem => problem,
+                        }));
                     }
                     match status {
                         StatusCode::OK => {
@@ -159,7 +165,7 @@ impl SourceNetwork {
                     drop(permit);
                     if !transient || retry == MAX_RETRIES {
                         return Err(if limited {
-                            AppError::Source(SourceProblem::Wait(service))
+                            self.wait(service, &origin)
                         } else {
                             AppError::Unavailable
                         });
@@ -179,7 +185,20 @@ impl SourceNetwork {
 
     /// How long the service at `origin` still asks ReviewQ to wait, or zero.
     pub(crate) fn paused_for(&self, origin: &Url) -> Duration {
-        self.cooldown_until(&origin.origin().ascii_serialization())
+        self.asked_pause(&origin.origin().ascii_serialization())
+    }
+
+    /// The failure for a call `service` asked to wait, carrying the wait left at `origin`.
+    fn wait(&self, service: Service, origin: &str) -> AppError {
+        let left = self.asked_pause(origin);
+        AppError::Source(SourceProblem::Wait(
+            service,
+            (!left.is_zero()).then_some(left),
+        ))
+    }
+
+    fn asked_pause(&self, origin: &str) -> Duration {
+        self.cooldown_until(origin)
             .ok()
             .flatten()
             .filter(|cooldown| cooldown.asked)
@@ -200,7 +219,7 @@ impl SourceNetwork {
             {
                 if until >= deadline {
                     return Err(if asked {
-                        AppError::Source(SourceProblem::Wait(service))
+                        self.wait(service, origin)
                     } else {
                         AppError::Unavailable
                     });
@@ -305,29 +324,39 @@ fn client(loopback: bool) -> Result<Client, AppError> {
     builder.build().map_err(|_| AppError::Internal)
 }
 
-/// What answered when it was not the API. Cloudflare marks every challenge and block with
-/// `cf-mitigated`. A redirect, which ReviewQ never follows, or an HTML success or refusal is a
-/// web page, as at a saved address that is not the service's own: every endpoint ReviewQ
-/// reads answers in JSON, its errors too. An HTML 408, 429 or 5xx stays a transient fault.
+/// What answered when it was not the API, or `None` for an API answer.
+///
+/// A 401 is refused access whatever it carries: Atlassian answers some with a web page.
+/// Cloudflare marks every challenge and block with `cf-mitigated`. A 403 web page refused
+/// the request, from the service or from something in front of it. A redirect, which
+/// ReviewQ never follows, or a web page on a success or another 4xx answered where the API
+/// answers JSON, its errors too. An HTML 408, 429 or 5xx stays a transient fault.
 /// [Cloudflare](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/)
 fn not_api(
+    service: Service,
     status: StatusCode,
     headers: &header::HeaderMap,
-) -> Option<fn(Service) -> SourceProblem> {
+) -> Option<SourceProblem> {
+    if status == StatusCode::UNAUTHORIZED {
+        return None;
+    }
     if headers.contains_key("cf-mitigated") {
-        return Some(SourceProblem::BotCheck);
+        return Some(SourceProblem::BotCheck(service));
     }
     let html = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.as_bytes().get(..9))
         .is_some_and(|start| start.eq_ignore_ascii_case(b"text/html"));
+    if html && status == StatusCode::FORBIDDEN {
+        return Some(SourceProblem::RefusedPage(service));
+    }
     let page = status.is_success()
         || (status.is_client_error()
             && !matches!(
                 status,
                 StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS
             ));
-    (status.is_redirection() || (html && page)).then_some(SourceProblem::WrongAddress)
+    (status.is_redirection() || (html && page)).then_some(SourceProblem::WrongAddress(service))
 }
 
 /// The wait before retry number `retry + 1` when the service named none. A rate-limit answer

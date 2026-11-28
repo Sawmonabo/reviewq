@@ -497,10 +497,7 @@ async fn check_discussions(
 }
 
 fn loses_access(error: &AppError) -> bool {
-    matches!(
-        error,
-        AppError::Forbidden | AppError::Unauthorized | AppError::NotFound
-    )
+    error.refuses_access() || *error == AppError::NotFound
 }
 
 fn encode(

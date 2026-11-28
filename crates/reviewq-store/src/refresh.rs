@@ -1,4 +1,4 @@
-use reviewq_app::access::{Actor, AppError, AppFuture};
+use reviewq_app::access::{Actor, AppError, AppFuture, Service, SourceProblem};
 use reviewq_app::events::{ResourceKey, Snapshot};
 use reviewq_app::sources::{
     MAX_PUBLICATION_REVIEWS, RefreshAdmission, RefreshAttempt, RefreshReceipt, RefreshState,
@@ -325,19 +325,49 @@ pub(crate) fn read_sync(
     })
 }
 
+/// The stored label of each failure, in the schema's `CHECK` lists. A Settings address
+/// refusal never comes from a refresh, so it stores as `unavailable`.
 fn failure_label(error: SourceFailure) -> &'static str {
+    use SourceProblem::{Address, BotCheck, GatewayPage, Refused, RefusedPage, Wait, WrongAddress};
     match error {
-        SourceFailure::Unavailable => "unavailable",
+        SourceFailure::Unavailable | SourceFailure::Source(Address(_)) => "unavailable",
         SourceFailure::TooLarge => "too_large",
         SourceFailure::Interrupted => "interrupted",
+        SourceFailure::Source(problem) => match problem {
+            Refused(Service::GitLab) => "gitlab_refused",
+            Refused(Service::Jira) => "jira_refused",
+            WrongAddress(Service::GitLab) => "gitlab_wrong_address",
+            WrongAddress(Service::Jira) => "jira_wrong_address",
+            GatewayPage => "jira_gateway_page",
+            BotCheck(Service::GitLab) => "gitlab_bot_check",
+            BotCheck(Service::Jira) => "jira_bot_check",
+            RefusedPage(Service::GitLab) => "gitlab_refused_page",
+            RefusedPage(Service::Jira) => "jira_refused_page",
+            Wait(Service::GitLab, _) => "gitlab_wait",
+            Wait(Service::Jira, _) => "jira_wait",
+            Address(_) => "unavailable",
+        },
     }
 }
 
 fn parse_failure(value: &str) -> Result<SourceFailure, StoreError> {
-    match value {
-        "unavailable" => Ok(SourceFailure::Unavailable),
-        "too_large" => Ok(SourceFailure::TooLarge),
-        "interrupted" => Ok(SourceFailure::Interrupted),
-        _ => Err(AppError::Internal.into()),
-    }
+    use SourceProblem::{BotCheck, GatewayPage, Refused, RefusedPage, Wait, WrongAddress};
+    let problem = match value {
+        "unavailable" => return Ok(SourceFailure::Unavailable),
+        "too_large" => return Ok(SourceFailure::TooLarge),
+        "interrupted" => return Ok(SourceFailure::Interrupted),
+        "gitlab_refused" => Refused(Service::GitLab),
+        "jira_refused" => Refused(Service::Jira),
+        "gitlab_wrong_address" => WrongAddress(Service::GitLab),
+        "jira_wrong_address" => WrongAddress(Service::Jira),
+        "jira_gateway_page" => GatewayPage,
+        "gitlab_bot_check" => BotCheck(Service::GitLab),
+        "jira_bot_check" => BotCheck(Service::Jira),
+        "gitlab_refused_page" => RefusedPage(Service::GitLab),
+        "jira_refused_page" => RefusedPage(Service::Jira),
+        "gitlab_wait" => Wait(Service::GitLab, None),
+        "jira_wait" => Wait(Service::Jira, None),
+        _ => return Err(AppError::Internal.into()),
+    };
+    Ok(SourceFailure::Source(problem))
 }

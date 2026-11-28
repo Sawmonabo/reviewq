@@ -1,8 +1,8 @@
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request};
-use axum::http::StatusCode;
 use axum::http::request::Parts;
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::{AppError, SourceProblem};
 use reviewq_protocol::field_errors::{FieldError, bounded_field_errors};
@@ -86,8 +86,13 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         match self {
             Self::Application(error) => {
+                let wait = retry_after(&error);
                 let (status, failure) = failure(error);
-                (status, Json(failure)).into_response()
+                let mut response = (status, Json(failure)).into_response();
+                if let Some(wait) = wait {
+                    response.headers_mut().insert(header::RETRY_AFTER, wait);
+                }
+                response
             }
             Self::InvalidFields(errors) => field_errors(AppError::InvalidRequest, &capped(errors)),
             Self::Refused(message) => {
@@ -228,20 +233,38 @@ pub(super) fn failure(error: AppError) -> (StatusCode, Failure) {
     )
 }
 
+/// The `Retry-After` header for a reply that fails with `error`: whole seconds, rounded up,
+/// when GitLab or Jira named how long ReviewQ must wait.
+pub(super) fn retry_after(error: &AppError) -> Option<HeaderValue> {
+    let AppError::Source(problem) = error else {
+        return None;
+    };
+    let wait = problem.retry_after()?;
+    let seconds = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
+    Some(HeaderValue::from(seconds.max(1)))
+}
+
 /// The reply status and code for a GitLab or Jira problem: an address to correct is a bad
-/// request, a wait is `busy`, and a wrong saved address or a bot check is an unavailable
-/// service.
+/// request; a wait is `busy`, the service rate-limiting ReviewQ; a web page that refused the
+/// request is `forbidden`, a token problem until shown otherwise; a wrong saved address, a
+/// gateway page or a bot check is an unavailable service.
 fn source_status(problem: SourceProblem) -> (StatusCode, ErrorCode) {
     match problem {
         SourceProblem::Address(_) => (StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest),
-        SourceProblem::Wait(_) => (StatusCode::TOO_MANY_REQUESTS, ErrorCode::Busy),
-        SourceProblem::WrongAddress(_) | SourceProblem::BotCheck(_) => {
-            (StatusCode::SERVICE_UNAVAILABLE, ErrorCode::Unavailable)
+        SourceProblem::Wait(..) => (StatusCode::TOO_MANY_REQUESTS, ErrorCode::Busy),
+        SourceProblem::RefusedPage(_) | SourceProblem::Refused(_) => {
+            (StatusCode::FORBIDDEN, ErrorCode::Forbidden)
         }
+        SourceProblem::WrongAddress(_)
+        | SourceProblem::GatewayPage
+        | SourceProblem::BotCheck(_) => (StatusCode::SERVICE_UNAVAILABLE, ErrorCode::Unavailable),
     }
 }
 
 /// Whether trying again can succeed without the person changing Settings.
 fn source_retryable(problem: SourceProblem) -> bool {
-    matches!(problem, SourceProblem::BotCheck(_) | SourceProblem::Wait(_))
+    matches!(
+        problem,
+        SourceProblem::BotCheck(_) | SourceProblem::GatewayPage | SourceProblem::Wait(..)
+    )
 }

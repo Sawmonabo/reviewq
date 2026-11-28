@@ -465,18 +465,38 @@ async fn poll_source(
             () = tokio::time::sleep(interval) => {},
             () = entry.refresh_wakeup.notified() => {},
         }
-        // A rate-limited service is not asked again until the wait it named is over.
-        if let Some((_, pause)) = entry.source_pause().await {
-            tokio::select! {
-                _ = shutdown.changed() => break,
-                () = tokio::time::sleep(pause) => {},
-            }
+        if !wait_out_pause(
+            || entry.source_pause(),
+            &entry.refresh_wakeup,
+            &mut shutdown,
+        )
+        .await
+        {
+            break;
         }
         tokio::select! {
             _ = shutdown.changed() => break,
             _ = refresh::enqueue(&entry) => {},
         }
     }
+}
+
+/// Waits while `pause` reports a wait GitLab or Jira asked for, so a rate-limited service is
+/// not asked again before then. It checks again after each wait and after each `wakeup`, which
+/// saving Settings sends: a new address can end the wait at once. `false` on shutdown.
+async fn wait_out_pause<F: Future<Output = Option<Duration>>>(
+    pause: impl Fn() -> F,
+    wakeup: &Notify,
+    shutdown: &mut watch::Receiver<bool>,
+) -> bool {
+    while let Some(wait) = pause().await {
+        tokio::select! {
+            _ = shutdown.changed() => return false,
+            () = tokio::time::sleep(wait) => {},
+            () = wakeup.notified() => {},
+        }
+    }
+    true
 }
 
 async fn guard(State(entry): State<Arc<Entry>>, request: Request, next: Next) -> Response {
@@ -578,5 +598,41 @@ impl Entry {
             .workspace_context(Actor::local_operator())
             .await?;
         EventCursorDto::new(snapshot.cursor.get()).ok_or(AppError::Internal)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    use tokio::sync::{Notify, watch};
+
+    /// Saving Settings while a long pause is in force ends the wait once the pause is gone.
+    #[tokio::test]
+    async fn settings_wakeup_ends_a_pause() {
+        let saved = Arc::new(AtomicBool::new(false));
+        let wakeup = Arc::new(Notify::new());
+        let (_stop, mut shutdown) = watch::channel(false);
+        let pause = || {
+            let saved = saved.clone();
+            async move { (!saved.load(Ordering::SeqCst)).then_some(Duration::from_secs(86_400)) }
+        };
+        let save = {
+            let (saved, wakeup) = (saved.clone(), wakeup.clone());
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                saved.store(true, Ordering::SeqCst);
+                wakeup.notify_one();
+            })
+        };
+        let waited = tokio::time::timeout(
+            Duration::from_secs(2),
+            super::wait_out_pause(pause, &wakeup, &mut shutdown),
+        )
+        .await;
+        assert_eq!(waited, Ok(true));
+        save.await.unwrap();
     }
 }

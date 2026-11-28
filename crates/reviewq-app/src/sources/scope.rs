@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use reviewq_domain::identity::{MrIdentity, ProjectId, TicketKey};
 use reviewq_domain::settings::{BoardScope, BoardType, WorkspaceScope};
 
-use crate::access::AppError;
+use crate::access::{AppError, Service};
 use crate::queue::LoadedSprint;
 use crate::queue::ReviewSource;
 use crate::workspace::ConfiguredProject;
@@ -84,7 +84,7 @@ pub(super) async fn collect(
     let mut total_memberships = 0;
     for board in scope.boards.iter().filter(|board| board.selection.enabled) {
         let board_id = board.selection.board_id;
-        let mut issues = issues(jira, board, None).await?;
+        let mut issues = issues(jira, board, None).await.map_err(by_jira)?;
         if observation.issues.len() + issues.len() > MAX_ISSUES {
             return Err(AppError::PayloadTooLarge);
         }
@@ -99,12 +99,13 @@ pub(super) async fn collect(
             }
         }
         if board.board_type == BoardType::Scrum {
-            let sprints = active_sprints(jira, board_id).await?;
+            let sprints = active_sprints(jira, board_id).await.map_err(by_jira)?;
             if observation.sprints.len() + sprints.len() > MAX_SPRINTS {
                 return Err(AppError::PayloadTooLarge);
             }
             for sprint in sprints {
-                for key in self::issues(jira, board, Some(sprint.id)).await?.keys() {
+                let members = self::issues(jira, board, Some(sprint.id)).await;
+                for key in members.map_err(by_jira)?.keys() {
                     let issue = issues.get_mut(key).ok_or(AppError::Conflict)?;
                     total_memberships += 1;
                     if total_memberships > MAX_ASSOCIATIONS {
@@ -126,7 +127,8 @@ pub(super) async fn collect(
             }
             for found in gitlab
                 .ticket_reviews(project.clone(), keys.keys().cloned().collect())
-                .await?
+                .await
+                .map_err(by_gitlab)?
             {
                 let exact = matches_for(&found, keys);
                 open.extend(
@@ -154,7 +156,8 @@ pub(super) async fn collect(
                 project.clone(),
                 keys.keys().cloned().collect(),
             )
-            .await?
+            .await
+            .map_err(by_gitlab)?
             {
                 let exact = matches_for(&found, &keys);
                 add_match(&mut observation, found.review, exact, &mut matches)?;
@@ -169,7 +172,7 @@ pub(super) async fn collect(
             match gitlab.review(identity).await {
                 Ok(review) => observation.owned.push(review),
                 Err(AppError::NotFound) => (),
-                Err(error) => return Err(error),
+                Err(error) => return Err(by_gitlab(error)),
             }
         }
     }
@@ -217,6 +220,16 @@ pub(super) async fn collect(
             .push(LoadedSprint { sprint, tickets });
     }
     Ok(observation)
+}
+
+/// A refusal from a refresh's GitLab read, named as GitLab's for the stored failure.
+fn by_gitlab(error: AppError) -> AppError {
+    error.refused_by(Service::GitLab)
+}
+
+/// A refusal from a refresh's Jira read, named as Jira's for the stored failure.
+fn by_jira(error: AppError) -> AppError {
+    error.refused_by(Service::Jira)
 }
 
 pub(crate) async fn issues(

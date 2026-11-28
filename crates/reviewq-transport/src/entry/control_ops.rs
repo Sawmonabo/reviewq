@@ -162,15 +162,18 @@ pub(super) fn signed(
     success_status: StatusCode,
     result: Result<impl Serialize, AppError>,
 ) -> Result<Response, ApiError> {
+    let mut headers = HeaderMap::new();
     let (status, body) = match result {
         Ok(value) => (success_status, serde_json::to_vec(&value)),
         Err(error) => {
+            if let Some(wait) = super::error::retry_after(&error) {
+                headers.insert(header::RETRY_AFTER, wait);
+            }
             let (status, failure) = super::error::failure(error);
             (status, serde_json::to_vec(&failure))
         }
     };
     let body = body.map_err(|_| AppError::Internal)?;
-    let mut headers = HeaderMap::new();
     headers.insert(
         header::CONTENT_TYPE,
         header::HeaderValue::from_static("application/json"),

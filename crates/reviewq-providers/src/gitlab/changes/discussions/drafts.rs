@@ -266,12 +266,10 @@ fn draft(
 }
 
 fn lost_observation(error: AppError) -> AppError {
-    match error {
-        AppError::Forbidden
-        | AppError::Unauthorized
-        | AppError::NotFound
-        | AppError::PayloadTooLarge => AppError::CursorExpired,
-        other => other,
+    if error.refuses_access() || matches!(error, AppError::NotFound | AppError::PayloadTooLarge) {
+        AppError::CursorExpired
+    } else {
+        error
     }
 }
 

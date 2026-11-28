@@ -281,10 +281,7 @@ fn note_kind(outdated: bool, positioned: bool) -> dto::NoteKind {
 }
 
 fn invalidates(error: &AppError) -> bool {
-    matches!(
-        error,
-        AppError::CursorExpired | AppError::NotFound | AppError::Forbidden | AppError::Unauthorized
-    )
+    error.refuses_access() || matches!(error, AppError::CursorExpired | AppError::NotFound)
 }
 
 fn count(value: usize) -> Result<SafeCountDto, AppError> {

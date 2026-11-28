@@ -153,13 +153,13 @@ impl Jira {
         key: &TicketKey,
         result: Result<T, AppError>,
     ) -> Result<T, AppError> {
-        if matches!(
-            result,
-            Err(AppError::Forbidden
-                | AppError::NotFound
-                | AppError::Conflict
-                | AppError::CursorExpired)
-        ) {
+        if result.as_ref().is_err_and(|error| {
+            error.refuses_access()
+                || matches!(
+                    error,
+                    AppError::NotFound | AppError::Conflict | AppError::CursorExpired
+                )
+        }) {
             self.ticket_cache.remove(key);
         }
         result

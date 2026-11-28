@@ -3,7 +3,7 @@ use reviewq_domain::identity::{
 };
 use reviewq_domain::settings::{BoardScope, CheckoutBinding};
 
-use crate::access::{Actor, AppError, AppFuture};
+use crate::access::{Actor, AppError, AppFuture, Service};
 use crate::changes::ChangeSource;
 use crate::events::Snapshot;
 use crate::queue::{MergeRequestState, ReviewLookup, ReviewSource};
@@ -218,6 +218,26 @@ pub enum SourceFailure {
     Unavailable,
     TooLarge,
     Interrupted,
+    /// GitLab or Jira answered for a reason the queue names in its own sentence. A stored
+    /// wait keeps no length: the background refresh waits it out.
+    Source(crate::access::SourceProblem),
+}
+
+impl SourceFailure {
+    /// What a failed refresh records for `error`. The refresh names the service of each
+    /// refusal with [`AppError::refused_by`], so a plain refusal is not a source's.
+    pub fn of(error: &AppError) -> Self {
+        use crate::access::SourceProblem;
+        match error {
+            AppError::PayloadTooLarge => Self::TooLarge,
+            AppError::Source(SourceProblem::Wait(service, _)) => {
+                Self::Source(SourceProblem::Wait(*service, None))
+            }
+            AppError::Source(SourceProblem::Address(_)) => Self::Unavailable,
+            AppError::Source(problem) => Self::Source(*problem),
+            _ => Self::Unavailable,
+        }
+    }
 }
 
 pub trait SourceRefreshStore: Send + Sync + ProjectHistoryStore {
@@ -278,10 +298,7 @@ pub async fn refresh_queue(
         }
     }
     .await;
-    let observation = result.map_err(|error| match error {
-        AppError::PayloadTooLarge => SourceFailure::TooLarge,
-        _ => SourceFailure::Unavailable,
-    });
+    let observation = result.map_err(|error| SourceFailure::of(&error));
     if let Err(error) = store.finish_refresh(attempt, observation).await {
         let _ = store
             .finish_refresh(attempt, Err(SourceFailure::Unavailable))
@@ -297,7 +314,10 @@ async fn scan(
 ) -> Result<Vec<ReviewSource>, AppError> {
     let mut reviews = Vec::new();
     for project in projects {
-        let records = source.reviews(project).await?;
+        let records = source
+            .reviews(project)
+            .await
+            .map_err(|error| error.refused_by(Service::GitLab))?;
         if records.len() > MAX_PUBLICATION_REVIEWS - reviews.len() {
             return Err(AppError::PayloadTooLarge);
         }

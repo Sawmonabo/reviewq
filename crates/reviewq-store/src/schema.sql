@@ -21,7 +21,10 @@ CREATE TABLE source_refresh (
     started_at_ms INTEGER NOT NULL,
     last_success_at_ms INTEGER,
     active INTEGER NOT NULL CHECK (active IN (0, 1)),
-    error TEXT CHECK (error IN ('unavailable', 'too_large', 'interrupted'))
+    error TEXT CHECK (error IN ('unavailable', 'too_large', 'interrupted',
+        'gitlab_refused', 'jira_refused', 'gitlab_wrong_address', 'jira_wrong_address', 'jira_gateway_page',
+        'gitlab_bot_check', 'jira_bot_check', 'gitlab_refused_page', 'jira_refused_page',
+        'gitlab_wait', 'jira_wait'))
 ) STRICT;
 
 CREATE TABLE configured_projects (

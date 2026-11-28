@@ -102,10 +102,11 @@ impl Jira {
             JiraTokenType::Scoped if fixture => site
                 .join(&format!("ex/jira/{id}/"))
                 .map_err(|_| AppError::Internal)?,
-            JiraTokenType::Scoped => {
-                Url::parse(&format!("https://api.atlassian.com/ex/jira/{id}/"))
-                    .map_err(|_| AppError::Internal)?
-            }
+            JiraTokenType::Scoped => Url::parse(&format!(
+                "https://{}/ex/jira/{id}/",
+                crate::http::ATLASSIAN_GATEWAY
+            ))
+            .map_err(|_| AppError::Internal)?,
         };
         let secret = STANDARD.encode(format!("{email}:{}", token.expose()));
         let mut auth = HeaderValue::from_str(&format!("Basic {secret}"))

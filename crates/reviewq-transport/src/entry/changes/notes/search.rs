@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
-use reviewq_app::access::{AppError, SourceProblem};
+use reviewq_app::access::AppError;
 use reviewq_app::changes::{
     DiscussionAnchor, DiscussionInvalidation, DiscussionPage, DiscussionPageRequest,
     NoteOccurrence, discussion_page_at, note_occurrence,
@@ -255,14 +255,7 @@ pub(in crate::entry) async fn search_notes(
                         .await?;
                     return Err(AppError::CursorExpired.into());
                 }
-                Err(
-                    AppError::Forbidden
-                    | AppError::NotFound
-                    | AppError::Unauthorized
-                    | AppError::Unavailable
-                    | AppError::Source(SourceProblem::WrongAddress(_) | SourceProblem::BotCheck(_))
-                    | AppError::PayloadTooLarge,
-                ) => {
+                Err(error) if error.source_unreadable() || error == AppError::PayloadTooLarge => {
                     drafts_unavailable = true;
                     (
                         Scan {
