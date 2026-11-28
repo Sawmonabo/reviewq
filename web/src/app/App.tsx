@@ -1,30 +1,34 @@
-import { questionDraftValues } from "../lib/question-draft";
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { findRunSession, readOverview, readRun, resolveReview } from "../api/client";
-import type { Notification, RunDetail, SessionSummary } from "../api/generated/contracts";
+import type {
+  Notification,
+  RunDetail,
+  SessionSummary,
+  UninstallReceipt,
+} from "../api/generated/contracts";
 import type { Tab } from "../api/generated/contracts/notifications";
 import { readNotifications } from "../api/workspace";
 import { ActionMenu } from "../components/ActionMenu";
 import { Icon } from "../components/Icon";
-import { Modal } from "../components/Modal";
 import { PanelBoundary } from "../components/PanelBoundary";
 import { Loading, Notice } from "../components/PanelState";
 import { Wordmark } from "../components/Wordmark";
 import { startBrowserAlerts } from "../features/notifications/browser-alerts";
 import { BrowserAlertsButton } from "../features/notifications/BrowserAlertsButton";
 import type { LaunchMode, LaunchTarget } from "../features/queue/types";
+import { UninstallScreen } from "../features/settings/system/UninstallScreen";
 import { useAppearance } from "../hooks/useAppearance";
 import { useResource } from "../hooks/useResource";
 import { WorkspaceRecoveryContext } from "../hooks/useWorkspaceRecovery";
 import { useWorkspaceResource } from "../hooks/useWorkspaceResource";
 import { DraftStore } from "../lib/drafts";
-import { describeError } from "../lib/presentation";
 import { savedValue, saveValue } from "../lib/view-preferences";
 import { WorkspaceWarning } from "./connection/WorkspaceWarning";
 import { useWorkspaceConnection } from "./connection/useWorkspaceConnection";
 import type { WorkspaceConnection } from "./connection/useWorkspaceConnection";
 import { DetailHeader, LoadingDetail } from "./DetailHeader";
+import { DraftDialog } from "./DraftDialog";
 import {
   observeRoute,
   openNotificationRoute,
@@ -67,14 +71,22 @@ type Overlay =
 
 export function App() {
   const { recovery, warning } = useWorkspaceConnection();
+  const [uninstall, setUninstall] = useState<UninstallReceipt>();
+  if (uninstall) return <UninstallScreen receipt={uninstall} />;
   return (
     <WorkspaceRecoveryContext value={recovery}>
-      <Workspace warning={warning} />
+      <Workspace warning={warning} onUninstall={setUninstall} />
     </WorkspaceRecoveryContext>
   );
 }
 
-function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefined }) {
+function Workspace({
+  warning,
+  onUninstall,
+}: {
+  readonly warning: WorkspaceConnection | undefined;
+  readonly onUninstall: (receipt: UninstallReceipt) => void;
+}) {
   const [route, setRoute] = useState(readRoute);
   const [split, setSplit] = useState(() => {
     const saved = savedValue("split");
@@ -722,6 +734,7 @@ function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefi
               appearance={appearance}
               onAppearance={changeAppearance}
               onClose={() => setSettings(false)}
+              onUninstall={onUninstall}
               onSave={() => {
                 setRevision((value) => value + 1);
                 overview.retry();
@@ -789,106 +802,4 @@ function NavIcon({ view }: { readonly view: Route["view"] | "settings" }) {
       )}
     </svg>
   );
-}
-
-function DraftDialog({
-  drafts,
-  onClose,
-  onOpen,
-}: {
-  readonly drafts: DraftStore;
-  readonly onClose: () => void;
-  readonly onOpen: (review: string, run: string, tab: Tab) => void;
-}) {
-  const state = useSyncExternalStore(drafts.subscribe, drafts.getSnapshot);
-  const [notice, setNotice] = useState<string>();
-  return (
-    <Modal title="Unsent drafts" onClose={onClose}>
-      <div className="stack">
-        <p className="meta">
-          Drafts stay in this tab until they’re sent, discarded, or the page reloads.
-        </p>
-        {state.full && (
-          <Notice>Draft storage full. Shorten or discard a draft to make room.</Notice>
-        )}
-        {notice && <Notice>{notice}</Notice>}
-        {!state.entries.length && <p>No unsent drafts.</p>}
-        {state.entries.map((draft) => {
-          const target = draftRoute(draft.key);
-          const text = draftContent(draft.key, draft.text);
-          return (
-            <div className="surface-card stack" key={draft.key}>
-              <strong>{draft.label}</strong>
-              <p className="meta truncate">{text}</p>
-              <div className="actions">
-                {target && (
-                  <button
-                    type="button"
-                    onClick={() => onOpen(target.review, target.run, target.tab)}
-                  >
-                    Open draft target
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    void navigator.clipboard
-                      .writeText(text)
-                      .catch((error: unknown) => setNotice(describeError(error)));
-                  }}
-                >
-                  Copy
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (window.confirm(`Discard unsent draft for ${draft.label}?`))
-                      drafts.set(draft.key, draft.label, "");
-                  }}
-                >
-                  Discard
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </Modal>
-  );
-}
-
-function draftContent(key: string, text: string) {
-  if (key.startsWith('["question",')) return questionDraftValues(text).join(", ");
-  if (!key.startsWith('["quote",')) return text;
-  try {
-    const value: unknown = JSON.parse(text);
-    if (value && typeof value === "object" && "text" in value && typeof value.text === "string")
-      return value.text;
-  } catch {
-    /* Preserve the charged draft string. */
-  }
-  return text;
-}
-
-function draftRoute(key: string): { review: string; run: string; tab: Tab } | undefined {
-  try {
-    const value: unknown = JSON.parse(key);
-    if (
-      Array.isArray(value) &&
-      (value[0] === "message" ||
-        value[0] === "feedback" ||
-        value[0] === "disposition" ||
-        value[0] === "quote") &&
-      typeof value[1] === "string" &&
-      typeof value[2] === "string"
-    ) {
-      return {
-        review: value[1],
-        run: value[2],
-        tab: value[0] === "message" ? "agent" : "findings",
-      };
-    }
-  } catch {
-    /* Draft keys are local to this tab. */
-  }
 }

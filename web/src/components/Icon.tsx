@@ -35,6 +35,7 @@ const paths = {
   warning: "m12 3 10 17H2zm0 6v5m0 3h.01",
   send: "M12 20V4m-6 6 6-6 6 6",
   terminal: "M4 5h16v14H4z m3 4 3 3-3 3m5 0h4",
+  system: "M3 4h18v12H3z M8 20h8 M12 16v4",
 } as const;
 
 export function Icon({

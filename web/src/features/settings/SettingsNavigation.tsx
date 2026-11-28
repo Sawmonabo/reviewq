@@ -36,8 +36,15 @@ const pages = [
     id: "appearance",
     title: "Appearance",
     icon: "palette",
-    group: "Preferences",
+    group: "App",
     description: "Choose how your review queue and reports look in this browser.",
+  },
+  {
+    id: "system",
+    title: "System",
+    icon: "system",
+    group: null,
+    description: "See what is running, install ReviewQ as an app, quit or uninstall.",
   },
 ] as const;
 

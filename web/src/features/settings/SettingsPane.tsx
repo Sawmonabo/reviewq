@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiResponseError } from "../../api/client";
 import { disconnectSettings, readSettings, saveSettings, testConnection } from "../../api/settings";
+import type { UninstallReceipt } from "../../api/generated/contracts";
 import type {
   CatalogItem,
   Identity,
@@ -35,6 +36,7 @@ import { SettingsNavigation, SettingsPage, savedPage } from "./SettingsNavigatio
 import type { Page } from "./SettingsNavigation";
 import { TeamBoards } from "./TeamBoards";
 import { TeamReviewers } from "./TeamReviewers";
+import { SystemPage } from "./system/SystemPage";
 import { useAgentPreferences } from "./useAgentPreferences";
 import "./settings.css";
 
@@ -53,6 +55,7 @@ type Props = {
   readonly onSave: () => void;
   readonly appearance: Appearance;
   readonly onAppearance: (appearance: Appearance) => void;
+  readonly onUninstall: (receipt: UninstallReceipt) => void;
 };
 
 const settingsMark = (
@@ -79,6 +82,7 @@ function UnavailableWorkspace({
   onClose,
   appearance,
   onAppearance,
+  onUninstall,
   pending,
   error,
   onRetry,
@@ -107,6 +111,8 @@ function UnavailableWorkspace({
           <SettingsPage page={active} active={active}>
             {active === "appearance" ? (
               <AppearancePage appearance={appearance} onChange={onAppearance} />
+            ) : active === "system" ? (
+              <SystemPage onUninstall={onUninstall} />
             ) : pending ? (
               <Loading label="Loading workspace settings…" />
             ) : (
@@ -125,6 +131,7 @@ function SettingsEditor({
   onSave,
   appearance,
   onAppearance,
+  onUninstall,
 }: Props & { readonly initial: SettingsView }) {
   const [editor, setEditor] = useState(() => fromSaved(initial));
   const [active, setActive] = useState(() => savedPage(savedValue("settings.page")));
@@ -169,7 +176,12 @@ function SettingsEditor({
     Boolean(tokens.gitlab || tokens.jira) ||
     JSON.stringify(draft) !== JSON.stringify(fromSaved(snapshot).draft);
   const dirty = workspaceDirty || preferences.dirty;
-  const saveArea = active === "appearance" ? undefined : active === "agents" ? active : "workspace";
+  const saveArea =
+    active === "appearance" || active === "system"
+      ? undefined
+      : active === "agents"
+        ? active
+        : "workspace";
   const pageDirty =
     saveArea === "workspace" ? workspaceDirty : saveArea === "agents" && preferences.dirty;
   const footerStatus = busy
@@ -667,6 +679,9 @@ function SettingsEditor({
             </SettingsPage>
             <SettingsPage page="appearance" active={active}>
               <AppearancePage appearance={appearance} onChange={onAppearance} />
+            </SettingsPage>
+            <SettingsPage page="system" active={active}>
+              {active === "system" && <SystemPage onUninstall={onUninstall} />}
             </SettingsPage>
           </form>
         </div>

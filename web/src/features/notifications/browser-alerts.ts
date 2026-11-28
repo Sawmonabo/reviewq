@@ -1,7 +1,6 @@
 import { holdDesktopChannel } from "./desktop-channel";
 
 const permissionChanged = new EventTarget();
-const workerPath = "/notifications-worker.js";
 
 export function browserAlertPermission(): NotificationPermission | "unsupported" {
   // The development preview can be read-only and can proxy a different service.
@@ -39,8 +38,7 @@ export function startBrowserAlerts(openNotification: (id: string) => void) {
     leader = undefined;
   }
   async function connect(channel: AbortSignal) {
-    const registered = await navigator.serviceWorker.register(workerPath, { scope: "/" });
-    const registration = registered.active ? registered : await navigator.serviceWorker.ready;
+    const registration = await navigator.serviceWorker.ready;
     if (channel.aborted) return;
     if (navigator.locks) {
       // Hidden tabs can receive alerts. One tab per browser profile owns delivery.
@@ -73,6 +71,11 @@ export function startBrowserAlerts(openNotification: (id: string) => void) {
     paused = true;
     stopChannel();
   }
+  // The app registers the worker at start. Accept messages only from that worker.
+  let workerUrl: string | undefined;
+  void navigator.serviceWorker.ready.then((registration) => {
+    workerUrl = registration.active?.scriptURL;
+  });
   navigator.serviceWorker.addEventListener(
     "message",
     (event: MessageEvent<unknown>) => {
@@ -81,7 +84,7 @@ export function startBrowserAlerts(openNotification: (id: string) => void) {
       if (
         !source ||
         !("scriptURL" in source) ||
-        source.scriptURL !== new URL(workerPath, location.origin).href ||
+        source.scriptURL !== workerUrl ||
         !data ||
         typeof data !== "object" ||
         !("type" in data)

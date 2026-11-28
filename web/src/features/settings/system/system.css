@@ -1,0 +1,63 @@
+.settings-system {
+  display: grid;
+  gap: 22px;
+}
+.settings-system .settings-policy > button {
+  flex: none;
+}
+.settings-system .settings-policy .notice {
+  margin-top: 8px;
+}
+.settings-facts > div {
+  display: grid;
+  grid-template-columns: min(120px, 34%) minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 16px;
+  min-height: 34px;
+  padding: 5px 16px;
+  font-size: 13px;
+}
+.settings-facts > div:first-child {
+  padding-top: 9px;
+}
+.settings-facts > div:last-child {
+  padding-bottom: 9px;
+}
+.settings-facts dt {
+  color: var(--settings-muted);
+}
+.settings-facts dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.settings-pane button.settings-danger {
+  border-color: currentColor;
+  background: transparent;
+  color: var(--red);
+  font-weight: 550;
+}
+.settings-pane button.settings-danger:hover:not(:disabled) {
+  border-color: var(--red);
+  background: var(--red);
+  color: var(--settings-panel);
+}
+.settings-check-hint {
+  margin: 4px 0 0 21px;
+}
+/* public/stopped.html repeats these rules, since it cannot load the app's styles. */
+.system-screen {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 14px;
+  width: min(480px, calc(100% - 32px));
+  min-height: 100%;
+  margin-inline: auto;
+  padding-block: 48px;
+}
+.system-screen .brand-wordmark {
+  margin-bottom: 14px;
+}
+.system-screen > p {
+  max-width: 62ch;
+}

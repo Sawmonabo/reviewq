@@ -1,0 +1,327 @@
+<!doctype html>
+<!-- The service serves this page with data-door "on" when it runs as the installed service. -->
+<html lang="en" data-door="off">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#09090b" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111215'/%3E%3Cpath d='M4.5 24V8H9a4.5 4.5 0 0 1 0 9H4.5m4.5 0 5.5 7' fill='none' stroke='%23e8e9ed' stroke-width='2.25' stroke-linecap='square'/%3E%3Cg transform='translate(11.5 4.5) scale(.72)' fill='none' stroke-width='3' stroke-linecap='square'%3E%3Cpath d='M22.5 17V12a6.5 6.5 0 0 0-13 0v7a6.5 6.5 0 0 0 6.5 6.5h2' stroke='%23e8e9ed'/%3E%3Cpath d='m17 19 7 7' stroke='%238faeff'/%3E%3C/g%3E%3C/svg%3E"
+    />
+    <title>ReviewQ isn’t running</title>
+    <script>
+      // Follow the appearance the app saved for this address.
+      try {
+        const saved = JSON.parse(localStorage.getItem("reviewq.v1.appearance") ?? "null");
+        const root = document.documentElement;
+        if (saved?.palette === "violet") root.dataset.palette = "violet";
+        const mode = saved?.mode;
+        root.dataset.theme =
+          mode === "light" || mode === "dark"
+            ? mode
+            : mode === "system" && !matchMedia("(prefers-color-scheme: dark)").matches
+              ? "light"
+              : "dark";
+      } catch {
+        // Keep the dark default.
+      }
+    </script>
+    <style>
+      /* This page loads nothing from the service, so it repeats the app's tokens (styles/tokens.css),
+         base rules (styles/base.css), wordmark and .system-screen (settings/system/system.css). */
+      :root {
+        font-family:
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        font-synthesis: none;
+        color-scheme: dark;
+        --canvas: #09090b;
+        --surface: #101013;
+        --raised: #18181c;
+        --hover: #1e1e25;
+        --line: #26262c;
+        --strong-line: #444450;
+        --text: #e4e4e7;
+        --muted: #9999a4;
+        --link: #a7baff;
+        --primary: #cbd2e5;
+        --primary-text: #171a25;
+        --focus: #8198ed;
+        --selection: #36416b;
+        --amber: #d8bd82;
+        --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+      }
+      :root[data-theme="light"] {
+        color-scheme: light;
+        --canvas: #faf9fc;
+        --surface: #fff;
+        --raised: #f0eff5;
+        --hover: #eae8f2;
+        --line: #dcd9e6;
+        --strong-line: #aaa3ba;
+        --text: #252331;
+        --muted: #575364;
+        --link: #324d98;
+        --primary: #3e4b78;
+        --primary-text: #fff;
+        --focus: #415caf;
+        --selection: #354781;
+        --amber: #6c4c10;
+      }
+      :root[data-palette="violet"] {
+        --canvas: light-dark(#f6f7fa, #11131a);
+        --surface: light-dark(#ffffff, #1d2029);
+        --raised: light-dark(#f0f2f7, #242832);
+        --hover: light-dark(#ecedf6, #292d38);
+        --line: light-dark(#e1e4ee, #343845);
+        --strong-line: light-dark(#aaa8c0, #575568);
+        --text: light-dark(#222638, #f3f4f7);
+        --muted: light-dark(#5d6176, #a0a6b5);
+        --link: light-dark(#5243b6, #b6a9ff);
+        --focus: light-dark(#6050d6, #a49bff);
+        --primary: light-dark(#5648bc, #b7a9ff);
+        --primary-text: light-dark(#fff, #1e1634);
+        --selection: light-dark(#514a91, #514777);
+        --amber: light-dark(#805219, #ebbd79);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        background: var(--canvas);
+        color: var(--text);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      h1,
+      p {
+        margin: 0;
+      }
+      h1 {
+        font-size: 25px;
+        font-weight: 650;
+        line-height: 1.2;
+        letter-spacing: -0.55px;
+      }
+      button {
+        min-width: 0;
+        min-height: 31px;
+        padding: 5px 9px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: var(--raised);
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      button:hover:not(:disabled) {
+        background: var(--hover);
+        border-color: var(--strong-line);
+      }
+      button:disabled {
+        cursor: default;
+        opacity: 0.52;
+      }
+      button.primary {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: var(--primary-text);
+        font-weight: 650;
+      }
+      button.primary:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--primary), var(--link) 18%);
+      }
+      code {
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      :focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 3px;
+      }
+      ::selection {
+        background: var(--selection);
+        color: #fff;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+      .notice {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-left: 2px solid var(--amber);
+        border-radius: 5px;
+        background: var(--surface);
+        color: var(--text);
+        overflow-wrap: anywhere;
+      }
+      .brand-wordmark {
+        display: flex;
+        align-items: center;
+        gap: 1px;
+        font-size: 25px;
+        font-weight: 600;
+        letter-spacing: -1.1px;
+        line-height: 1.2;
+      }
+      .brand-q {
+        width: 20px;
+        height: 26px;
+      }
+      .system-screen {
+        display: grid;
+        align-content: center;
+        justify-items: start;
+        gap: 14px;
+        width: min(480px, calc(100% - 32px));
+        min-height: 100%;
+        margin-inline: auto;
+        padding-block: 48px;
+      }
+      .system-screen .brand-wordmark {
+        margin-bottom: 14px;
+      }
+      .system-screen > p {
+        max-width: 62ch;
+      }
+      @media (pointer: coarse) {
+        button {
+          min-height: 44px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="system-screen">
+      <span class="brand-wordmark" aria-hidden="true"
+        ><span>Review</span
+        ><svg class="brand-q" viewBox="7 3 20 26">
+          <path
+            d="M22.5 17V12a6.5 6.5 0 0 0-13 0v7a6.5 6.5 0 0 0 6.5 6.5h2"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="3"
+            stroke-linecap="square"
+          />
+          <path
+            d="m17 19 7 7"
+            fill="none"
+            stroke="var(--link)"
+            stroke-width="3"
+            stroke-linecap="square"
+          /></svg
+      ></span>
+      <h1>ReviewQ isn’t running</h1>
+      <p class="meta" data-show="off" hidden>Start the server again, then reload this page.</p>
+      <div class="actions" data-show="idle starting unreached nostart" hidden>
+        <button type="button" class="primary" id="start">Start ReviewQ</button>
+      </div>
+      <p class="meta" data-show="idle starting" hidden>
+        If you uninstalled ReviewQ, remove this app: right-click its icon and choose Uninstall.
+      </p>
+      <div class="notice" role="alert" data-show="unreached" hidden>
+        <span
+          >Couldn’t reach ReviewQ. If you uninstalled it, remove this app: right-click its icon and
+          choose Uninstall. Otherwise, its logs show why it can’t start:</span
+        >
+        <span class="actions"
+          ><code>reviewq logs</code><button type="button" data-copy>Copy</button></span
+        >
+      </div>
+      <div class="notice" role="alert" data-show="nostart" hidden>
+        <span>ReviewQ didn’t start.</span>
+        <span class="actions"
+          ><code>reviewq logs</code><button type="button" data-copy>Copy</button></span
+        >
+      </div>
+    </main>
+    <script>
+      (() => {
+        // systemd holds the start port, the dashboard port + 4, while ReviewQ is stopped. Keep the
+        // default referrer policy: the start port accepts only this page's Origin header.
+        const startUrl = `http://127.0.0.1:${Number(location.port) + 4}/start`;
+        const startButton = document.getElementById("start");
+        const copyButtons = document.querySelectorAll("[data-copy]");
+
+        function show(state) {
+          for (const node of document.querySelectorAll("[data-show]"))
+            node.hidden = !node.dataset.show.split(" ").includes(state);
+          startButton.disabled = state === "starting";
+          startButton.textContent = startButton.disabled ? "Starting…" : "Start ReviewQ";
+          for (const button of copyButtons) button.textContent = "Copy";
+        }
+
+        async function running() {
+          try {
+            const response = await fetch("/", {
+              cache: "no-store",
+              signal: AbortSignal.timeout(2000),
+            });
+            return response.status === 200;
+          } catch {
+            return false;
+          }
+        }
+
+        async function start() {
+          show("starting");
+          const sent = fetch(startUrl, {
+            method: "POST",
+            mode: "no-cors",
+            signal: AbortSignal.timeout(5000),
+          }).then(
+            () => true,
+            () => false,
+          );
+          const deadline = Date.now() + 30000;
+          while (Date.now() < deadline) {
+            if (await running()) {
+              if (location.pathname === "/stopped.html") location.replace("/");
+              else location.reload();
+              return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+          show((await sent) ? "nostart" : "unreached");
+        }
+
+        show(document.documentElement.dataset.door === "on" ? "idle" : "off");
+        startButton.addEventListener("click", () => void start());
+        for (const button of copyButtons)
+          button.addEventListener("click", () =>
+            navigator.clipboard.writeText("reviewq logs").then(
+              () => (button.textContent = "Copied"),
+              () => {},
+            ),
+          );
+      })();
+    </script>
+  </body>
+</html>

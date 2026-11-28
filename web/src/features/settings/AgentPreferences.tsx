@@ -66,13 +66,15 @@ export function AgentPreferences({
   );
 }
 
-function Policy({
+export function Policy({
   title,
   description,
+  notice,
   children,
 }: {
   readonly title: string;
   readonly description: string;
+  readonly notice?: ReactNode;
   readonly children: ReactNode;
 }) {
   return (
@@ -80,13 +82,14 @@ function Policy({
       <div>
         <strong>{title}</strong>
         <p className="meta">{description}</p>
+        {notice}
       </div>
       {children}
     </div>
   );
 }
 
-function Switch({
+export function Switch({
   label,
   checked,
   onChange,

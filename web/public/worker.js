@@ -1,6 +1,36 @@
-// This worker handles notification clicks only. Browser and API reads stay online.
-self.addEventListener("install", (event) => event.waitUntil(self.skipWaiting()));
+// This worker handles notification clicks and shows the stopped page when a page load cannot reach
+// ReviewQ. Every other request goes to the network. Only the app writes the stopped-page cache.
+const STOPPED_CACHE = "reviewq-stopped";
+
+self.addEventListener("install", (event) =>
+  event.waitUntil(Promise.all([bypassWorker(event), self.skipWaiting()])),
+);
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+
+self.addEventListener("fetch", (event) => {
+  if (event.request.mode !== "navigate") return;
+  event.respondWith(
+    fetch(event.request).catch(
+      async () =>
+        (await caches.match("/stopped.html", { cacheName: STOPPED_CACHE })) ?? Response.error(),
+    ),
+  );
+});
+
+// Where the browser supports static routes, API and asset requests never start the worker.
+async function bypassWorker(event) {
+  if (!event.addRoutes) return;
+  try {
+    await event.addRoutes(
+      ["/api/*", "/assets/*"].map((pathname) => ({
+        condition: { urlPattern: new URLPattern({ pathname }) },
+        source: "network",
+      })),
+    );
+  } catch {
+    // The fetch handler returns at once for these requests.
+  }
+}
 
 self.addEventListener("notificationclick", (event) => {
   const id = event.notification.data?.notificationId;

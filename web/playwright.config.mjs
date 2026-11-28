@@ -8,6 +8,9 @@ export default defineConfig({
   retries: 0,
   use: {
     ...(externalUrl && { baseURL: externalUrl }),
+    // A production build registers a service worker, and page.route cannot see requests that
+    // pass through one.
+    serviceWorkers: "block",
     trace: "retain-on-failure",
   },
   webServer: externalUrl
