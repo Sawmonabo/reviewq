@@ -244,29 +244,6 @@ const schema488 = {
   enum: ["installed", "foreground", "validation"],
   type: "string",
 };
-const schema498 = {
-  properties: {
-    author: { type: ["string", "null"] },
-    authorId: { type: ["string", "null"] },
-    body: { type: "string" },
-    createdAt: { $ref: "#/definitions/UtcTimestampDto" },
-    id: { $ref: "#/definitions/MergeRequestIidDto" },
-    updatedAt: {
-      anyOf: [{ $ref: "#/definitions/UtcTimestampDto" }, { type: "null" }],
-    },
-    url: { type: "string" },
-  },
-  required: [
-    "id",
-    "url",
-    "author",
-    "authorId",
-    "body",
-    "createdAt",
-    "updatedAt",
-  ],
-  type: "object",
-};
 export {
   schema456,
   schema458,
@@ -283,5 +260,4 @@ export {
   schema484,
   schema487,
   schema488,
-  schema498,
 };

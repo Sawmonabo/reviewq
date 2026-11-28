@@ -3,6 +3,7 @@ import type { FocusEvent } from "react";
 import { Icon } from "../../components/Icon";
 import { formatTime } from "../../lib/presentation";
 import type { WorkspaceConnection } from "./useWorkspaceConnection";
+import "../../components/popover.css";
 import "./connection.css";
 
 export function WorkspaceWarning({ connection }: { readonly connection: WorkspaceConnection }) {
@@ -66,7 +67,7 @@ export function WorkspaceWarning({ connection }: { readonly connection: Workspac
         popover="auto"
         role="dialog"
         aria-labelledby={`${id}-title`}
-        className="filter-popup workspace-warning-popup"
+        className="popover filter-popup workspace-warning-popup"
         onToggle={(event) => {
           const expanded = event.newState === "open";
           setOpen(expanded);

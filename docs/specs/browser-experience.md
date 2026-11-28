@@ -95,6 +95,14 @@ A jump belongs to one review, its exact GitLab diff revision and a verified file
 
 The closed button shows the basename, current file position (for example, “3 of 12”) and trailing caret on one line. Align the caret vertically with the filename. Show folder context in the open picker and the full path on hover. Place a single Filters button beside the Changes views. It shows the active filter count and opens the participant and resolution choices together. Applying or resetting a choice preserves the file query.
 
+### Jump to a finding
+
+A report version with two or more finding cards shows a findings button, such as “8 findings ⌄”, on the right of the level-two heading of the section that holds the first card. It adds no height. Its label is drawn, not written, so the report’s text, selection, copy, quotes and browser Find never include it. A screen reader hears “Jump to one of 8 findings”, a button that opens a dialog. A version with one card or none has no button.
+
+The button opens a list of every card in the version on screen, also an earlier version opened from History. Group the rows under “Blocking · n” and then “Nonblocking · n”, in report order within each group, and hide an empty group. A row shows the card’s colour bar, ID, title, category, first location and severity, exactly as the card prints them. Blocking is the value the card printed when the version was published, even when the reviewer’s current disposition differs. A windowed report reads these from its layout, without reading report text. When the layout lacks a card’s text, the whole report opens and the list fills from it.
+
+Focus starts in the filter field. Typing filters by ID, title, category or location, ignoring case, and “Nothing matches.” replaces an empty list. Up and Down choose a row, Enter or a click jumps to it, and Escape closes the list and returns focus to the button. A jump closes the list, brings the card to the top of the panel and moves focus to it. The card outlines briefly, with no outline when reduced motion is preferred. After keyboard use, including typing in the filter, the card keeps the focus ring until focus leaves it, also in forced colours. A jump made only with the pointer leaves no lasting ring. The section navigation jumps through the same path.
+
 ### Full document and bounded source modes
 
 The following initial limits apply before fetching a body for rich rendering. A physical line includes ordinary code, hunk headers and metadata. Count bytes in the original UTF-8, count an unterminated final line, and exclude LF or CRLF terminators from the longest-line measurement. Each limit is inclusive. Missing trustworthy size information selects bounded range retrieval.

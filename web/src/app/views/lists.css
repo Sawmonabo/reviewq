@@ -43,10 +43,8 @@
 .filter-control:is(:focus-within, [aria-expanded="true"]) {
   border-color: var(--focus);
 }
+/* With the shared `.popover` surface. */
 .filter-popup {
-  position: fixed;
-  inset: auto;
-  margin: 6px 0;
   position-area: block-end span-inline-end;
   position-try-fallbacks:
     flip-inline,
@@ -57,17 +55,8 @@
   max-height: calc(100dvh - 32px);
   padding: 0;
   overflow: auto;
-  color: var(--text);
-  background: var(--popup-bg);
-  border: 1px solid var(--popup-border);
   border-radius: 6px;
   box-shadow: 0 10px 30px #0008;
-}
-@supports not (position-area: block-end span-inline-end) {
-  .filter-popup {
-    inset: 20% 0 auto;
-    margin-inline: auto;
-  }
 }
 .select-filter > select {
   position: absolute;

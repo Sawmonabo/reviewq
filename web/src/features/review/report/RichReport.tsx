@@ -454,6 +454,7 @@ export function RichReport({
             busy={stage && !destinationReady && cards.includes(destination ?? -1)}
             boundary={scroll}
             onJump={jumpToFinding}
+            onFallback={onFallback}
           />
         )}
         {card ?? (

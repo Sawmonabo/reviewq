@@ -1,0 +1,17 @@
+/* The popup surface in the top layer, a little below its button. Each popup places, sizes, pads
+   and shades itself. */
+.popover {
+  position: fixed;
+  inset: auto;
+  margin: 6px 0;
+  color: var(--text);
+  background: var(--popup-bg);
+  border: 1px solid var(--popup-border);
+}
+/* Without anchor positioning, centered near the top of the window. */
+@supports not (position-area: block-end) {
+  .popover {
+    inset: 20% 0 auto;
+    margin-inline: auto;
+  }
+}

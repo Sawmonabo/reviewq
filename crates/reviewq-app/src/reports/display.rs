@@ -1,12 +1,14 @@
 //! Native source spans for a published report version. Browser admission still uses its own validator.
 
+mod cards;
 mod cutter;
 
 pub use cutter::{DisplayBlock, DisplayBlockKind, DisplayFallback, HtmlRendering};
 
 use super::ReportSummary;
 
-pub const DISPLAY_INDEX_FORMAT: u32 = 2;
+/// Format 3 adds each finding card's leading Markdown to the layout.
+pub const DISPLAY_INDEX_FORMAT: u32 = 3;
 pub const MAX_DISPLAY_BLOCKS: usize = 512;
 pub const MAX_DISPLAY_HEADING_BYTES: usize = 1024;
 pub const MAX_DISPLAY_HEADINGS_BYTES: usize = 16 * 1024;
@@ -62,9 +64,14 @@ pub fn build_display_index(source: &str) -> DisplayIndex {
 }
 
 /// Index a published report version's text, whose reader shows raw HTML as text, so HTML
-/// keeps the windowed reader. Otherwise as `build_display_index`.
+/// keeps the windowed reader. Each finding card's card line and Location field also carry
+/// their leading Markdown for the findings list. Otherwise as `build_display_index`.
 pub fn build_report_display_index(source: &str) -> DisplayIndex {
-    display_index(source, HtmlRendering::Text)
+    let mut index = display_index(source, HtmlRendering::Text);
+    if let DisplayIndex::Indexed(layout) = &mut index {
+        cards::mark(source, &mut layout.blocks);
+    }
+    index
 }
 
 /// Index `source` for a reader that renders raw HTML as `html` says: `build_display_index`

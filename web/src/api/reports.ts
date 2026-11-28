@@ -61,7 +61,7 @@ export async function reportWindow(
   );
   const returned = result.data.report;
   if (
-    result.data.indexFormat !== 2 ||
+    result.data.indexFormat !== 3 ||
     returned.receiptId !== report.receiptId ||
     returned.sha256 !== report.sha256 ||
     returned.byteLength !== report.byteLength ||

@@ -77,73 +77,21 @@ function validate1413(
           }
           if (valid0) {
             if (
-              data.headingLevel !== undefined &&
-              func0.call(data, "headingLevel")
+              data.cardMarkdown !== undefined &&
+              func0.call(data, "cardMarkdown")
             ) {
-              let data2 = data.headingLevel;
+              let data2 = data.cardMarkdown;
               const _errs3 = errors;
-              const _errs4 = errors;
-              let valid1 = false;
-              const _errs5 = errors;
-              if (
-                !validate131(data2, {
-                  instancePath: instancePath + "/headingLevel",
-                  parentData: data,
-                  parentDataProperty: "headingLevel",
-                  rootData,
-                })
-              ) {
-                vErrors =
-                  vErrors === null
-                    ? validate131.errors
-                    : vErrors.concat(validate131.errors);
-                errors = vErrors.length;
-              }
-              var _valid0 = _errs5 === errors;
-              valid1 = valid1 || _valid0;
-              if (!valid1) {
-                const _errs6 = errors;
-                if (data2 !== null) {
-                  const err0 = {
-                    instancePath: instancePath + "/headingLevel",
-                    schemaPath: "#/properties/headingLevel/anyOf/1/type",
+              if (typeof data2 !== "string" && data2 !== null) {
+                validate1413.errors = [
+                  {
+                    instancePath: instancePath + "/cardMarkdown",
+                    schemaPath: "#/properties/cardMarkdown/type",
                     keyword: "type",
-                    params: { type: "null" },
-                  };
-                  if (vErrors === null) {
-                    vErrors = [err0];
-                  } else {
-                    vErrors.push(err0);
-                  }
-                  errors++;
-                }
-                var _valid0 = _errs6 === errors;
-                valid1 = valid1 || _valid0;
-              }
-              if (!valid1) {
-                const err1 = {
-                  instancePath: instancePath + "/headingLevel",
-                  schemaPath: "#/properties/headingLevel/anyOf",
-                  keyword: "anyOf",
-                  params: {},
-                };
-                if (vErrors === null) {
-                  vErrors = [err1];
-                } else {
-                  vErrors.push(err1);
-                }
-                errors++;
-                validate1413.errors = vErrors;
+                    params: { type: schema418.properties.cardMarkdown.type },
+                  },
+                ];
                 return false;
-              } else {
-                errors = _errs4;
-                if (vErrors !== null) {
-                  if (_errs4) {
-                    vErrors.length = _errs4;
-                  } else {
-                    vErrors = null;
-                  }
-                }
               }
               var valid0 = _errs3 === errors;
             } else {
@@ -151,84 +99,134 @@ function validate1413(
             }
             if (valid0) {
               if (
-                data.headingMarkdown !== undefined &&
-                func0.call(data, "headingMarkdown")
+                data.headingLevel !== undefined &&
+                func0.call(data, "headingLevel")
               ) {
-                let data3 = data.headingMarkdown;
-                const _errs8 = errors;
-                if (typeof data3 !== "string" && data3 !== null) {
-                  validate1413.errors = [
-                    {
-                      instancePath: instancePath + "/headingMarkdown",
-                      schemaPath: "#/properties/headingMarkdown/type",
-                      keyword: "type",
-                      params: {
-                        type: schema418.properties.headingMarkdown.type,
-                      },
-                    },
-                  ];
-                  return false;
+                let data3 = data.headingLevel;
+                const _errs5 = errors;
+                const _errs6 = errors;
+                let valid1 = false;
+                const _errs7 = errors;
+                if (
+                  !validate131(data3, {
+                    instancePath: instancePath + "/headingLevel",
+                    parentData: data,
+                    parentDataProperty: "headingLevel",
+                    rootData,
+                  })
+                ) {
+                  vErrors =
+                    vErrors === null
+                      ? validate131.errors
+                      : vErrors.concat(validate131.errors);
+                  errors = vErrors.length;
                 }
-                var valid0 = _errs8 === errors;
+                var _valid0 = _errs7 === errors;
+                valid1 = valid1 || _valid0;
+                if (!valid1) {
+                  const _errs8 = errors;
+                  if (data3 !== null) {
+                    const err0 = {
+                      instancePath: instancePath + "/headingLevel",
+                      schemaPath: "#/properties/headingLevel/anyOf/1/type",
+                      keyword: "type",
+                      params: { type: "null" },
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err0];
+                    } else {
+                      vErrors.push(err0);
+                    }
+                    errors++;
+                  }
+                  var _valid0 = _errs8 === errors;
+                  valid1 = valid1 || _valid0;
+                }
+                if (!valid1) {
+                  const err1 = {
+                    instancePath: instancePath + "/headingLevel",
+                    schemaPath: "#/properties/headingLevel/anyOf",
+                    keyword: "anyOf",
+                    params: {},
+                  };
+                  if (vErrors === null) {
+                    vErrors = [err1];
+                  } else {
+                    vErrors.push(err1);
+                  }
+                  errors++;
+                  validate1413.errors = vErrors;
+                  return false;
+                } else {
+                  errors = _errs6;
+                  if (vErrors !== null) {
+                    if (_errs6) {
+                      vErrors.length = _errs6;
+                    } else {
+                      vErrors = null;
+                    }
+                  }
+                }
+                var valid0 = _errs5 === errors;
               } else {
                 var valid0 = true;
               }
               if (valid0) {
-                if (data.kind !== undefined && func0.call(data, "kind")) {
+                if (
+                  data.headingMarkdown !== undefined &&
+                  func0.call(data, "headingMarkdown")
+                ) {
+                  let data4 = data.headingMarkdown;
                   const _errs10 = errors;
-                  if (
-                    !validate657(data.kind, {
-                      instancePath: instancePath + "/kind",
-                      parentData: data,
-                      parentDataProperty: "kind",
-                      rootData,
-                    })
-                  ) {
-                    vErrors =
-                      vErrors === null
-                        ? validate657.errors
-                        : vErrors.concat(validate657.errors);
-                    errors = vErrors.length;
+                  if (typeof data4 !== "string" && data4 !== null) {
+                    validate1413.errors = [
+                      {
+                        instancePath: instancePath + "/headingMarkdown",
+                        schemaPath: "#/properties/headingMarkdown/type",
+                        keyword: "type",
+                        params: {
+                          type: schema418.properties.headingMarkdown.type,
+                        },
+                      },
+                    ];
+                    return false;
                   }
                   var valid0 = _errs10 === errors;
                 } else {
                   var valid0 = true;
                 }
                 if (valid0) {
-                  if (
-                    data.scalarStart !== undefined &&
-                    func0.call(data, "scalarStart")
-                  ) {
-                    const _errs11 = errors;
+                  if (data.kind !== undefined && func0.call(data, "kind")) {
+                    const _errs12 = errors;
                     if (
-                      !validate131(data.scalarStart, {
-                        instancePath: instancePath + "/scalarStart",
+                      !validate657(data.kind, {
+                        instancePath: instancePath + "/kind",
                         parentData: data,
-                        parentDataProperty: "scalarStart",
+                        parentDataProperty: "kind",
                         rootData,
                       })
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate131.errors
-                          : vErrors.concat(validate131.errors);
+                          ? validate657.errors
+                          : vErrors.concat(validate657.errors);
                       errors = vErrors.length;
                     }
-                    var valid0 = _errs11 === errors;
+                    var valid0 = _errs12 === errors;
                   } else {
                     var valid0 = true;
                   }
                   if (valid0) {
                     if (
-                      data.utf16Start !== undefined &&
-                      func0.call(data, "utf16Start")
+                      data.scalarStart !== undefined &&
+                      func0.call(data, "scalarStart")
                     ) {
-                      const _errs12 = errors;
+                      const _errs13 = errors;
                       if (
-                        !validate131(data.utf16Start, {
-                          instancePath: instancePath + "/utf16Start",
+                        !validate131(data.scalarStart, {
+                          instancePath: instancePath + "/scalarStart",
                           parentData: data,
-                          parentDataProperty: "utf16Start",
+                          parentDataProperty: "scalarStart",
                           rootData,
                         })
                       ) {
@@ -238,9 +236,34 @@ function validate1413(
                             : vErrors.concat(validate131.errors);
                         errors = vErrors.length;
                       }
-                      var valid0 = _errs12 === errors;
+                      var valid0 = _errs13 === errors;
                     } else {
                       var valid0 = true;
+                    }
+                    if (valid0) {
+                      if (
+                        data.utf16Start !== undefined &&
+                        func0.call(data, "utf16Start")
+                      ) {
+                        const _errs14 = errors;
+                        if (
+                          !validate131(data.utf16Start, {
+                            instancePath: instancePath + "/utf16Start",
+                            parentData: data,
+                            parentDataProperty: "utf16Start",
+                            rootData,
+                          })
+                        ) {
+                          vErrors =
+                            vErrors === null
+                              ? validate131.errors
+                              : vErrors.concat(validate131.errors);
+                          errors = vErrors.length;
+                        }
+                        var valid0 = _errs14 === errors;
+                      } else {
+                        var valid0 = true;
+                      }
                     }
                   }
                 }

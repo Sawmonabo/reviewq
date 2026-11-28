@@ -60,7 +60,7 @@ CREATE TABLE display_spans (
     utf16_start INTEGER NOT NULL CHECK (utf16_start BETWEEN scalar_start AND byte_start),
     kind TEXT NOT NULL,
     heading_level INTEGER CHECK (heading_level BETWEEN 1 AND 6),
-    heading_markdown TEXT CHECK (length(CAST(heading_markdown AS BLOB))<=1024),
+    lead_markdown TEXT CHECK (length(CAST(lead_markdown AS BLOB))<=1024),
     checksum BLOB NOT NULL CHECK (length(checksum)=32),
     CHECK ((kind='heading')=(heading_level IS NOT NULL)),
     PRIMARY KEY (entry_id, byte_start)

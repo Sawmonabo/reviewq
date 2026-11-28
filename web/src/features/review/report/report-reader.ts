@@ -26,10 +26,8 @@ type Group = GroupPosition & {
 export type ReaderDocument = {
   readonly groups: readonly GroupPosition[];
   readonly prepared: (index: number) => PreparedGroup | undefined;
-  // The card a finding group holds, once the reader has read it.
+  // What the card of a finding group says about itself, or `undefined` when its text is unknown.
   readonly finding: (index: number) => FindingSummary | undefined;
-  // Reads the cards of finding groups a windowed reader has not read yet.
-  readonly readFindings?: (indexes: readonly number[], signal: AbortSignal) => Promise<void>;
   readonly byteAt?: (index: number) => number | undefined;
   readonly prepare?: (
     indexes: readonly number[],
@@ -108,8 +106,8 @@ export function indexedDocument(
   const raw = new Map<number, DisplayBlock>();
   const prepared = new Map<number, PreparedGroup>();
   const retainedCost = new Map<number, number>();
-  // Each card's summary outlives its prepared group, so the findings list never reads it again.
-  const findings = new Map<number, FindingSummary>();
+  // Read from the layout on the first request, which comes from the findings list.
+  let leads: ReadonlyMap<number, FindingSummary> | undefined;
   let previousPins = new Set<number>();
 
   function receive(blocks: readonly DisplayBlock[], destination: number) {
@@ -178,7 +176,6 @@ export function indexedDocument(
       drawings: drawings.size ? [...drawings.values()] : undefined,
     });
     retainedCost.set(index, sourceBytes + (provision ? extra : 0));
-    if (block.finding) findings.set(index, summary(block.finding));
     for (let i = group.first; i <= group.last; i++) raw.delete(i);
     return true;
   }
@@ -308,65 +305,43 @@ export function indexedDocument(
     }
   }
 
-  // Reads only each card's heading, card line and first field, several cards to a window, and
-  // leaves the prepared groups and their byte ledger as they are.
-  async function readFindings(indexes: readonly number[], signal: AbortSignal) {
-    const cards = indexes.filter((index) => groups[index]?.findingId && !findings.has(index));
-    const lead = (index: number) => {
-      const group = groups[index]!;
-      return { first: group.first, last: Math.min(group.first + 2, group.last) };
-    };
-    for (let start = 0; start < cards.length;) {
-      const first = lead(cards[start]!).first;
-      let last = lead(cards[start]!).last;
-      let end = start + 1;
-      for (; end < cards.length; end++) {
-        const next = lead(cards[end]!).last;
-        if (next - first >= 32 || spans[next]!.byteEnd - spans[first]!.byteStart > RANGE_BYTES)
-          break;
-        last = next;
-      }
-      const { data } = await reportWindow(runId, report, signal, {
-        byteOffset: spans[first]!.byteStart,
-        byteEnd: spans[last]!.byteEnd,
-      });
-      signal.throwIfAborted();
-      const result = data.result;
-      if (
-        result.state !== "ready" ||
-        result.totalBlocks !== spans.length ||
-        result.blocks.length !== last - first + 1 ||
-        result.blocks.some((block, i) => block.byteStart !== spans[first + i]!.byteStart)
-      )
-        throw new Error("The report's findings are unavailable.");
-      for (const index of cards.slice(start, end)) {
-        const card = lead(index);
-        const text = result.blocks
-          .slice(card.first - first, card.last - first + 1)
-          .map((block) => block.markdown)
-          .join("");
-        const tree = parseMarkdown(text, base, reportMarkdown);
-        const finding = tree && reportBlocks(tree, text, changes, { previousThreads: false })[0];
-        if (!finding?.finding || finding.findingId !== groups[index]!.findingId)
-          throw new Error("The report's findings changed.");
-        findings.set(index, summary(finding.finding));
-      }
-      start = end;
-    }
-  }
-
   return {
     groups,
     prepared: (index) => prepared.get(index),
-    finding: (index) => findings.get(index),
-    readFindings,
+    finding: (index) => {
+      leads ??= cardLeads(spans, groups, base);
+      return leads.get(index) ?? prepared.get(index)?.block.finding;
+    },
     byteAt: (index) => spans[groups[index]!.first]!.byteStart,
     prepare,
   };
 }
 
-function summary({ id, title, severity, category, blocking, location }: FindingSummary) {
-  return { id, title, severity, category, blocking, ...(location && { location }) };
+// Each card's heading, card line and first location, which the layout carries, read with the
+// card parser in one pass. A card without that text has no summary here.
+function cardLeads(
+  spans: DisplayLayout["blocks"],
+  groups: readonly Group[],
+  base: string | undefined,
+) {
+  const owners = new Map<string, number>();
+  const texts: string[] = [];
+  for (const [index, group] of groups.entries()) {
+    const [heading, line, location] = spans.slice(group.first, group.last + 1);
+    if (!group.findingId || !heading?.headingMarkdown || !line?.cardMarkdown) continue;
+    owners.set(group.findingId, index);
+    texts.push(heading.headingMarkdown, line.cardMarkdown, location?.cardMarkdown ?? "");
+  }
+  const leads = new Map<number, FindingSummary>();
+  const text = texts.filter(Boolean).join("\n\n");
+  const tree = text ? parseMarkdown(text, base, reportMarkdown) : undefined;
+  for (const { finding } of tree
+    ? reportBlocks(tree, text, undefined, { previousThreads: false })
+    : []) {
+    const index = finding && owners.get(finding.id);
+    if (finding && index !== undefined) leads.set(index, finding);
+  }
+  return leads;
 }
 
 function planGroups(layout: DisplayLayout, base: string | undefined) {

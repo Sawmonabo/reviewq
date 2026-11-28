@@ -66,6 +66,7 @@ pub(super) fn project_layout(layout: DisplayLayout) -> Result<dto::DisplayLayout
                     kind,
                     heading_level,
                     heading_markdown: block.heading_markdown,
+                    card_markdown: block.card_markdown,
                 })
             })
             .collect::<Result<_, AppError>>()?,

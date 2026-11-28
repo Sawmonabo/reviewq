@@ -100,7 +100,21 @@ struct Spans {
 }
 
 impl SqliteStore {
+    /// One window of a report. Its waits, for a window read slot and for each turn on the
+    /// store's queue, share one deadline, so together they wait at most `LONGEST`. Every step
+    /// is safe to cut, as a browser that leaves cuts it.
     pub(crate) async fn report_display_window(
+        &self,
+        actor: Actor,
+        run: RunId,
+        reference: ReportReference,
+        position: DisplayWindowPosition,
+    ) -> Result<Snapshot<DisplayWindow>, StoreError> {
+        let window = self.display_window(actor, run, reference, position);
+        reviewq_app::wait::within(window).await?
+    }
+
+    async fn display_window(
         &self,
         actor: Actor,
         run: RunId,
@@ -659,10 +673,10 @@ fn prepare_blocks(
         };
         if u64::from(span.scalar_start) != scalar
             || span.utf16_start != utf16
-            || span
-                .heading_markdown
-                .as_ref()
-                .is_some_and(|heading| !markdown.starts_with(heading))
+            || [&span.heading_markdown, &span.card_markdown]
+                .into_iter()
+                .flatten()
+                .any(|lead| !markdown.starts_with(lead.as_str()))
         {
             return invalid();
         }

@@ -3,6 +3,11 @@ const schema418 = {
   properties: {
     byteEnd: { $ref: "#/definitions/SafeCountDto" },
     byteStart: { $ref: "#/definitions/SafeCountDto" },
+    cardMarkdown: {
+      description:
+        "On a finding card's card line or Location field in a report: its leading Markdown,\nthe whole card line, or the field through its first location.",
+      type: ["string", "null"],
+    },
     headingLevel: {
       anyOf: [{ $ref: "#/definitions/SafeCountDto" }, { type: "null" }],
     },

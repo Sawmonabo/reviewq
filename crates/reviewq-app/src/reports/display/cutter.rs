@@ -41,6 +41,9 @@ pub struct DisplayBlock {
     pub utf16_start: u32,
     pub kind: DisplayBlockKind,
     pub heading_markdown: Option<String>,
+    /// On a finding card's card line or Location field in a report: its leading Markdown,
+    /// which the findings list reads.
+    pub card_markdown: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -173,6 +176,7 @@ pub(super) fn cut(source: &str, html: HtmlRendering) -> Result<DisplayLayout, Di
                     utf16_start: coordinate.utf16,
                     kind: start.kind,
                     heading_markdown,
+                    card_markdown: None,
                 });
                 coordinate.advance(&window[start.byte..end]);
                 previous_end = end;

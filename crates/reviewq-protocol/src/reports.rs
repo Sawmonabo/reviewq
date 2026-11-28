@@ -263,6 +263,10 @@ pub struct DisplayLayoutBlock {
     pub heading_level: Option<SafeCountDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub heading_markdown: Option<String>,
+    /// On a finding card's card line or Location field in a report: its leading Markdown,
+    /// the whole card line, or the field through its first location.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub card_markdown: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

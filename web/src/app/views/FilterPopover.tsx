@@ -1,6 +1,6 @@
-import { useId, useState } from "react";
 import type { ReactNode } from "react";
 import { Icon } from "../../components/Icon";
+import { Popover } from "../../components/Popover";
 
 export function FilterPopover({
   label,
@@ -21,42 +21,27 @@ export function FilterPopover({
   readonly icon?: ReactNode;
   readonly children: (close: () => void) => ReactNode;
 }) {
-  const id = useId();
-  const triggerId = `${id}-trigger`;
-  const [open, setOpen] = useState(false);
-  function close() {
-    document.getElementById(id)?.hidePopover();
-    document.getElementById(triggerId)?.focus({ preventScroll: true });
-  }
   return (
-    <>
-      <button
-        id={triggerId}
-        type="button"
-        className="filter-control"
-        disabled={disabled}
-        aria-label={triggerLabel}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        popoverTarget={id}
-      >
-        {icon}
-        <span className="filter-label">{label}</span>
-        <span className="filter-value" title={value}>
-          {value}
-        </span>
-        <Icon name="chevron" size={12} />
-      </button>
-      <section
-        id={id}
-        popover="auto"
-        role="dialog"
-        aria-label={popupLabel}
-        className={`filter-popup ${popupClass}`}
-        onToggle={(event) => setOpen(event.newState === "open")}
-      >
-        {open && children(close)}
-      </section>
-    </>
+    <Popover
+      label={popupLabel}
+      className={`filter-popup ${popupClass}`}
+      trigger={{
+        className: "filter-control",
+        disabled,
+        "aria-label": triggerLabel,
+        children: (
+          <>
+            {icon}
+            <span className="filter-label">{label}</span>
+            <span className="filter-value" title={value}>
+              {value}
+            </span>
+            <Icon name="chevron" size={12} />
+          </>
+        ),
+      }}
+    >
+      {children}
+    </Popover>
   );
 }

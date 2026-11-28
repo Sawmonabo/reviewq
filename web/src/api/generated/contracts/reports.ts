@@ -391,6 +391,11 @@ export interface DisplayLayout {
 export interface DisplayLayoutBlock {
   byteEnd: SafeCountDto;
   byteStart: SafeCountDto;
+  /**
+   * On a finding card's card line or Location field in a report: its leading Markdown,
+   * the whole card line, or the field through its first location.
+   */
+  cardMarkdown?: string | null;
   headingLevel?: SafeCountDto | null;
   headingMarkdown?: string | null;
   kind: DisplayBlockKind;

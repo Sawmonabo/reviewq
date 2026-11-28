@@ -71,7 +71,8 @@ export function restoreBookmark(
   };
 }
 
-// Waits while the reader holds a selection or keyboard focus in `element`.
+// Waits while the reader holds a selection or keyboard focus in `element`, except focus in a
+// busy jump control, such as the findings list while the whole report opens for it.
 export function finishReading(element: Element | null, signal: AbortSignal) {
   if (!element) return;
   const host = element;
@@ -79,7 +80,7 @@ export function finishReading(element: Element | null, signal: AbortSignal) {
     const selection = getSelection();
     return (
       (host.contains(document.activeElement) &&
-        !document.activeElement?.matches('[data-report-jump][aria-busy="true"]')) ||
+        !document.activeElement?.closest('[data-report-jump][aria-busy="true"]')) ||
       Boolean(
         selection?.rangeCount &&
         !selection.isCollapsed &&

@@ -35,11 +35,8 @@
 }
 
 /* Anchored below the control's end edge, like the queue filters, or above it when that side has
-   more room, and never taller than that side. */
+   more room, and never taller than that side. With the shared `.popover` surface. */
 .finding-picker {
-  position: fixed;
-  inset: auto;
-  margin: 6px 0;
   position-area: block-end span-inline-start;
   position-try-fallbacks: flip-block;
   position-try-order: most-block-size;
@@ -50,21 +47,15 @@
   width: var(--finding-picker-width, 430px);
   max-width: calc(100vw - 16px);
   padding: 0;
-  border: 1px solid var(--popup-border);
   border-radius: 12px;
-  background: var(--popup-bg);
-  color: var(--text);
   box-shadow: 0 18px 50px #0000008c;
   overflow: hidden;
 }
 .finding-picker:popover-open {
   display: flex;
 }
-@supports not (position-area: block-end span-inline-start) {
-  .finding-picker {
-    inset: 20% 0 auto;
-    margin-inline: auto;
-  }
+.finding-picker-body {
+  display: contents;
 }
 .finding-picker-filter > input {
   width: 100%;
@@ -182,8 +173,9 @@
   font-size: 10px;
 }
 
-/* The card a jump lands on holds focus without a lasting outline, and outlines briefly. */
-.report-finding[tabindex="-1"]:focus {
+/* The card a jump lands on holds focus and outlines briefly. After a pointer pick its focus draws
+   no lasting outline; after a keyboard pick it keeps the focus ring. */
+.report-finding[tabindex="-1"]:focus:not(:focus-visible) {
   outline: none;
 }
 .report-finding[data-arrival] {

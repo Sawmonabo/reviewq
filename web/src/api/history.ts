@@ -96,7 +96,7 @@ export async function historyDocument(
   )
     throw new Error("The native output source changed. Reopen the entry.");
   if (
-    data.indexFormat !== 2 ||
+    data.indexFormat !== 3 ||
     byteEnd > byteLength ||
     byteEnd < byteStart ||
     byteEnd - byteStart > MAX_DOCUMENT_WINDOW_BYTES ||

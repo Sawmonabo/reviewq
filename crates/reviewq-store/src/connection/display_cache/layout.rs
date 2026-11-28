@@ -8,7 +8,8 @@ use sha2::{Digest, Sha256};
 use crate::StoreError;
 
 pub(super) const WINDOW_BYTES: u32 = 64 * 1024;
-pub(super) const SPAN_COLUMNS: &str = "byte_start, byte_end, scalar_start, utf16_start, kind, heading_level, heading_markdown, checksum";
+pub(super) const SPAN_COLUMNS: &str =
+    "byte_start, byte_end, scalar_start, utf16_start, kind, heading_level, lead_markdown, checksum";
 
 pub(super) fn header_checksum(
     report_hash: &str,
@@ -46,7 +47,7 @@ pub(super) fn write_spans(
             block.utf16_start,
             kind,
             level,
-            block.heading_markdown,
+            stored_markdown(&block),
             hash.as_slice(),
         ])?;
     }
@@ -58,18 +59,23 @@ pub(super) fn read_span(row: &Row<'_>, report_hash: &str) -> Result<DisplayBlock
         row.get_ref(4)?.as_str().map_err(rusqlite::Error::from)?,
         row.get(5)?,
     )?;
-    let heading = row
+    let stored = row
         .get_ref(6)?
         .as_str_or_null()
         .map_err(rusqlite::Error::from)?;
-    match (kind, heading) {
-        (DisplayBlockKind::Heading(1..=3), Some(markdown))
-            if !markdown.is_empty() && markdown.len() <= MAX_DISPLAY_HEADING_BYTES => {}
-        (DisplayBlockKind::Heading(1..=3), _) | (_, Some(_)) => {
+    let (heading, card) = match (kind, stored) {
+        (_, Some(markdown))
+            if markdown.is_empty() || markdown.len() > MAX_DISPLAY_HEADING_BYTES =>
+        {
             return Err(AppError::Internal.into());
         }
-        _ => {}
-    }
+        (DisplayBlockKind::Heading(1..=3), Some(markdown)) => (Some(markdown), None),
+        (DisplayBlockKind::Paragraph, card) => (None, card),
+        (DisplayBlockKind::Heading(1..=3), None) | (_, Some(_)) => {
+            return Err(AppError::Internal.into());
+        }
+        _ => (None, None),
+    };
     let span = DisplayBlock {
         byte_start: row.get(0)?,
         byte_end: row.get(1)?,
@@ -77,6 +83,7 @@ pub(super) fn read_span(row: &Row<'_>, report_hash: &str) -> Result<DisplayBlock
         utf16_start: row.get(3)?,
         kind,
         heading_markdown: heading.map(str::to_owned),
+        card_markdown: card.map(str::to_owned),
     };
     if span.byte_end <= span.byte_start
         || span.byte_end - span.byte_start > WINDOW_BYTES
@@ -101,9 +108,17 @@ fn checksum(report_hash: &str, span: &DisplayBlock) -> [u8; 32] {
         .chain_update([level.unwrap_or(0)])
         .chain_update(kind.as_bytes())
         .chain_update([0])
-        .chain_update(span.heading_markdown.as_deref().unwrap_or("").as_bytes())
+        .chain_update(stored_markdown(span).unwrap_or("").as_bytes())
         .finalize()
         .into()
+}
+
+/// The `lead_markdown` column holds a heading's Markdown, or a card paragraph's leading
+/// Markdown; the span's kind says which.
+fn stored_markdown(span: &DisplayBlock) -> Option<&str> {
+    span.heading_markdown
+        .as_deref()
+        .or(span.card_markdown.as_deref())
 }
 
 fn block_label(kind: DisplayBlockKind) -> (&'static str, Option<u8>) {

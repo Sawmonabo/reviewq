@@ -115,9 +115,9 @@ pub(super) fn read(
 /// A `Findings` read selects from what the version itself records: the findings it shows
 /// (`report_findings`, when `?6`), and the findings it retires (when `?7`), which are its
 /// outcomes (`report_changes`) on findings it no longer shows, each with the row its parent
-/// version showed. `?8` names a kind, `?9` asks for the issue and proposed comment. A finding's
-/// fields come from `ledger_changes` at the record revision the version published, so a later
-/// unsubmitted revision is never read.
+/// version showed. `?8` names a kind, `?9` asks for the issue, the proposed comment and the
+/// note the comment replies to. A finding's fields come from `ledger_changes` at the record
+/// revision the version published, so a later unsubmitted revision is never read.
 fn query(collection: Collection) -> &'static str {
     match collection {
         Collection::Findings => {
