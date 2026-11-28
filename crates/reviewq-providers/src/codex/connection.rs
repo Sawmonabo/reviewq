@@ -1,6 +1,7 @@
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -8,6 +9,7 @@ use futures_util::{SinkExt, StreamExt};
 use reviewq_app::access::AppError;
 use reviewq_app::hosts::{DispatchGuard, FollowupResume, QuestionAnswer, QuestionForm};
 use reviewq_app::launch::LaunchProgress;
+use reviewq_app::wait;
 use reviewq_domain::identity::NativeSessionId;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -16,7 +18,7 @@ use tokio::io::AsyncReadExt;
 use tokio::net::UnixStream;
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{Instant, timeout};
+use tokio::time::{Instant, timeout, timeout_at};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 use tokio_tungstenite::{WebSocketStream, client_async_with_config};
 
@@ -34,16 +36,12 @@ use super::questions::Questions;
 const REQUEST_LIMIT: usize = 8;
 const DISCOVERY_LIMIT: u64 = 16 * 1024;
 pub(super) const FRAME_LIMIT: usize = 2 * 1024 * 1024;
+/// How long a written request waits for its reply, and how long one write may take.
 const DEADLINE: Duration = Duration::from_secs(5);
-/// How long a call waits for a place in the command queue while a burst fills it. Nothing is
-/// sent while it waits, so a call that runs out of it is refused `Busy`, unsent.
-const ROOM_WAIT: Duration = Duration::from_secs(10);
-/// A bound on the wait for the loop's answer, against a fault only. The loop answers every
-/// request it takes, and each step it takes for one ends within `DEADLINE`: connecting,
-/// checking the guard and waiting for the reply. A request behind a full queue while every
-/// connection attempt times out is answered in about a minute, half of this. Past it the
-/// caller cannot tell whether the request was written, so it reads as `Uncertain`.
-const ANSWER_LIMIT: Duration = Duration::from_secs(120);
+/// How many requests may wait for their guard check at once. Fewer callers send guarded
+/// requests than this, so in practice it never stops the loop: up to four deliveries, four
+/// launches and four answers, each one request at a time.
+const CHECK_LIMIT: usize = 16;
 const IDLE_TIME: Duration = Duration::from_secs(60);
 
 type Socket = WebSocketStream<UnixStream>;
@@ -58,18 +56,71 @@ pub(super) struct Connection {
 
 enum CommandRequest {
     Rpc(Rpc),
-    Answer(
-        QuestionAnswer,
-        QuestionForm,
-        oneshot::Sender<Result<QuestionForm, AnswerError>>,
-    ),
+    Answer(AnswerRequest),
 }
 
+/// A queued request. The loop writes it only by `write_by`, the same time its caller's wait
+/// for a place and for the guard check end; past it the request is answered `BeforeSend`
+/// with `Busy`, unsent.
 struct Rpc {
     method: &'static str,
     params: Value,
     guard: Option<Effect>,
+    write_by: Instant,
+    mark: Mark,
     reply: oneshot::Sender<Result<Reply, CallError>>,
+}
+
+/// A queued answer, written only by `write_by` as an `Rpc` is.
+struct AnswerRequest {
+    answer: QuestionAnswer,
+    form: QuestionForm,
+    write_by: Instant,
+    mark: Mark,
+    reply: oneshot::Sender<Result<QuestionForm, AnswerError>>,
+}
+
+/// Whether the loop began writing a request, shared with its caller. A caller that stops
+/// waiting withdraws a request that was never written, so the loop never writes it, and so
+/// `Uncertain` means on every path that the request may have been sent.
+#[derive(Clone, Default)]
+struct Mark(Arc<AtomicU8>);
+
+impl Mark {
+    const QUEUED: u8 = 0;
+    const WRITTEN: u8 = 1;
+    const WITHDRAWN: u8 = 2;
+
+    /// Taken by the loop just before it writes: false when the caller withdrew the request.
+    fn write(&self) -> bool {
+        self.0
+            .compare_exchange(
+                Self::QUEUED,
+                Self::WRITTEN,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    /// Taken by a caller that stops waiting: true when the request was never written, and now
+    /// never will be.
+    fn withdraw(&self) -> bool {
+        self.0
+            .compare_exchange(
+                Self::QUEUED,
+                Self::WITHDRAWN,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+}
+
+/// How long a caller waits for the loop's answer: the loop writes a request by `write_by` or
+/// answers it unsent, a write takes at most `DEADLINE`, and so does the wait for its reply.
+fn answer_by(write_by: Instant) -> Instant {
+    write_by + DEADLINE + DEADLINE
 }
 
 struct Pending {
@@ -216,12 +267,15 @@ impl Connection {
             .list(thread, request))
     }
 
-    /// Holds a place in the command queue for one answer, waiting up to `ROOM_WAIT` while a
-    /// burst fills it. Taken before the answer is reserved, so a queue that stays full
-    /// refuses the answer as `Busy` with nothing reserved and nothing to settle.
+    /// Holds a place in the command queue for one answer, waiting its turn while a burst
+    /// fills it. The answer must be written within `wait::LONGEST` of this call, this wait,
+    /// its reservation and its guard check included. Taken before the answer is reserved, so
+    /// a queue that stays full refuses the answer as `Busy` with nothing reserved and nothing
+    /// to settle.
     pub(super) async fn answer_slot(&self) -> Result<AnswerSlot<'_>, AppError> {
-        match timeout(ROOM_WAIT, self.sender.reserve()).await {
-            Ok(Ok(permit)) => Ok(AnswerSlot { permit }),
+        let write_by = Instant::now() + wait::LONGEST;
+        match timeout_at(write_by, self.sender.reserve()).await {
+            Ok(Ok(permit)) => Ok(AnswerSlot { permit, write_by }),
             Ok(Err(_)) => Err(AppError::Unavailable),
             Err(_) => Err(AppError::Busy),
         }
@@ -234,7 +288,7 @@ impl Connection {
         method: &'static str,
         params: Value,
     ) -> Result<Reply, AppError> {
-        self.round_trip(method, params, None)
+        self.round_trip(method, params, None, None)
             .await
             .map_err(CallError::app)
     }
@@ -251,20 +305,21 @@ impl Connection {
         serde_json::from_value(response).map_err(|_| AppError::Unavailable)
     }
 
+    /// Submits a delivery, written only by `write_by`: past it the delivery is answered
+    /// `BeforeSend` with `Busy`, unsent.
     pub(super) async fn submit(
         &self,
         method: &'static str,
         params: Value,
         guard: DispatchGuard,
         question_source: Option<PathBuf>,
+        write_by: Instant,
     ) -> Result<(), CallError> {
-        self.call(
-            method,
-            params,
-            Some(Effect::Delivery(guard, question_source)),
-        )
-        .await
-        .map(|_| ())
+        let effect = Some(Effect::Delivery(guard, question_source));
+        let (frame, _) = self
+            .round_trip(method, params, effect, Some(write_by))
+            .await?;
+        rpc_result(frame).map(|_| ()).map_err(CallError::Remote)
     }
 
     pub(super) async fn resume_followup<T: DeserializeOwned>(
@@ -301,61 +356,82 @@ impl Connection {
         params: Value,
         guard: Option<Effect>,
     ) -> Result<Value, CallError> {
-        let (frame, _) = self.round_trip(method, params, guard).await?;
+        let (frame, _) = self.round_trip(method, params, guard, None).await?;
         rpc_result(frame).map_err(CallError::Remote)
     }
 
-    /// Queues one request, waiting up to `ROOM_WAIT` for room while a burst fills the queue,
-    /// and returns its reply. A call that never got room was not sent: `BeforeSend`. The
-    /// loop owns the rest: it answers `Denied` for a guard that refused and `BeforeSend` for
-    /// a request it never wrote, and waits for the reply only from the moment it wrote the
-    /// request, so `Uncertain` means it may have been sent.
+    /// Queues one request and returns its reply. It must be written by `write_by`, by
+    /// default `wait::LONGEST` from now: the wait for a place in the queue, the loop's wait
+    /// for the guard check and its last look before the write all end then, each leaving the
+    /// request unsent as `BeforeSend` with `Busy`. The loop answers `Denied` for a guard that
+    /// refused, and waits for the reply from the moment it wrote the request, so `Uncertain`
+    /// means it may have been sent. A caller still waiting at `answer_by` withdraws a request
+    /// that was never written.
     async fn round_trip(
         &self,
         method: &'static str,
         params: Value,
         guard: Option<Effect>,
+        write_by: Option<Instant>,
     ) -> Result<Reply, CallError> {
-        let permit = match timeout(ROOM_WAIT, self.sender.reserve()).await {
+        let write_by = write_by.unwrap_or_else(|| Instant::now() + wait::LONGEST);
+        let permit = match timeout_at(write_by, self.sender.reserve()).await {
             Ok(Ok(permit)) => permit,
             Ok(Err(_)) => return Err(CallError::BeforeSend(AppError::Unavailable)),
             Err(_) => return Err(CallError::BeforeSend(AppError::Busy)),
         };
         let (reply, receive) = oneshot::channel();
+        let mark = Mark::default();
         permit.send(CommandRequest::Rpc(Rpc {
             method,
             params,
             guard,
+            write_by,
+            mark: mark.clone(),
             reply,
         }));
-        timeout(ANSWER_LIMIT, receive)
-            .await
-            .map_err(|_| CallError::Uncertain)?
-            .map_err(|_| CallError::Uncertain)?
+        // A request the loop dropped or never reached is unsent unless the loop took it to
+        // write; only then may it have been sent.
+        match timeout_at(answer_by(write_by), receive).await {
+            Ok(Ok(reply)) => reply,
+            Ok(Err(_)) if mark.withdraw() => Err(CallError::BeforeSend(AppError::Unavailable)),
+            Err(_) if mark.withdraw() => Err(CallError::BeforeSend(AppError::Busy)),
+            Ok(Err(_)) | Err(_) => Err(CallError::Uncertain),
+        }
     }
 }
 
 /// A place held in a connection's command queue for one answer.
 pub(super) struct AnswerSlot<'a> {
     permit: mpsc::Permit<'a, CommandRequest>,
+    write_by: Instant,
 }
 
 impl AnswerSlot<'_> {
-    /// Sends `answer` in the place held and waits for whether the daemon took it. The loop
-    /// answers `BeforeSend` for an answer it never wrote, and `Uncertain` for one whose write
-    /// it began; so does a wait past `ANSWER_LIMIT`.
+    /// Sends `answer` in the place held and waits for whether the daemon took it. It must be
+    /// written by the slot's `write_by`, its guard check included. The loop answers
+    /// `BeforeSend` for an answer it never wrote and `Uncertain` for one whose write it
+    /// began; a caller still waiting at `answer_by` withdraws one never written.
     pub(super) async fn answer(
         self,
         answer: QuestionAnswer,
         form: QuestionForm,
     ) -> Result<QuestionForm, AnswerError> {
+        let write_by = self.write_by;
         let (reply, result) = oneshot::channel();
-        self.permit
-            .send(CommandRequest::Answer(answer, form, reply));
-        timeout(ANSWER_LIMIT, result)
-            .await
-            .map_err(|_| AnswerError::Uncertain)?
-            .map_err(|_| AnswerError::Uncertain)?
+        let mark = Mark::default();
+        self.permit.send(CommandRequest::Answer(AnswerRequest {
+            answer,
+            form,
+            write_by,
+            mark: mark.clone(),
+            reply,
+        }));
+        match timeout_at(answer_by(write_by), result).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) | Err(_) if mark.withdraw() => Err(AnswerError::BeforeSend),
+            Ok(Err(_)) | Err(_) => Err(AnswerError::Uncertain),
+        }
     }
 }
 
@@ -373,8 +449,8 @@ impl Daemon {
         while let Some(first) = commands.recv().await {
             let request = match first {
                 CommandRequest::Rpc(request) => request,
-                CommandRequest::Answer(_, _, reply) => {
-                    let _ = reply.send(Err(AnswerError::BeforeSend));
+                CommandRequest::Answer(answer) => {
+                    let _ = answer.reply.send(Err(AnswerError::BeforeSend));
                     continue;
                 }
             };

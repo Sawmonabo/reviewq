@@ -1,8 +1,9 @@
 //! The loop that owns one daemon session's socket. It writes the requests callers queue,
 //! hands each reply frame to its caller and every other frame to the question and live
 //! caches. A request with a guard is checked beside that work, never in its way: a check reads
-//! the store or a transcript and may wait its turn there, while the loop keeps reading frames,
-//! and the request is written the moment its check passes.
+//! the store or a transcript and waits its turn there, while the loop keeps reading frames and
+//! serving other requests, and the request is written the moment its check passes. A request
+//! is written only by its `write_by` and only while its caller has not withdrawn it.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -14,28 +15,31 @@ use reviewq_app::access::AppError;
 use reviewq_app::hosts::{QuestionAnswer, QuestionForm};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{Instant, sleep_until, timeout};
+use tokio::time::{Instant, sleep_until, timeout, timeout_at};
 
 use super::super::live::Live;
 use super::super::questions::Questions;
 use super::{
-    AnswerError, CallError, CommandRequest, DEADLINE, IDLE_TIME, Pending, REQUEST_LIMIT, Rpc,
-    Served, Socket, receive_frame, send,
+    AnswerError, AnswerRequest, CHECK_LIMIT, CallError, CommandRequest, DEADLINE, IDLE_TIME, Mark,
+    Pending, REQUEST_LIMIT, Rpc, Served, Socket, receive_frame, send,
 };
 
 /// A request the loop took and has not written, while its guard is checked. Kept apart from
 /// the check, so a loop that ends first still tells its caller that nothing was sent.
 enum Held {
     Rpc(Box<Rpc>),
-    Answer(
-        QuestionForm,
-        oneshot::Sender<Result<QuestionForm, AnswerError>>,
-    ),
+    Answer {
+        form: QuestionForm,
+        write_by: Instant,
+        mark: Mark,
+        reply: oneshot::Sender<Result<QuestionForm, AnswerError>>,
+    },
 }
 
 /// One guard check in flight. It ends with the key of its held request, the answer to send
-/// when there is one, and whether the guard passed within `DEADLINE`.
-type Check<'a> = BoxFuture<'a, (u64, Option<QuestionAnswer>, Result<(), AppError>)>;
+/// when there is one, and what the guard said, or `None` when the request's `write_by` came
+/// first.
+type Check<'a> = BoxFuture<'a, (u64, Option<QuestionAnswer>, Option<Result<(), AppError>>)>;
 
 /// The loop's state for one daemon session.
 struct Work<'a> {
@@ -104,8 +108,9 @@ impl<'a> Work<'a> {
                 (Some(value), None) | (None, Some(value)) => value,
                 (None, None) => last_activity + IDLE_TIME,
             };
-            // A request being checked holds its place as one waiting for a reply does.
-            let room = self.pending.len() + self.held.len() < REQUEST_LIMIT;
+            // A check counts apart from the requests waiting for a reply, so slow checks
+            // never keep a plain request from being written.
+            let room = self.pending.len() < REQUEST_LIMIT && self.held.len() < CHECK_LIMIT;
             let checking = !self.checks.is_empty();
             tokio::select! {
                 work = commands.recv(), if room => {
@@ -149,8 +154,8 @@ impl<'a> Work<'a> {
     }
 
     /// Starts on one queued request. One with a guard is held while the guard is checked,
-    /// as is every answer; any other is written at once. `Err` when a write failed, which
-    /// ends the session.
+    /// as is every answer, until the request's `write_by`; any other is written at once.
+    /// `Err` when a write failed, which ends the session.
     async fn take(&mut self, work: CommandRequest) -> Result<(), ()> {
         let key = self.next_key;
         let questions = self.questions;
@@ -162,20 +167,33 @@ impl<'a> Work<'a> {
                 let Some(guard) = request.guard.take() else {
                     return self.write(request).await;
                 };
+                let write_by = request.write_by;
                 self.held.insert(key, Held::Rpc(Box::new(request)));
                 Box::pin(async move {
-                    let checked = timeout(DEADLINE, guard.check(questions)).await;
-                    (key, None, checked.unwrap_or(Err(AppError::Busy)))
+                    let checked = timeout_at(write_by, guard.check(questions)).await;
+                    (key, None, checked.ok())
                 })
             }
-            CommandRequest::Answer(answer, form, reply) => {
+            CommandRequest::Answer(AnswerRequest {
+                answer,
+                form,
+                write_by,
+                mark,
+                reply,
+            }) => {
                 if reply.is_closed() {
                     return Ok(());
                 }
-                self.held.insert(key, Held::Answer(form, reply));
+                let held = Held::Answer {
+                    form,
+                    write_by,
+                    mark,
+                    reply,
+                };
+                self.held.insert(key, held);
                 Box::pin(async move {
-                    let checked = timeout(DEADLINE, answer.check()).await;
-                    (key, Some(answer), checked.unwrap_or(Err(AppError::Busy)))
+                    let checked = timeout_at(write_by, answer.check()).await;
+                    (key, Some(answer), checked.ok())
                 })
             }
         };
@@ -185,23 +203,37 @@ impl<'a> Work<'a> {
     }
 
     /// Finishes the held request `key` once its check ended: writes it when the check
-    /// passed, and otherwise tells its caller that nothing was sent.
+    /// passed, and otherwise tells its caller that nothing was sent, `Denied` when the guard
+    /// refused and `BeforeSend` with `Busy` when its `write_by` came first.
     async fn checked(
         &mut self,
         key: u64,
         answer: Option<QuestionAnswer>,
-        checked: Result<(), AppError>,
+        checked: Option<Result<(), AppError>>,
     ) -> Result<(), ()> {
         match self.held.remove(&key) {
             Some(Held::Rpc(request)) => match checked {
-                Ok(()) => self.write(*request).await,
-                Err(error) => {
+                Some(Ok(())) => self.write(*request).await,
+                Some(Err(error)) => {
                     let _ = request.reply.send(Err(CallError::Denied(error)));
                     Ok(())
                 }
+                None => {
+                    let _ = request
+                        .reply
+                        .send(Err(CallError::BeforeSend(AppError::Busy)));
+                    Ok(())
+                }
             },
-            Some(Held::Answer(form, reply)) => match (answer, checked) {
-                (Some(answer), Ok(())) => self.answer(answer, form, reply).await,
+            Some(Held::Answer {
+                form,
+                write_by,
+                mark,
+                reply,
+            }) => match (answer, checked) {
+                (Some(answer), Some(Ok(()))) => {
+                    self.answer(answer, form, write_by, &mark, reply).await
+                }
                 _ => {
                     let _ = reply.send(Err(AnswerError::BeforeSend));
                     Ok(())
@@ -211,10 +243,20 @@ impl<'a> Work<'a> {
         }
     }
 
-    /// Writes `request` and waits for its reply until `DEADLINE` after the write. `Err` when
-    /// the write failed, which leaves the request `Uncertain` and ends the session.
+    /// Writes `request` and waits for its reply until `DEADLINE` after the write, unless its
+    /// `write_by` passed or its caller withdrew it. `Err` when the write failed, which leaves
+    /// the request `Uncertain` and ends the session.
     async fn write(&mut self, request: Rpc) -> Result<(), ()> {
         if request.reply.is_closed() {
+            return Ok(());
+        }
+        if Instant::now() >= request.write_by {
+            let _ = request
+                .reply
+                .send(Err(CallError::BeforeSend(AppError::Busy)));
+            return Ok(());
+        }
+        if !request.mark.write() {
             return Ok(());
         }
         *self.id = self.id.wrapping_add(1).max(2);
@@ -235,14 +277,24 @@ impl<'a> Work<'a> {
     }
 
     /// Sends an answer whose check passed, when the question cache still has the question
-    /// open for it. `Err` when the write failed, which ends the session.
+    /// open for it, its `write_by` has not passed and its caller has not withdrawn it. `Err`
+    /// when the write failed, which ends the session.
     async fn answer(
         &mut self,
         answer: QuestionAnswer,
         form: QuestionForm,
+        write_by: Instant,
+        mark: &Mark,
         reply: oneshot::Sender<Result<QuestionForm, AnswerError>>,
     ) -> Result<(), ()> {
         if reply.is_closed() {
+            return Ok(());
+        }
+        if Instant::now() >= write_by {
+            let _ = reply.send(Err(AnswerError::BeforeSend));
+            return Ok(());
+        }
+        if !mark.write() {
             return Ok(());
         }
         let prepared = self
@@ -281,7 +333,7 @@ impl<'a> Work<'a> {
                         .reply
                         .send(Err(CallError::BeforeSend(AppError::Unavailable)));
                 }
-                Held::Answer(_, reply) => {
+                Held::Answer { reply, .. } => {
                     let _ = reply.send(Err(AnswerError::BeforeSend));
                 }
             }

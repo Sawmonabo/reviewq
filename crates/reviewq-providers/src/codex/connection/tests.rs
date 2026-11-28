@@ -9,11 +9,11 @@ use tokio::net::UnixListener;
 use tokio::sync::oneshot;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
-use super::{Connection, Effect, home_owner};
+use super::{Connection, DEADLINE, Effect, home_owner};
 
 /// A guard whose check is slow, as a store read waiting its turn is, no longer stops the
 /// loop: calls queued after it are written and answered meanwhile, and it is written once
-/// its check passes. The synthetic daemon lives in a private folder; no Codex runs.
+/// its check passes, even after longer than a reply may take. The synthetic daemon lives in a private folder; no Codex runs.
 #[tokio::test]
 async fn a_slow_guard_check_leaves_the_session_serving_other_calls() {
     let root = tempfile::tempdir().unwrap();
@@ -60,9 +60,11 @@ async fn a_slow_guard_check_leaves_the_session_serving_other_calls() {
         for _ in 0..3 {
             assert!(connection.call("plain", json!({}), None).await.is_ok());
         }
+        // A check may outlast a written request's own wait for its reply.
+        tokio::time::sleep(DEADLINE + Duration::from_secs(1)).await;
         release.send(()).unwrap();
     };
-    let (guarded, ()) = tokio::time::timeout(Duration::from_secs(8), async {
+    let (guarded, ()) = tokio::time::timeout(Duration::from_secs(12), async {
         tokio::join!(guarded, others)
     })
     .await

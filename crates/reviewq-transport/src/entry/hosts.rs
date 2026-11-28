@@ -256,10 +256,11 @@ fn link_response(
 
 /// What a Codex link tells the person about ReviewQ's hooks in the conversation `thread`,
 /// after asking `host` to trust them: `Pending` when Codex does not trust them. When it does,
-/// `Restart` only when ReviewQ has a reason to believe the conversation lacks them: its
-/// daemon holds it without them even after a reload and another look, or the daemon cannot
-/// show it, no ReviewQ hook has reported from it, and Codex created it before ReviewQ last
-/// wrote that trust. Otherwise nothing, also whenever a time is unknown. Codex does not say
+/// `Restart` only when ReviewQ has a reason to believe the conversation lacks them and no
+/// ReviewQ hook has reported from it: its daemon holds it without them even after a reload
+/// and a look after a pause, or the daemon cannot show it and Codex created it before
+/// ReviewQ last wrote that trust. Otherwise nothing, also whenever a time is unknown. A hook
+/// that reported shows the hooks run there, whatever a list says. Codex does not say
 /// when it opened a conversation, so one created before that write but opened again since in
 /// a Codex process of its own gets the notice until one of its hooks reports. Asks Codex
 /// nothing more when the hooks are not trusted, and in the common case one hook list.
@@ -275,14 +276,19 @@ async fn codex_hooks_notice(
     if !trusted {
         return Some(HooksNotice::Pending);
     }
-    let lacking = match host.hooks_live(thread.clone()).await {
+    let shown = host.hooks_live(thread.clone()).await;
+    restart_owed(shown, entry.codex_hook_reports.contains(&thread)).then_some(HooksNotice::Restart)
+}
+
+/// Whether trusted hooks call for the restart notice in a conversation the daemon showed as
+/// `shown`: never once a hook has `reported` from it, as one that ran there shows.
+fn restart_owed(shown: Result<LiveHooks, AppError>, reported: bool) -> bool {
+    let lacking = match shown {
         Ok(LiveHooks::NotRunning) => true,
-        Ok(LiveHooks::Unconfirmed { predates_trust }) => {
-            predates_trust && !entry.codex_hook_reports.contains(&thread)
-        }
+        Ok(LiveHooks::Unconfirmed { predates_trust }) => predates_trust,
         Ok(LiveHooks::Running) | Err(_) => false,
     };
-    lacking.then_some(HooksNotice::Restart)
+    lacking && !reported
 }
 
 /// The Codex conversations a ReviewQ hook has reported from since the service started, so a

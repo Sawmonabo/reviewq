@@ -39,7 +39,9 @@ pub use questions::{
     QuestionAnchor, QuestionAnswer, QuestionForm, QuestionKey, QuestionMode, QuestionOption,
     QuestionReceipt, QuestionStatus, QuestionStore, QuestionsPort, answer_digest,
 };
-pub use work::{DispatchGuard, FollowupResume, receipt, recover_delivery, send_message};
+pub use work::{
+    DELIVERY_LIMIT, DispatchGuard, FollowupResume, receipt, recover_delivery, send_message,
+};
 
 const MAX_MESSAGE_CHARACTERS: usize = 12_000;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -206,7 +208,8 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
 pub enum LiveHooks {
     /// The host holds the conversation, and it runs each of ReviewQ's hooks.
     Running,
-    /// The host holds the conversation, and it does not run them even after a reload.
+    /// The host holds the conversation, and it does not run them even after a reload and a
+    /// look after a pause.
     NotRunning,
     /// The host cannot show it: it does not hold the conversation, cannot be reached or
     /// cannot list one conversation's hooks. `predates_trust` when the conversation was

@@ -78,6 +78,11 @@ impl Codex {
             .await
         {
             Ok(value) => value,
+            // Nothing was sent: a busy ReviewQ leaves the launch to be started again, and any
+            // other refusal ends it.
+            Err(CallError::BeforeSend(AppError::Busy) | CallError::Denied(AppError::Busy)) => {
+                return NativeLaunchResult::NotStarted;
+            }
             Err(CallError::BeforeSend(_) | CallError::Denied(_)) => {
                 return NativeLaunchResult::Rejected;
             }

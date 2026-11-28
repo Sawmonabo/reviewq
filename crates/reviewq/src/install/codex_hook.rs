@@ -15,6 +15,8 @@ mod json;
 
 const TIMEOUT_SECONDS: u32 = 5;
 const OWNERSHIP: &str = "codex-hooks.json";
+/// The service's own record of when it last wrote Codex's trust in ReviewQ's hooks.
+const SERVICE_NOTE: &str = "codex-trust-note.json";
 const MIXED: &str = "A hook group there runs ReviewQ's command beside other hooks.";
 
 /// A Codex hook event ReviewQ answers.
@@ -161,6 +163,7 @@ pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<Reconciled, Fa
     if owned.len() != original_count {
         if owned.is_empty() {
             fs::remove_file(&sidecar)?;
+            remove_service_note(paths)?;
             paths::sync(&paths.state)?;
         } else {
             paths::write_json(&sidecar, &owned)?;
@@ -225,18 +228,33 @@ pub(super) fn note_trusted(paths: &Paths, at: SystemTime) -> Result<(), Failure>
     paths::write_json(&sidecar, &owned)
 }
 
-/// When ReviewQ last wrote Codex's trust in its hooks, when the record says: the latest time
-/// it holds. `None` when it holds none or cannot be read.
+/// When ReviewQ last wrote Codex's trust in its hooks: the latest time the record or the
+/// service's note holds. `None` when neither holds one or can be read.
 fn trusted_at(paths: &Paths) -> Option<SystemTime> {
     let owned = paths::read_json::<Vec<Registration>>(&paths.state.join(OWNERSHIP)).ok()??;
-    let millis = owned.iter().filter_map(|hook| hook.trusted_at).max()?;
+    let recorded = owned.iter().filter_map(|hook| hook.trusted_at).max();
+    let millis = recorded.max(service_note(paths))?;
     UNIX_EPOCH.checked_add(Duration::from_millis(millis))
 }
 
-/// The service's reader and writer of the trust time. The service records under the
-/// installation lock like the installer. When an install, uninstall, start or stop holds it,
-/// the note waits for the lock on a thread of its own, so the caller does not wait; that
-/// holder may have found the hooks already trusted by the service and recorded nothing.
+/// The latest trust time the service noted, in milliseconds since the Unix epoch.
+fn service_note(paths: &Paths) -> Option<u64> {
+    paths::read_json::<u64>(&paths.state.join(SERVICE_NOTE)).ok()?
+}
+
+/// Removes the service's note with the last hook ReviewQ owned.
+fn remove_service_note(paths: &Paths) -> Result<(), Failure> {
+    match fs::remove_file(paths.state.join(SERVICE_NOTE)) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        removed => Ok(removed?),
+    }
+}
+
+/// The service's reader and writer of the trust time. The service writes its note to a file of
+/// its own, which nothing else writes, so it needs no installation lock and records at once,
+/// even while an install holds that lock and is about to stop the service; that install may
+/// find the hooks already trusted by the service and record nothing. The note counts only
+/// while ReviewQ owns hooks: removing the last of them removes it too.
 pub(crate) fn trust_record(
     paths: Paths,
 ) -> (
@@ -246,27 +264,20 @@ pub(crate) fn trust_record(
     let reader = paths.clone();
     let read = move || trusted_at(&reader);
     // A time that could not be written stays as it was, which can only keep a notice away.
-    let note = move |at| match paths.try_lock() {
-        Ok(Some(_lock)) => {
-            let _ = note_trusted(&paths, at);
+    let note = move |at: SystemTime| {
+        let Some(millis) = at
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .and_then(|since| u64::try_from(since.as_millis()).ok())
+        else {
+            return;
+        };
+        if service_note(&paths).is_some_and(|noted| noted >= millis) {
+            return;
         }
-        Ok(None) => {
-            let paths = paths.clone();
-            let _ = std::thread::Builder::new()
-                .name("reviewq-trust-note".into())
-                .spawn(move || note_when_unlocked(&paths, at));
-        }
-        Err(_) => {}
+        let _ = paths::write_json(&paths.state.join(SERVICE_NOTE), &millis);
     };
     (read, note)
-}
-
-/// Records the trust time `at` once the installation lock is free. Creates nothing, so a note
-/// that outlasts an uninstall records nothing.
-fn note_when_unlocked(paths: &Paths, at: SystemTime) {
-    if let Ok(Some(_lock)) = paths.lock_existing() {
-        let _ = note_trusted(paths, at);
-    }
 }
 
 /// The installed launcher running `internal codex-hook` for the installed profile. `|| :`
@@ -447,8 +458,9 @@ mod tests {
         reconcile(&paths, true)?;
         assert_eq!(fs::read(&file)?, created);
         assert_eq!(trusted_at(&paths), Some(approved));
-        // A late note of an earlier write never moves the time back, and the service's note
-        // while an install holds the lock is recorded once the lock is free.
+        // A late note of an earlier write never moves the time back. The service's note while
+        // an install holds the lock, about to stop that service, counts at once, and goes
+        // with the last hook.
         note_trusted(&paths, approved - Duration::from_secs(60))?;
         assert_eq!(trusted_at(&paths), Some(approved));
         fs::set_permissions(&paths.state, fs::Permissions::from_mode(0o700))?;
@@ -456,17 +468,12 @@ mod tests {
         let (_, note) = trust_record(paths.clone());
         let held = paths.lock()?;
         note(later);
-        assert_eq!(trusted_at(&paths), Some(approved));
-        drop(held);
-        for _ in 0..500 {
-            if trusted_at(&paths) == Some(later) {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        note(approved);
         assert_eq!(trusted_at(&paths), Some(later));
+        drop(held);
         reconcile(&paths, false)?;
         assert!(!file.try_exists()? && !sidecar.try_exists()?);
+        assert!(!paths.state.join(SERVICE_NOTE).try_exists()?);
 
         // A user's hooks, number literals and file mode survive install, upgrade and removal.
         let user_stop = r#"{"hooks":[{"type":"command","command":"/bin/false"}]}"#;

@@ -1,6 +1,8 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use reviewq_domain::identity::{GitSha, NativeSessionId, RunId, SessionKey, SubmissionId};
+use tokio::time::Instant;
 
 use crate::access::{Actor, AppError};
 use crate::events::Snapshot;
@@ -12,12 +14,22 @@ use super::{
     RecoverableDelivery, SubmitMessage,
 };
 
+/// How long one delivery attempt may take, from its claim to its recorded outcome. The
+/// service cuts `recover_delivery` at this time; the claim's lease (`CLAIM_MS` in the store,
+/// 90 seconds) is longer, so a cut attempt never overlaps the next. Within it the host must
+/// return its observation by `DispatchGuard::deadline`, which leaves `FINISH_RESERVE` for
+/// recording it; the host chooses how much of that it needs after the native submit.
+pub const DELIVERY_LIMIT: Duration = Duration::from_secs(60);
+/// The part of `DELIVERY_LIMIT` kept for recording the outcome after the host returns.
+const FINISH_RESERVE: Duration = Duration::from_secs(10);
+
 /// The dispatch adapter must call this after preparing the exact native request.
 pub struct DispatchGuard {
     store: Arc<dyn LeadStore>,
     claim: DeliveryClaim,
     workflow_confirmed: bool,
     sources: Arc<RuntimeSources>,
+    deadline: Instant,
 }
 
 /// Checks a saved lead's existing follow-up claim before loading it.
@@ -39,6 +51,11 @@ impl FollowupResume {
 }
 
 impl DispatchGuard {
+    /// When the host must have returned its observation of this delivery attempt.
+    pub fn deadline(&self) -> Instant {
+        self.deadline
+    }
+
     pub fn async_question(&self) -> Option<&super::AsyncQuestionDispatch> {
         match &self.claim.work {
             DeliveryWork::Dispatch { async_question, .. } => async_question.as_deref(),
@@ -154,6 +171,7 @@ pub async fn recover_delivery(
     candidate: RecoverableDelivery,
     sources: Arc<RuntimeSources>,
 ) -> Result<(), AppError> {
+    let deadline = Instant::now() + DELIVERY_LIMIT - FINISH_RESERVE;
     let Some(claim) = store
         .claim_delivery(candidate.cursor.delivery_id, candidate.state)
         .await?
@@ -174,6 +192,7 @@ pub async fn recover_delivery(
                     claim: claim.clone(),
                     workflow_confirmed: false,
                     sources,
+                    deadline,
                 },
             )
             .await

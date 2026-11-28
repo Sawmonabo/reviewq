@@ -160,6 +160,7 @@ pub(super) async fn execute(
             Some(digest),
         )
         .await?
+        && let Some(found) = app::resume_launch(entry.store.as_ref(), found).await?
     {
         return reconcile(entry, actor, found).await;
     }

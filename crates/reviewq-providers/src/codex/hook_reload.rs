@@ -30,7 +30,7 @@ const CHECK_DEADLINE: Duration = Duration::from_secs(3);
 /// The pauses before each new list of a conversation's hooks after the reload, in case Codex
 /// applies it a moment after it replies: about 1.3 seconds in all. The first list follows the
 /// reply at once. A slow connection can leave `CHECK_DEADLINE` too little for all of them;
-/// then the last list seen after the reload decides.
+/// then the last list seen after a pause decides, and with none the check is unconfirmed.
 const RELIST_PAUSES: [Duration; 7] = [
     Duration::ZERO,
     Duration::from_millis(20),
@@ -100,7 +100,7 @@ enum ThreadHooks {
 impl Codex {
     /// What the daemon shows of ReviewQ's hooks in the open conversation `thread`. When it
     /// holds the conversation without them, it is asked once to reload them and listed again
-    /// a few times. When the deadline ends the lists, the last one after the reload stands.
+    /// a few times. When the deadline ends the lists, the last one after a pause stands.
     /// `Unconfirmed` whenever it cannot show either, saying whether the conversation was
     /// created before ReviewQ last wrote Codex's trust in them.
     pub(super) async fn own_hooks_live(&self, thread: &NativeSessionId) -> LiveHooks {
@@ -117,10 +117,10 @@ impl Codex {
         })
     }
 
-    /// Sets `shown` to `Running` or `NotRunning` as one daemon session shows the conversation,
-    /// from its first listing, its reload and each later listing alike, so a deadline that
-    /// cuts the listings short keeps what the last one showed. Clears it whenever a listing
-    /// fails or comes from another session.
+    /// Sets `shown` to `Running` as soon as one daemon session lists the hooks live, and to
+    /// `NotRunning` only from a list after the reload that followed a pause, so a deadline
+    /// that cuts the lists short keeps what the last such list showed. Clears it whenever a
+    /// list fails or comes from another session.
     async fn shown_hooks(
         &self,
         thread: &NativeSessionId,
@@ -141,19 +141,22 @@ impl Codex {
         if rpc_result(reply).is_err() || !Arc::ptr_eq(&reloaded, &session) {
             return;
         }
-        for pause in RELIST_PAUSES {
+        for (index, pause) in RELIST_PAUSES.into_iter().enumerate() {
             sleep(pause).await;
-            *shown = match self.thread_hooks(thread, command).await {
+            match self.thread_hooks(thread, command).await {
                 Some((ThreadHooks::Live, listed)) if Arc::ptr_eq(&listed, &session) => {
-                    Some(LiveHooks::Running)
+                    *shown = Some(LiveHooks::Running);
+                    return;
                 }
+                // The list right after the reply may come before Codex applied the reload,
+                // so only a list after a pause can show the hooks still missing.
                 Some((ThreadHooks::Stale, listed)) if Arc::ptr_eq(&listed, &session) => {
-                    Some(LiveHooks::NotRunning)
+                    *shown = (index > 0).then_some(LiveHooks::NotRunning);
                 }
-                _ => None,
-            };
-            if *shown != Some(LiveHooks::NotRunning) {
-                return;
+                _ => {
+                    *shown = None;
+                    return;
+                }
             }
         }
     }

@@ -12,7 +12,7 @@ use reviewq_domain::identity::{
     DeliveryId, NativeSessionId, ReviewId, Revision, RunId, SubmissionId,
 };
 use reviewq_domain::session::{AbsolutePath, HostProvider, LeadTarget};
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -335,6 +335,8 @@ impl LaunchStore for SqliteStore {
                     NativeLaunchResult::Confirmed => "confirmed",
                     NativeLaunchResult::Rejected => "rejected",
                     NativeLaunchResult::Uncertain => "uncertain",
+                    // `withdraw_launch` takes an attempt that was never started.
+                    NativeLaunchResult::NotStarted => return Err(AppError::InvalidRequest.into()),
                 };
                 let time = now_ms()?;
                 let changed = tx.sql.execute(
@@ -354,6 +356,30 @@ impl LaunchStore for SqliteStore {
                 }
                 snapshot(&tx.sql, value)
             }).await.map_err(StoreError::app)
+        })
+    }
+
+    fn withdraw_launch(&self, id: DeliveryId) -> AppFuture<'_, bool> {
+        Box::pin(async move {
+            self.write(move |tx| {
+                let review: Option<String> = tx
+                    .sql
+                    .query_row(
+                        "DELETE FROM launch_attempts
+                         WHERE id=?1 AND state='pending' AND native_id IS NULL AND run_id IS NULL
+                         RETURNING review_id",
+                        [id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(review) = review else {
+                    return Ok(false);
+                };
+                tx.emit(&[ResourceKey::Review(Some(parse(&review)?))])?;
+                Ok(true)
+            })
+            .await
+            .map_err(StoreError::app)
         })
     }
 

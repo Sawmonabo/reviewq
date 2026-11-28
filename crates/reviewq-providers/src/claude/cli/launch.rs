@@ -25,8 +25,14 @@ impl NativeLauncher for ClaudeCli {
         progress: LaunchProgress,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = NativeLaunchResult> + Send + '_>> {
         Box::pin(async move {
-            if self.launch_ready(&input, &progress).await.is_err() {
-                return NativeLaunchResult::Rejected;
+            // Nothing is started before the spawn: a busy ReviewQ leaves the launch to be
+            // started again, and any other refusal ends it.
+            let unstarted = |error| match error {
+                AppError::Busy => NativeLaunchResult::NotStarted,
+                _ => NativeLaunchResult::Rejected,
+            };
+            if let Err(error) = self.launch_ready(&input, &progress).await {
+                return unstarted(error);
             }
             let cwd = input.checkout.root.as_path();
             let mut command = self.command(cwd);
@@ -45,13 +51,15 @@ impl NativeLauncher for ClaudeCli {
             self.plugin_args(&mut command);
             command.arg("--").arg(input.prompt());
 
-            if progress
+            let ready = match progress
                 .record_claude_locator(self.profile.clone(), name.clone(), None)
                 .await
-                .is_err()
-                || progress.check().await.is_err()
             {
-                return NativeLaunchResult::Rejected;
+                Ok(()) => progress.check().await,
+                Err(error) => Err(error),
+            };
+            if let Err(error) = ready {
+                return unstarted(error);
             }
             let Ok(mut child) = command.spawn() else {
                 return NativeLaunchResult::Rejected;

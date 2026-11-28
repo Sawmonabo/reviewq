@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use reviewq_domain::identity::{
     DeliveryId, NativeSessionId, ReviewId, RunId, SessionKey, SubmissionId,
@@ -117,6 +118,10 @@ pub trait LaunchStore: Send + Sync {
         state: NativeLaunchResult,
     ) -> AppFuture<'_, Snapshot<LaunchReceipt>>;
 
+    /// Removes a pending attempt the host never started, which holds no native ID, so the
+    /// same submission can be admitted again: false, leaving it as it is, for any other.
+    fn withdraw_launch(&self, id: DeliveryId) -> AppFuture<'_, bool>;
+
     fn recover_launches(&self) -> AppFuture<'_, ()>;
 }
 
@@ -225,6 +230,52 @@ pub enum NativeLaunchResult {
     Confirmed,
     Rejected,
     Uncertain,
+    /// Nothing was sent to the host because ReviewQ was busy. The attempt is withdrawn, so
+    /// the same submission can start it again, and the caller reads `Busy`.
+    NotStarted,
+}
+
+/// The launch attempts of this process whose outcome the store does not hold yet: `None`
+/// while the host works on one, and the host's result once recording it failed, as a store
+/// that stays full can make it. The one owner of whether a pending attempt is in flight: a
+/// replay of its submission records what is kept here, so it never waits for a restart.
+static UNRECORDED: LazyLock<Mutex<HashMap<DeliveryId, Option<NativeLaunchResult>>>> =
+    LazyLock::new(Default::default);
+
+/// Keeps one attempt in `UNRECORDED` until its outcome is recorded. Dropped before then, as
+/// when recording fails, it leaves the host's result there, or `Uncertain` when the host did
+/// not return.
+struct Flight {
+    id: DeliveryId,
+    result: Option<NativeLaunchResult>,
+    recorded: bool,
+}
+
+impl Flight {
+    fn start(id: DeliveryId) -> Self {
+        if let Ok(mut unrecorded) = UNRECORDED.lock() {
+            unrecorded.insert(id.clone(), None);
+        }
+        Self {
+            id,
+            result: None,
+            recorded: false,
+        }
+    }
+}
+
+impl Drop for Flight {
+    fn drop(&mut self) {
+        let Ok(mut unrecorded) = UNRECORDED.lock() else {
+            return;
+        };
+        if self.recorded {
+            unrecorded.remove(&self.id);
+        } else {
+            let result = self.result.unwrap_or(NativeLaunchResult::Uncertain);
+            unrecorded.insert(self.id.clone(), Some(result));
+        }
+    }
 }
 
 pub async fn run_launch(
@@ -235,12 +286,64 @@ pub async fn run_launch(
     created_at_ms: i64,
     input: LaunchInput,
 ) -> Result<Snapshot<LaunchReceipt>, AppError> {
+    let mut flight = Flight::start(id.clone());
     let progress = LaunchProgress {
         store: store.clone(),
         actor,
         id: id.clone(),
         created_at_ms,
     };
-    let state = host.launch(input, progress).await;
-    store.finish_launch(id, state).await
+    let result = host.launch(input, progress).await;
+    flight.result = Some(result);
+    let recorded = record(store.as_ref(), id, result).await;
+    flight.recorded = recorded.is_ok();
+    recorded?.ok_or(AppError::Busy)
+}
+
+/// Records the host's `result` for the attempt `id`: its receipt, or `None` when the host
+/// started nothing and the attempt is withdrawn, so the same submission can start it again.
+async fn record(
+    store: &dyn LaunchStore,
+    id: DeliveryId,
+    result: NativeLaunchResult,
+) -> Result<Option<Snapshot<LaunchReceipt>>, AppError> {
+    let result = match result {
+        NativeLaunchResult::NotStarted if store.withdraw_launch(id.clone()).await? => {
+            return Ok(None);
+        }
+        // An attempt that holds a native ID may have started after all.
+        NativeLaunchResult::NotStarted => NativeLaunchResult::Uncertain,
+        result => result,
+    };
+    store.finish_launch(id, result).await.map(Some)
+}
+
+/// What a replay of a submission finds: the stored attempt `found`, or `None` when the attempt
+/// was withdrawn and the submission starts again. A pending attempt this process ran without
+/// recording its outcome gets that outcome recorded now; one still in flight, or that this
+/// process never ran, stays as it is.
+pub async fn resume_launch(
+    store: &dyn LaunchStore,
+    found: Snapshot<LaunchReceipt>,
+) -> Result<Option<Snapshot<LaunchReceipt>>, AppError> {
+    if found.value.state != LaunchState::Pending {
+        return Ok(Some(found));
+    }
+    let id = found.value.id.clone();
+    let taken = UNRECORDED.lock().ok().and_then(|mut unrecorded| {
+        let result = (*unrecorded.get(&id)?)?;
+        unrecorded.insert(id.clone(), None);
+        Some(result)
+    });
+    let Some(result) = taken else {
+        return Ok(Some(found));
+    };
+    let mut flight = Flight {
+        id: id.clone(),
+        result: Some(result),
+        recorded: false,
+    };
+    let recorded = record(store, id, result).await;
+    flight.recorded = recorded.is_ok();
+    recorded
 }

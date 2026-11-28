@@ -5,14 +5,81 @@ use reviewq_app::hosts::{
 use reviewq_app::workflow::{WorkflowBinding, WorkflowReadiness};
 use reviewq_domain::identity::DeliveryId;
 use reviewq_domain::session::{HostProvider, LeadTarget};
-use serde_json::json;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use serde_json::{Value, json};
+use tokio::time::{Instant, timeout_at};
 
 use super::Codex;
 use super::connection::CallError;
 use super::history::Item;
 use super::session::{ThreadStatus, canonical_cwd};
 
+/// The part of a delivery attempt kept after the native submit must be written: up to
+/// `DEADLINE` for the write, as much for its reply, and the rest for the readback that finds
+/// the submitted input.
+const AFTER_SUBMIT: Duration = Duration::from_secs(20);
+
+/// A native submit ready to be written.
+struct Prepared {
+    method: &'static str,
+    params: Value,
+    guard: DispatchGuard,
+    question_source: Option<PathBuf>,
+}
+
+/// One delivery attempt's time rules, apart from the work they bound. `prepare` runs until
+/// `submit_by`, and a cut there leaves the attempt `NotSubmitted`, to be tried again. `submit`
+/// must write its request by `submit_by`, which it is given, and says how the attempt ended or
+/// that the readback must decide. The readback runs until `deadline`, and a cut there leaves
+/// the attempt `Uncertain`, since the submit may have been written.
+async fn within_budget<T>(
+    submit_by: Instant,
+    deadline: Instant,
+    prepare: impl Future<Output = Result<T, DeliveryObservation>>,
+    submit: impl AsyncFnOnce(T, Instant) -> Option<DeliveryObservation>,
+    readback: impl Future<Output = DeliveryObservation>,
+) -> DeliveryObservation {
+    let prepared = match timeout_at(submit_by, prepare).await {
+        Ok(Ok(prepared)) => prepared,
+        Ok(Err(observation)) => return observation,
+        Err(_) => return DeliveryObservation::NotSubmitted,
+    };
+    match submit(prepared, submit_by).await {
+        Some(observation) => observation,
+        None => timeout_at(deadline, readback)
+            .await
+            .unwrap_or(DeliveryObservation::Uncertain),
+    }
+}
+
+/// How a submit ended, or `None` when only the readback can tell: whenever the request may
+/// have been written and the caller waits for its input.
+fn submitted(
+    result: Result<(), CallError>,
+    automatic: bool,
+    answers_question: bool,
+) -> Option<DeliveryObservation> {
+    Some(match result {
+        Err(CallError::BeforeSend(_)) => DeliveryObservation::NotSubmitted,
+        Err(CallError::Denied(AppError::Busy | AppError::Unavailable)) => {
+            DeliveryObservation::NotSubmitted
+        }
+        Err(CallError::Denied(AppError::PreconditionFailed)) if answers_question => {
+            DeliveryObservation::QuestionAlreadyAnswered
+        }
+        Err(CallError::Denied(_)) => DeliveryObservation::Rejected,
+        Ok(()) if !automatic && !answers_question => DeliveryObservation::Acknowledged,
+        // The remaining replies and errors still need the original exact readback.
+        _ => return None,
+    })
+}
+
 impl Codex {
+    /// Delivers one message within the attempt's `DispatchGuard::deadline`, as `within_budget`
+    /// sets out: nothing before the submit gives the conversation input, so that work ends at
+    /// `AFTER_SUBMIT` before the deadline, and so must the submit's write.
     pub(super) async fn send_to_thread(
         &self,
         lead: LeadTarget,
@@ -22,14 +89,52 @@ impl Codex {
         guard: DispatchGuard,
     ) -> DeliveryObservation {
         let automatic = guard.workflow().is_some();
+        let deadline = guard.deadline();
+        let readback = self.find_input(lead.clone(), delivery.clone(), None, automatic, false);
+        let submit = async |prepared: Prepared, write_by| {
+            let answers_question = prepared.guard.async_question().is_some();
+            let result = self
+                .connection
+                .submit(
+                    prepared.method,
+                    prepared.params,
+                    prepared.guard,
+                    prepared.question_source,
+                    write_by,
+                )
+                .await;
+            submitted(result, automatic, answers_question)
+        };
+        within_budget(
+            deadline - AFTER_SUBMIT,
+            deadline,
+            self.prepare_send(&lead, &delivery, text, report, guard),
+            submit,
+            readback,
+        )
+        .await
+    }
+
+    /// Reads what the submit needs and builds it, or the observation that ends the attempt
+    /// before anything is sent. It reads and at most loads the thread, giving it no input, so
+    /// it can be cut at any point.
+    async fn prepare_send(
+        &self,
+        lead: &LeadTarget,
+        delivery: &DeliveryId,
+        text: MessageBody,
+        report: Option<ReportRef>,
+        guard: DispatchGuard,
+    ) -> Result<Prepared, DeliveryObservation> {
+        let automatic = guard.workflow().is_some();
         let followup = guard.is_followup();
         let head = if automatic {
             match guard.verify_workflow_source().await {
                 Ok(head) => Some(head),
                 Err(AppError::Conflict | AppError::StaleRevision | AppError::Forbidden) => {
-                    return DeliveryObservation::Rejected;
+                    return Err(DeliveryObservation::Rejected);
                 }
-                Err(_) => return DeliveryObservation::NotSubmitted,
+                Err(_) => return Err(DeliveryObservation::NotSubmitted),
             }
         } else {
             None
@@ -37,20 +142,20 @@ impl Codex {
         let question = guard.async_question();
         let thread = match question {
             Some(question) => self.bound_history_thread(&question.session).await,
-            None => self.verified_thread(&lead).await,
+            None => self.verified_thread(lead).await,
         };
         let mut thread = match thread {
             Ok(thread) => thread,
             Err(AppError::Conflict | AppError::Forbidden) if question.is_some() => {
-                return DeliveryObservation::Rejected;
+                return Err(DeliveryObservation::Rejected);
             }
-            Err(_) => return DeliveryObservation::NotSubmitted,
+            Err(_) => return Err(DeliveryObservation::NotSubmitted),
         };
         if matches!(thread.status, ThreadStatus::NotLoaded) {
             let resumed = match guard.workflow() {
-                None => self.resume_exact_thread(&lead, &thread, None).await,
-                Some(_) if followup => self.resume_saved_followup(&lead, &thread, &guard).await,
-                Some(_) => return DeliveryObservation::NotSubmitted,
+                None => self.resume_exact_thread(lead, &thread, None).await,
+                Some(_) if followup => self.resume_saved_followup(lead, &thread, &guard).await,
+                Some(_) => return Err(DeliveryObservation::NotSubmitted),
             };
             thread = match resumed {
                 Ok(resumed) => resumed,
@@ -60,8 +165,8 @@ impl Codex {
                     | AppError::NotFound
                     | AppError::Forbidden
                     | AppError::PreconditionFailed,
-                ) if followup => return DeliveryObservation::Rejected,
-                Err(_) => return DeliveryObservation::NotSubmitted,
+                ) if followup => return Err(DeliveryObservation::Rejected),
+                Err(_) => return Err(DeliveryObservation::NotSubmitted),
             };
         }
         let question_source = if let Some(question) = question {
@@ -72,7 +177,7 @@ impl Codex {
                     .as_ref()
                     .map(|parent| parent.native_id.as_str())
             {
-                return DeliveryObservation::Rejected;
+                return Err(DeliveryObservation::Rejected);
             }
             thread.path.clone().or_else(|| {
                 question
@@ -113,7 +218,7 @@ impl Codex {
             let ready = if let Some(recovery) = recovery {
                 match self
                     .prepare_continuation(
-                        &lead,
+                        lead,
                         recovery.episode.clone(),
                         recovery.failed_turn.clone(),
                         recovery.kind,
@@ -132,22 +237,24 @@ impl Codex {
                         let mut previous = recovery.clone();
                         previous.capacity = fresh.capacity.clone();
                         if previous == fresh {
-                            return DeliveryObservation::RecoveryAllowanceChanged(fresh.capacity);
+                            return Err(DeliveryObservation::RecoveryAllowanceChanged(
+                                fresh.capacity,
+                            ));
                         }
-                        return DeliveryObservation::Rejected;
+                        return Err(DeliveryObservation::Rejected);
                     }
                     Err(AppError::Conflict | AppError::StaleRevision) => {
-                        return DeliveryObservation::Rejected;
+                        return Err(DeliveryObservation::Rejected);
                     }
-                    _ => return DeliveryObservation::NotSubmitted,
+                    _ => return Err(DeliveryObservation::NotSubmitted),
                 }
             } else {
-                match self.idle_readiness(&lead, &thread).await {
+                match self.idle_readiness(lead, &thread).await {
                     Ok(WorkflowReadiness::Ready(ready)) => ready,
                     Ok(WorkflowReadiness::Held(_)) if followup => {
-                        return DeliveryObservation::Rejected;
+                        return Err(DeliveryObservation::Rejected);
                     }
-                    _ => return DeliveryObservation::NotSubmitted,
+                    _ => return Err(DeliveryObservation::NotSubmitted),
                 }
             };
             let expected_status = if recovery.is_some() {
@@ -159,13 +266,13 @@ impl Codex {
                 params["rootTurnId"] = json!(recovery.root_turn.as_str());
             }
             let Some(previous) = &ready.latest_user_turn_id else {
-                return DeliveryObservation::NotSubmitted;
+                return Err(DeliveryObservation::NotSubmitted);
             };
             let Ok(check) = self.turns(&thread.id, None, false, 1, false).await else {
-                return DeliveryObservation::NotSubmitted;
+                return Err(DeliveryObservation::NotSubmitted);
             };
-            let Ok(current) = self.verified_thread(&lead).await else {
-                return DeliveryObservation::NotSubmitted;
+            let Ok(current) = self.verified_thread(lead).await else {
+                return Err(DeliveryObservation::NotSubmitted);
             };
             if check.data.first().is_none_or(|latest| {
                 latest.id != previous.as_str() || latest.status != expected_status
@@ -173,16 +280,16 @@ impl Codex {
                 || (followup && (current.path != thread.path || !current.is_lead()))
             {
                 if followup {
-                    return DeliveryObservation::Rejected;
+                    return Err(DeliveryObservation::Rejected);
                 }
-                return DeliveryObservation::NotSubmitted;
+                return Err(DeliveryObservation::NotSubmitted);
             }
             let Ok(guard) = guard.confirm_workflow(&ready, &head) else {
-                return DeliveryObservation::Rejected;
+                return Err(DeliveryObservation::Rejected);
             };
             params["model"] = json!(ready.model);
             params["effort"] = json!(ready.effort);
-            params["turnTrigger"] = json!(turn_marker(&delivery));
+            params["turnTrigger"] = json!(turn_marker(delivery));
             ("turn/start", guard)
         } else {
             let method = match thread.status {
@@ -191,14 +298,14 @@ impl Codex {
                         thread.model.as_ref() != Some(model)
                             || thread.reasoning_effort.as_ref() != Some(effort)
                     }) {
-                        return DeliveryObservation::NotSubmitted;
+                        return Err(DeliveryObservation::NotSubmitted);
                     }
                     let Ok(mut turns) = self.turns(&thread.id, None, false, 1, false).await else {
-                        return DeliveryObservation::NotSubmitted;
+                        return Err(DeliveryObservation::NotSubmitted);
                     };
                     let Some(turn) = turns.data.pop().filter(|row| row.status == "inProgress")
                     else {
-                        return DeliveryObservation::NotSubmitted;
+                        return Err(DeliveryObservation::NotSubmitted);
                     };
                     params["expectedTurnId"] = json!(turn.id);
                     "turn/steer"
@@ -210,32 +317,16 @@ impl Codex {
                     }
                     "turn/start"
                 }
-                _ => return DeliveryObservation::NotSubmitted,
+                _ => return Err(DeliveryObservation::NotSubmitted),
             };
             (method, guard)
         };
-
-        let answers_question = guard.async_question().is_some();
-        match self
-            .connection
-            .submit(method, params, guard, question_source)
-            .await
-        {
-            Err(CallError::BeforeSend(_)) => DeliveryObservation::NotSubmitted,
-            Err(CallError::Denied(AppError::Busy | AppError::Unavailable)) => {
-                DeliveryObservation::NotSubmitted
-            }
-            Err(CallError::Denied(AppError::PreconditionFailed)) if answers_question => {
-                DeliveryObservation::QuestionAlreadyAnswered
-            }
-            Err(CallError::Denied(_)) => DeliveryObservation::Rejected,
-            Ok(()) if !automatic && !answers_question => DeliveryObservation::Acknowledged,
-            // The remaining replies and errors still need the original exact readback.
-            _ => {
-                self.find_input(lead, delivery, None, automatic, false)
-                    .await
-            }
-        }
+        Ok(Prepared {
+            method,
+            params,
+            guard,
+            question_source,
+        })
     }
 
     pub(super) async fn find_input(

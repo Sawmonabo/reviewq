@@ -101,9 +101,9 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
 pub(crate) const CODEX_HOOKS_PENDING: &str = "The ReviewQ hooks have not run in Codex yet: open /hooks in Codex to review and trust them. Until then ReviewQ still saves a review's findings and sections, the lead can still submit it, and a review that is not submitted still shows as unfinished; only the end-of-turn reminder and the reminder after compaction are missing.";
 
 /// Shown by `reviewq link` when Codex trusts ReviewQ's hooks but ReviewQ has a reason to
-/// believe the linked conversation does not run them: Codex's daemon holds it without them
-/// even after a reload, or it was created before ReviewQ last wrote that trust and neither
-/// the daemon nor a hook report from it shows them. A Codex conversation loads its hooks when
+/// believe the linked conversation does not run them and no hook has reported from it:
+/// Codex's daemon holds it without them even after a reload, or it was created before ReviewQ
+/// last wrote that trust and the daemon cannot show it. A Codex conversation loads its hooks when
 /// Codex opens it, and ReviewQ reloads them only in the conversations the daemon holds.
 const CODEX_HOOKS_RESTART: &str = "ReviewQ's hooks may not run in this Codex conversation yet. Codex loads a conversation's hooks when it opens the conversation, and this one may have been opened before they were approved; it runs them once Codex opens it again, for example after Codex restarts. Until then it misses the end-of-turn reminder and the reminder after compaction.";
 

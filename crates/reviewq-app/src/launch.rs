@@ -15,7 +15,8 @@ use crate::queue::{MergeRequestState, ReviewSource};
 mod effects;
 pub use effects::{
     ClaudeLaunchLocator, LaunchClaim, LaunchProgress, LaunchReceipt, LaunchState, LaunchStore,
-    NativeLaunchResult, NativeLauncher, NativeLaunchers, ObservedLaunchSettings, run_launch,
+    NativeLaunchResult, NativeLauncher, NativeLaunchers, ObservedLaunchSettings, resume_launch,
+    run_launch,
 };
 
 pub trait NativeModelReader: Send + Sync {

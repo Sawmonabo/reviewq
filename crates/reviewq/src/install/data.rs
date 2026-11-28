@@ -45,7 +45,11 @@ const CONFIG: &[Name] = &[Name::Exact("runtime.json")];
 const RECORD: &str = "install.json";
 /// `$XDG_STATE_HOME/reviewq`. The installation lock's file is not listed: only the uninstall
 /// that holds it deletes it, after everything else.
-const STATE: &[Name] = &[Name::Exact(RECORD), Name::Exact("codex-hooks.json")];
+const STATE: &[Name] = &[
+    Name::Exact(RECORD),
+    Name::Exact("codex-hooks.json"),
+    Name::Exact("codex-trust-note.json"),
+];
 /// Interrupted atomic writes and link swaps, in any of the three folders.
 const TEMPORARY: &[Name] = &[
     Name::Prefix(".reviewq-write."),
@@ -450,6 +454,7 @@ mod tests {
             data.join(".reviewq-write.x1"),
             state.join("install.json"),
             state.join("codex-hooks.json"),
+            state.join("codex-trust-note.json"),
         ];
         for file in &owned {
             fs::create_dir_all(file.parent().unwrap()).unwrap();
