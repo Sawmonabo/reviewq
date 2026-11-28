@@ -31,8 +31,9 @@ async fn search(documents: &Arc<Documents>, offset: u64) -> Result<(), AppError>
     let documents = documents.clone();
     tokio::task::spawn_blocking(move || {
         let stop = AtomicBool::new(false);
-        let claim = documents.claim_blocking(target(), reference(offset), &stop)?;
-        reviewq_app::wait::blocking(claim.handle.clone().lock_owned(), &stop).map(drop)
+        let deadline = wait::deadline();
+        let claim = documents.claim_blocking(target(), reference(offset), deadline, &stop)?;
+        wait::blocking(claim.handle.clone().lock_owned(), deadline, &stop).map(drop)
     })
     .await
     .unwrap()
@@ -45,7 +46,12 @@ async fn a_search_during_window_reads_of_one_document_waits_its_turn() {
     let documents = Arc::new(Documents::default());
     let mut windows = Vec::new();
     for _ in 0..3 {
-        windows.push(documents.claim(target(), reference(1)).await.unwrap());
+        windows.push(
+            documents
+                .claim(target(), reference(1), wait::deadline())
+                .await
+                .unwrap(),
+        );
     }
     let reading = windows[0].handle.clone().lock_owned().await;
     tokio::time::timeout(Duration::from_secs(1), search(&documents, 2))

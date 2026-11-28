@@ -36,7 +36,10 @@ impl GitLab {
     ) -> Result<DiscussionDrafts, AppError> {
         let (revision, mr_id) = self.discussion_context(&source, &scope.revision).await?;
         let id = valid_id(mr_id).ok_or(AppError::Unavailable)?;
-        let (_place, observation) = self.discussions.observe(&source, mr_id, &scope).await?;
+        let (_place, observation) = self
+            .discussions
+            .observe(&source, mr_id, &scope, reviewq_app::wait::deadline())
+            .await?;
         if let Some(cached) = observation.drafts.get() {
             if let Some(witness) = cached.items.first() {
                 let wire: Draft = self
@@ -116,7 +119,10 @@ impl GitLab {
         address: NoteAddress,
     ) -> Result<DiscussionTarget, AppError> {
         let (revision, mr_id) = self.discussion_context(&source, &scope.revision).await?;
-        let (_place, observation) = self.discussions.observe(&source, mr_id, &scope).await?;
+        let (_place, observation) = self
+            .discussions
+            .observe(&source, mr_id, &scope, reviewq_app::wait::deadline())
+            .await?;
         let result = match address {
             NoteAddress::Published(id) => {
                 if !valid_discussion_id(&id) {

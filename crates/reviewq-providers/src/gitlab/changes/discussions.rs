@@ -141,9 +141,14 @@ impl GitLab {
         if page == 0 || page > 1000 || !(1..=50).contains(&limit) {
             return Err(AppError::InvalidRequest);
         }
+        // One deadline for both waits for a place, so together they wait at most `LONGEST`.
+        let deadline = reviewq_app::wait::deadline();
         let (current, mr_id) = self.discussion_context(&source, &scope.revision).await?;
-        let (_place, observation) = self.discussions.observe(&source, mr_id, &scope).await?;
-        let (_page_place, slot) = observation.page(page, limit).await?;
+        let (_place, observation) = self
+            .discussions
+            .observe(&source, mr_id, &scope, deadline)
+            .await?;
+        let (_page_place, slot) = observation.page(page, limit, deadline).await?;
         let cached = slot
             .get_or_try_init(|| async {
                 let started = Instant::now();

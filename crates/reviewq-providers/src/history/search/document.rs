@@ -124,12 +124,18 @@ pub(super) fn read(
     reader: Reader,
 ) -> Result<Projection, AppError> {
     let claim = match reader {
-        Reader::Search => documents.claim_blocking(owner.clone(), reference.clone(), cancel)?,
+        // The search's own deadline cuts these waits through `cancel`; `wait::deadline` is
+        // only their backstop.
+        Reader::Search => {
+            documents.claim_blocking(owner.clone(), reference.clone(), wait::deadline(), cancel)?
+        }
         Reader::Index => documents.try_claim(owner.clone(), reference.clone())?,
     };
     // Declared after the claim, so the lock is let go of before the document's place.
     let mut cached = match reader {
-        Reader::Search => wait::blocking(claim.handle.clone().lock_owned(), cancel)?,
+        Reader::Search => {
+            wait::blocking(claim.handle.clone().lock_owned(), wait::deadline(), cancel)?
+        }
         Reader::Index => claim
             .handle
             .clone()

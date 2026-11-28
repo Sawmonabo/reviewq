@@ -340,16 +340,21 @@ impl NativeHistoryReader for FileHistory {
         query: reviewq_app::history::document::Query,
     ) -> AppFuture<'_, reviewq_app::history::document::Window> {
         Box::pin(async move {
+            // One deadline for the place, the lock and the read slot, so together they wait
+            // at most `LONGEST`.
+            let deadline = reviewq_app::wait::deadline();
             let claim = self
                 .documents
-                .claim(session.target.clone(), reference.clone())
+                .claim(session.target.clone(), reference.clone(), deadline)
                 .await?;
-            let mut slot = reviewq_app::wait::within(claim.handle.clone().lock_owned()).await?;
+            let mut slot =
+                reviewq_app::wait::until(deadline, claim.handle.clone().lock_owned()).await?;
             // The read may outlive this call when it is cancelled, so it keeps the place
             // with the handle and gives both up together. Only a search waits for a place or
             // a document's lock while it holds a read slot, and one search runs at a time, so
             // waiting here for a read slot while holding both cannot close a cycle.
-            self.inspect(session, move |source, cancel| {
+            let permit = reviewq_app::wait::owned_until(self.reads.clone(), deadline).await?;
+            self.inspect_in(permit, session, move |source, cancel| {
                 let read = documents::read(&mut slot, &source, &reference, query, cancel);
                 drop(slot);
                 drop(claim);
@@ -366,12 +371,19 @@ impl NativeHistoryReader for FileHistory {
         query: HistorySearch,
     ) -> AppFuture<'_, Option<SearchPage>> {
         Box::pin(async move {
-            let _slot = reviewq_app::wait::permit(&self.searches).await?;
+            // One deadline for the whole search. Its waits for a document's place and lock
+            // run on the blocking thread; when the deadline cuts the call, its stop flag is
+            // set and they leave at once, so all its waits together last at most `LONGEST`.
+            let deadline = reviewq_app::wait::deadline();
+            let _slot = reviewq_app::wait::until(deadline, self.searches.acquire())
+                .await?
+                .map_err(|_| AppError::Unavailable)?;
+            let permit = reviewq_app::wait::owned_until(self.reads.clone(), deadline).await?;
             let owner = session.target.clone();
             let large = self.large_records.clone();
             let index = self.search_index.clone();
             let documents = self.documents.clone();
-            self.inspect(session, move |source, stop| {
+            let search = self.inspect_in(permit, session, move |source, stop| {
                 // Only the expiry sweep shares this lock, and only for a moment.
                 let mut large = large.lock().map_err(|_| AppError::Internal)?;
                 search::read(
@@ -383,8 +395,8 @@ impl NativeHistoryReader for FileHistory {
                     &documents,
                     index.as_deref(),
                 )
-            })
-            .await
+            });
+            reviewq_app::wait::until(deadline, search).await?
         })
     }
 

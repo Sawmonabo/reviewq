@@ -4,9 +4,10 @@ use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
 use reviewq_app::changes::{Discussion, DiscussionDraft, DiscussionScope};
-use reviewq_app::wait::{Place, Turn};
+use reviewq_app::wait::{Place, Places, Turn};
 use reviewq_domain::identity::{EventCursor, MrIdentity};
-use tokio::sync::{OnceCell, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OnceCell, OwnedSemaphorePermit};
+use tokio::time::Instant as Deadline;
 
 const OBSERVATIONS: usize = 5;
 const RETAINED_BYTES: usize = 8 * 1024 * 1024 / OBSERVATIONS;
@@ -17,14 +18,14 @@ pub(in crate::gitlab) struct DiscussionCache {
     entries: Mutex<VecDeque<Entry>>,
     /// One per observation in use, so a caller holding one always finds an observation to
     /// replace when it needs a new one.
-    uses: Arc<Semaphore>,
+    uses: Places,
 }
 
 impl Default for DiscussionCache {
     fn default() -> Self {
         Self {
             entries: Mutex::default(),
-            uses: Arc::new(Semaphore::new(OBSERVATIONS)),
+            uses: Places::new(OBSERVATIONS),
         }
     }
 }
@@ -47,7 +48,7 @@ pub(super) struct Observation {
     pages: Mutex<VecDeque<PageSlot>>,
     /// One per page being read from GitLab, so a reader holding one always finds a page to
     /// replace.
-    page_uses: Arc<Semaphore>,
+    page_uses: Places,
     pub(super) drafts: OnceCell<Drafts>,
 }
 
@@ -80,15 +81,17 @@ pub(super) struct Drafts {
 impl DiscussionCache {
     /// The observation of `source`'s discussions in `scope`, with its place among
     /// `OBSERVATIONS`. A caller of an observation in use joins its place; a caller that needs
-    /// an observation no one is using waits for a place when every place is in use. Keep the
+    /// an observation no one is using waits until `deadline` for a place when every place is
+    /// in use, and joins the observation if another caller opens it meanwhile. Keep the
     /// place while using the observation.
     pub(super) async fn observe(
         &self,
         source: &MrIdentity,
         mr_id: Option<u64>,
         scope: &DiscussionScope,
+        deadline: Deadline,
     ) -> Result<(Place, Arc<Observation>), AppError> {
-        let mut turn = Turn::new(&self.uses);
+        let mut turn = self.uses.turn(deadline);
         loop {
             if let Some(found) = self.find_or_open(source, mr_id, scope, &mut turn)? {
                 return Ok(found);
@@ -103,7 +106,7 @@ impl DiscussionCache {
         source: &MrIdentity,
         mr_id: Option<u64>,
         scope: &DiscussionScope,
-        turn: &mut Turn,
+        turn: &mut Turn<'_>,
     ) -> Result<Option<(Place, Arc<Observation>)>, AppError> {
         let mut entries = self.entries.lock().map_err(|_| AppError::Internal)?;
         let now = Instant::now();
@@ -158,7 +161,7 @@ impl DiscussionCache {
             opened: now,
             expires: now + LIFETIME,
             pages: Mutex::default(),
-            page_uses: Arc::new(Semaphore::new(RETAINED_PAGES)),
+            page_uses: Places::new(RETAINED_PAGES),
             drafts: OnceCell::const_new(),
         });
         entries.push_back(Entry {
@@ -236,15 +239,17 @@ impl DiscussionCache {
 
 impl Observation {
     /// The slot of one page. A page already read answers at once, and a reader of a page
-    /// being read joins its readers' place; only a reader that starts a page waits for one of
-    /// `RETAINED_PAGES` places when every place is reading a page. Keep the place while using
-    /// the slot.
+    /// being read joins its readers' place; only a reader that starts a page waits until
+    /// `deadline` for one of `RETAINED_PAGES` places when every place is reading a page, and
+    /// joins the page if another reader starts it meanwhile. Keep the place while using the
+    /// slot.
     pub(super) async fn page(
         &self,
         page: u32,
         limit: u16,
+        deadline: Deadline,
     ) -> Result<(Option<Place>, PageCell), AppError> {
-        let mut turn = Turn::new(&self.page_uses);
+        let mut turn = self.page_uses.turn(deadline);
         loop {
             if let Some(found) = self.page_slot((page, limit), &mut turn)? {
                 return Ok(found);
@@ -257,7 +262,7 @@ impl Observation {
     fn page_slot(
         &self,
         address: (u32, u16),
-        turn: &mut Turn,
+        turn: &mut Turn<'_>,
     ) -> Result<Option<(Option<Place>, PageCell)>, AppError> {
         let mut pages = self.pages.lock().map_err(|_| AppError::Internal)?;
         pages.retain(|item| item.value.initialized() || item.place.strong_count() > 0);

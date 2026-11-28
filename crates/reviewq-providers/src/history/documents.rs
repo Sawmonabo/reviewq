@@ -9,11 +9,12 @@ use std::time::{Duration, Instant};
 use reviewq_app::access::AppError;
 use reviewq_app::history::document::{Index, MAX_INDEX_BYTES, Query, SourcePages, Window};
 use reviewq_app::history::{FileContentRef, search::SourceObservation};
-use reviewq_app::wait::{Place, Turn};
+use reviewq_app::wait::{self, Place, Places, Turn};
 use reviewq_domain::identity::ReportHash;
 use reviewq_domain::session::SessionTarget;
 use sha2::{Digest, Sha256};
-use tokio::sync::{Mutex as AsyncMutex, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{Mutex as AsyncMutex, OwnedSemaphorePermit};
+use tokio::time::Instant as Deadline;
 
 use super::{file, locator::Source, native_string::NativeString, records, search};
 
@@ -27,7 +28,7 @@ pub(super) struct Documents {
     active: Arc<Mutex<HashMap<Key, Slot>>>,
     /// One per document in use, shared by every caller of that document, so a caller that
     /// holds one always finds a free place or a document no one else is using.
-    uses: Arc<Semaphore>,
+    uses: Places,
     collect: AtomicBool,
 }
 
@@ -35,7 +36,7 @@ impl Default for Documents {
     fn default() -> Self {
         Self {
             active: Arc::default(),
-            uses: Arc::new(Semaphore::new(MAX_DOCUMENTS)),
+            uses: Places::new(MAX_DOCUMENTS),
             collect: AtomicBool::default(),
         }
     }
@@ -57,14 +58,16 @@ struct Slot {
 
 impl Documents {
     /// The handle of a document. A caller of a document in use joins its place; a caller
-    /// of any other document waits for a place when every document is in use.
+    /// of any other document waits until `deadline` for a place when every document is in
+    /// use, and joins the document if another caller claims it meanwhile.
     pub(super) async fn claim(
         &self,
         target: SessionTarget,
         reference: FileContentRef,
+        deadline: Deadline,
     ) -> Result<Claim, AppError> {
         let key = (target, reference);
-        let mut turn = Turn::new(&self.uses);
+        let mut turn = self.uses.turn(deadline);
         loop {
             if let Some(claim) = self.slot(&key, &mut turn)? {
                 return Ok(claim);
@@ -79,10 +82,11 @@ impl Documents {
         &self,
         target: SessionTarget,
         reference: FileContentRef,
+        deadline: Deadline,
         stop: &AtomicBool,
     ) -> Result<Claim, AppError> {
         let key = (target, reference);
-        let mut turn = Turn::new(&self.uses);
+        let mut turn = self.uses.turn(deadline);
         loop {
             if let Some(claim) = self.slot(&key, &mut turn)? {
                 return Ok(claim);
@@ -98,12 +102,12 @@ impl Documents {
         target: SessionTarget,
         reference: FileContentRef,
     ) -> Result<Claim, AppError> {
-        self.slot(&(target, reference), &mut Turn::new(&self.uses))?
+        self.slot(&(target, reference), &mut self.uses.turn(wait::deadline()))?
             .ok_or(AppError::Busy)
     }
 
     /// The document's claim, or `None` when it needs a place `turn` does not have.
-    fn slot(&self, key: &Key, turn: &mut Turn) -> Result<Option<Claim>, AppError> {
+    fn slot(&self, key: &Key, turn: &mut Turn<'_>) -> Result<Option<Claim>, AppError> {
         if !self.collect.swap(true, Ordering::Relaxed) {
             let owner = Arc::downgrade(&self.active);
             tokio::spawn(async move {

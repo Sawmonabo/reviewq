@@ -9,7 +9,7 @@ use reviewq_app::changes::{
     PatchBytes, PatchContent, PatchFile, PatchFileSelection, PatchPagePreview, PatchSourceTarget,
     PatchSourceWindow, SourcePage,
 };
-use reviewq_app::wait::{Place, Turn};
+use reviewq_app::wait::{self, Place, Places, Turn};
 use reviewq_domain::identity::MrIdentity;
 use tokio::sync::{Mutex, OnceCell, OwnedSemaphorePermit, Semaphore};
 
@@ -126,7 +126,7 @@ pub(in crate::gitlab) struct Leases {
     pub(super) source_reads: Arc<Semaphore>,
     /// One per file-index page being built, so a caller holding one always finds a page to
     /// reuse.
-    scan_uses: Arc<Semaphore>,
+    scan_uses: Arc<Places>,
 }
 
 pub(super) struct Body {
@@ -193,7 +193,7 @@ impl Leases {
             scans,
             flights: super::flights::Flights::default(),
             source_reads: Arc::new(Semaphore::new(MAX_SOURCE_READS)),
-            scan_uses: Arc::new(Semaphore::new(MAX_LEASES)),
+            scan_uses: Arc::new(Places::new(MAX_LEASES)),
         }
     }
 
@@ -206,7 +206,7 @@ impl Leases {
             scans: Arc::default(),
             flights: self.flights.clone(),
             source_reads: self.source_reads.clone(),
-            scan_uses: Arc::new(Semaphore::new(MAX_LEASES)),
+            scan_uses: Arc::new(Places::new(MAX_LEASES)),
         }
     }
 
@@ -229,13 +229,13 @@ impl Leases {
 
     /// The slot of one file-index page. A built page answers at once, and a caller of a page
     /// being built joins its builders' place; only a caller that starts a page waits for one
-    /// of `MAX_LEASES` places when every place is building a page. Keep the place while using
-    /// the slot.
+    /// of `MAX_LEASES` places when every place is building a page, and joins the page if
+    /// another caller starts it meanwhile. Keep the place while using the slot.
     pub(super) async fn index(
         &self,
         key: IndexKey,
     ) -> Result<(Option<Place>, Arc<IndexSlot>), AppError> {
-        let mut turn = Turn::new(&self.scan_uses);
+        let mut turn = self.scan_uses.turn(wait::deadline());
         loop {
             if let Some(found) = self.index_slot(&key, &mut turn).await? {
                 return Ok(found);
@@ -248,7 +248,7 @@ impl Leases {
     async fn index_slot(
         &self,
         key: &IndexKey,
-        turn: &mut Turn,
+        turn: &mut Turn<'_>,
     ) -> Result<Option<(Option<Place>, Arc<IndexSlot>)>, AppError> {
         let mut scans = self.scans.lock().await;
         // The caller checks the current GitLab refs before every lookup. Retain only
