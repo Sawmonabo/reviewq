@@ -28,6 +28,7 @@ use reviewq_app::queue::{
 use reviewq_app::reports::{DrawingRenderer, ReportMutationStore, ReportStore};
 use reviewq_app::settings::{ConnectionSources, NativeSkills, RuntimeSources, SettingsStore};
 use reviewq_app::sources::SourceRefreshStore;
+use reviewq_app::system::SystemControl;
 use reviewq_app::workflow::NativeWorkflowProof;
 use reviewq_app::workspace::WorkspaceStore;
 use reviewq_domain::identity::EventCursor;
@@ -58,6 +59,7 @@ mod questions;
 mod refresh;
 mod settings;
 mod sources;
+mod system;
 mod tables;
 mod targets;
 mod terminal;
@@ -162,6 +164,7 @@ pub(super) struct Entry {
     tables: tables::Cache,
     terminal: Arc<dyn NativeTerminal>,
     browser_desktop: Option<BrowserDesktop>,
+    system: Option<Arc<dyn SystemControl>>,
     sends_allowed: bool,
     commits: watch::Receiver<EventCursor>,
     shutdown: watch::Receiver<bool>,
@@ -219,6 +222,7 @@ pub struct ServiceRuntime<'a> {
     pub drawing_renderer: Option<Arc<dyn DrawingRenderer>>,
     pub terminal: Arc<dyn NativeTerminal>,
     pub browser_desktop: Option<BrowserDesktop>,
+    pub system: Option<Arc<dyn SystemControl>>,
     pub commits: watch::Receiver<EventCursor>,
     pub shutdown: watch::Receiver<bool>,
     pub startup: watch::Receiver<StartupState>,
@@ -253,6 +257,7 @@ pub fn router(
         tables: tables::Cache::new(),
         terminal: runtime.terminal,
         browser_desktop: runtime.browser_desktop,
+        system: runtime.system,
         sends_allowed: runtime.sends_allowed,
         commits: runtime.commits,
         shutdown: runtime.shutdown,
@@ -367,6 +372,7 @@ pub fn router(
             post(hosts::claude_registration),
         )
         .merge(features::routes())
+        .merge(system::routes())
         .merge(history::routes())
         .route(
             "/runs/{run_id}/sessions/{session_key}/history/page",

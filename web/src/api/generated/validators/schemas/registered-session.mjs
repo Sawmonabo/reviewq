@@ -2,9 +2,9 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
-import { schema364 } from "../metadata-9.mjs";
-import { validate116 } from "./review-id-dto.mjs";
-function validate1241(
+import { schema368 } from "../metadata-9.mjs";
+import { validate117 } from "./review-id-dto.mjs";
+function validate1247(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -31,7 +31,7 @@ function validate1241(
           !func0.call(data, "reviewCheckout")) &&
           (missing0 = "reviewCheckout"))
       ) {
-        validate1241.errors = [
+        validate1247.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -44,7 +44,7 @@ function validate1241(
         if (data.cwd !== undefined && func0.call(data, "cwd")) {
           const _errs1 = errors;
           if (typeof data.cwd !== "string") {
-            validate1241.errors = [
+            validate1247.errors = [
               {
                 instancePath: instancePath + "/cwd",
                 schemaPath: "#/properties/cwd/type",
@@ -132,13 +132,13 @@ function validate1241(
                   let data4 = data.reviewCheckout;
                   const _errs6 = errors;
                   if (typeof data4 !== "string" && data4 !== null) {
-                    validate1241.errors = [
+                    validate1247.errors = [
                       {
                         instancePath: instancePath + "/reviewCheckout",
                         schemaPath: "#/properties/reviewCheckout/type",
                         keyword: "type",
                         params: {
-                          type: schema364.properties.reviewCheckout.type,
+                          type: schema368.properties.reviewCheckout.type,
                         },
                       },
                     ];
@@ -155,7 +155,7 @@ function validate1241(
                   ) {
                     const _errs8 = errors;
                     if (
-                      !validate116(data.reviewId, {
+                      !validate117(data.reviewId, {
                         instancePath: instancePath + "/reviewId",
                         parentData: data,
                         parentDataProperty: "reviewId",
@@ -164,8 +164,8 @@ function validate1241(
                     ) {
                       vErrors =
                         vErrors === null
-                          ? validate116.errors
-                          : vErrors.concat(validate116.errors);
+                          ? validate117.errors
+                          : vErrors.concat(validate117.errors);
                       errors = vErrors.length;
                     }
                     var valid0 = _errs8 === errors;
@@ -201,7 +201,7 @@ function validate1241(
         }
       }
     } else {
-      validate1241.errors = [
+      validate1247.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -212,7 +212,7 @@ function validate1241(
       return false;
     }
   }
-  validate1241.errors = vErrors;
+  validate1247.errors = vErrors;
   return errors === 0;
 }
-export { validate1241 };
+export { validate1247 };

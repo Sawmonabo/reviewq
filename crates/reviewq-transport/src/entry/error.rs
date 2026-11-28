@@ -19,6 +19,9 @@ pub(super) enum ApiError {
     // The list is uncapped, from the validator or the app alike, and is capped once where the
     // reply is written.
     InvalidFields(Vec<FieldError>),
+    // The operation was refused before anything changed, for a reason the person reads: a
+    // `409` with that sentence as the error message.
+    Refused(String),
 }
 
 pub(super) struct ApiPath<T>(pub(super) T);
@@ -87,6 +90,10 @@ impl IntoResponse for ApiError {
                 (status, Json(failure)).into_response()
             }
             Self::InvalidFields(errors) => field_errors(AppError::InvalidRequest, &capped(errors)),
+            Self::Refused(message) => {
+                let (status, failure) = refused(message);
+                (status, Json(failure)).into_response()
+            }
             Self::BrowserProofRejected => {
                 let (status, failure) = failure(AppError::Forbidden);
                 (status, [("x-reviewq-csrf-rejected", "1")], Json(failure)).into_response()
@@ -109,12 +116,12 @@ fn field_errors(error: AppError, errors: &[FieldError]) -> Response {
 /// fields, `field_error_text` of the errors capped as the HTTP reply caps them; for any other
 /// failure, the protocol's error object as JSON.
 pub(super) fn tool_error_text(error: ApiError) -> String {
-    let error = match error {
+    let (_status, failure) = match error {
         ApiError::InvalidFields(errors) => return field_error_text(&capped(errors)),
-        ApiError::Application(error) => error,
-        ApiError::BrowserProofRejected => AppError::Forbidden,
+        ApiError::Application(error) => failure(error),
+        ApiError::BrowserProofRejected => failure(AppError::Forbidden),
+        ApiError::Refused(message) => refused(message),
     };
-    let (_status, failure) = failure(error);
     serde_json::to_string(&failure.error).unwrap_or(failure.error.message)
 }
 
@@ -162,6 +169,13 @@ pub fn field_error_text(errors: &[FieldError]) -> String {
 /// rest.
 fn capped(errors: Vec<FieldError>) -> Vec<FieldError> {
     bounded_field_errors(errors.into_iter().collect())
+}
+
+/// The common `409` conflict reply, carrying `message` in place of the generic text.
+fn refused(message: String) -> (StatusCode, Failure) {
+    let (status, mut failure) = failure(AppError::Conflict);
+    failure.error.message = message;
+    (status, failure)
 }
 
 pub(super) fn failure(error: AppError) -> (StatusCode, Failure) {

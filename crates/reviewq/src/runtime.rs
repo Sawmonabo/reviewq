@@ -353,6 +353,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             claude_interrupt,
             terminal,
             browser_desktop: browser_desktop.clone(),
+            system: None,
             workflow: WorkflowIntegration {
                 proof: workflow.clone(),
             },

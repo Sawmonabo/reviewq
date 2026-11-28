@@ -21,6 +21,7 @@ pub mod registration;
 pub mod reports;
 mod scalar;
 pub mod settings;
+pub mod system;
 
 pub use common::{ErrorCode, ErrorDto, Failure, Page, Success, UtcTimestampDto};
 pub use hosts::{

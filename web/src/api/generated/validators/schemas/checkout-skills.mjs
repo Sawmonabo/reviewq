@@ -3,8 +3,8 @@ import { func0 } from "../runtime.mjs";
 import { validate69 } from "./merge-request-iid-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
-import { validate211 } from "./skill.mjs";
-function validate351(
+import { validate212 } from "./skill.mjs";
+function validate353(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -26,7 +26,7 @@ function validate351(
         ((data.skills === undefined || !func0.call(data, "skills")) &&
           (missing0 = "skills"))
       ) {
-        validate351.errors = [
+        validate353.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -39,7 +39,7 @@ function validate351(
         if (data.checkout !== undefined && func0.call(data, "checkout")) {
           const _errs1 = errors;
           if (typeof data.checkout !== "string") {
-            validate351.errors = [
+            validate353.errors = [
               {
                 instancePath: instancePath + "/checkout",
                 schemaPath: "#/properties/checkout/type",
@@ -130,7 +130,7 @@ function validate351(
                       for (let i0 = 0; i0 < len0; i0++) {
                         const _errs8 = errors;
                         if (
-                          !validate211(data4[i0], {
+                          !validate212(data4[i0], {
                             instancePath: instancePath + "/skills/" + i0,
                             parentData: data4,
                             parentDataProperty: i0,
@@ -139,8 +139,8 @@ function validate351(
                         ) {
                           vErrors =
                             vErrors === null
-                              ? validate211.errors
-                              : vErrors.concat(validate211.errors);
+                              ? validate212.errors
+                              : vErrors.concat(validate212.errors);
                           errors = vErrors.length;
                         }
                         var valid1 = _errs8 === errors;
@@ -149,7 +149,7 @@ function validate351(
                         }
                       }
                     } else {
-                      validate351.errors = [
+                      validate353.errors = [
                         {
                           instancePath: instancePath + "/skills",
                           schemaPath: "#/properties/skills/type",
@@ -170,7 +170,7 @@ function validate351(
         }
       }
     } else {
-      validate351.errors = [
+      validate353.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -181,7 +181,7 @@ function validate351(
       return false;
     }
   }
-  validate351.errors = vErrors;
+  validate353.errors = vErrors;
   return errors === 0;
 }
-export { validate351 };
+export { validate353 };

@@ -2,8 +2,8 @@
 import { func0 } from "../runtime.mjs";
 import { validate25 } from "./checkpoint-id-dto.mjs";
 import { validate71 } from "./host-provider-dto.mjs";
-import { validate116 } from "./review-id-dto.mjs";
-function validate113(
+import { validate117 } from "./review-id-dto.mjs";
+function validate114(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate113(
         ((data.nativeId === undefined || !func0.call(data, "nativeId")) &&
           (missing0 = "nativeId"))
       ) {
-        validate113.errors = [
+        validate114.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -37,7 +37,7 @@ function validate113(
             key0 === "provider" ||
             key0 === "reviewId"
           )) {
-            validate113.errors = [
+            validate114.errors = [
               {
                 instancePath,
                 schemaPath: "#/additionalProperties",
@@ -95,7 +95,7 @@ function validate113(
               if (data.reviewId !== undefined && func0.call(data, "reviewId")) {
                 const _errs4 = errors;
                 if (
-                  !validate116(data.reviewId, {
+                  !validate117(data.reviewId, {
                     instancePath: instancePath + "/reviewId",
                     parentData: data,
                     parentDataProperty: "reviewId",
@@ -104,8 +104,8 @@ function validate113(
                 ) {
                   vErrors =
                     vErrors === null
-                      ? validate116.errors
-                      : vErrors.concat(validate116.errors);
+                      ? validate117.errors
+                      : vErrors.concat(validate117.errors);
                   errors = vErrors.length;
                 }
                 var valid0 = _errs4 === errors;
@@ -117,7 +117,7 @@ function validate113(
         }
       }
     } else {
-      validate113.errors = [
+      validate114.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -128,7 +128,7 @@ function validate113(
       return false;
     }
   }
-  validate113.errors = vErrors;
+  validate114.errors = vErrors;
   return errors === 0;
 }
-export { validate113 };
+export { validate114 };

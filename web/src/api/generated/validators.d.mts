@@ -13,6 +13,7 @@ import type {
   FollowupPreferencesRequest,
   InterruptRequest,
   LoadSprintsRequest,
+  LoginStartRequest,
   NotificationStateRequest,
   QuestionAnswerRequest,
   RegisterSessionRequest,
@@ -30,6 +31,7 @@ import type {
   SendMessageRequest,
   TestConnection,
   TrackReviewRequest,
+  UninstallRequest,
   ApprovalViewResponse,
   ArchivePageResponse,
   CancelRecoveryResponse,
@@ -59,6 +61,7 @@ import type {
   InterruptTargetResponse,
   LaunchReceiptResponse,
   LoadSprintsResponse,
+  LoginStartResponse,
   MessageHistoryPageResponse,
   NotificationPageResponse,
   NotificationStateResponse,
@@ -93,10 +96,12 @@ import type {
   RunPreviewResponse,
   SelectedPatchResponse,
   SettingsResponse,
+  SystemFactsResponse,
   TerminalResponse,
   TicketCommentsResponse,
   TicketDetailResponse,
   TrackReviewResponse,
+  UninstallResponse,
   VerifiedConnectionResponse,
   ViewNotificationResponse,
 } from "./contracts.js";
@@ -127,6 +132,7 @@ export function isInterruptRequest(value: unknown): value is InterruptRequest;
 export function isLoadSprintsRequest(
   value: unknown,
 ): value is LoadSprintsRequest;
+export function isLoginStartRequest(value: unknown): value is LoginStartRequest;
 export function isNotificationStateRequest(
   value: unknown,
 ): value is NotificationStateRequest;
@@ -168,6 +174,7 @@ export function isTestConnection(value: unknown): value is TestConnection;
 export function isTrackReviewRequest(
   value: unknown,
 ): value is TrackReviewRequest;
+export function isUninstallRequest(value: unknown): value is UninstallRequest;
 export function isApprovalViewResponse(
   value: unknown,
 ): value is ApprovalViewResponse;
@@ -249,6 +256,9 @@ export function isLaunchReceiptResponse(
 export function isLoadSprintsResponse(
   value: unknown,
 ): value is LoadSprintsResponse;
+export function isLoginStartResponse(
+  value: unknown,
+): value is LoginStartResponse;
 export function isMessageHistoryPageResponse(
   value: unknown,
 ): value is MessageHistoryPageResponse;
@@ -339,6 +349,9 @@ export function isSelectedPatchResponse(
   value: unknown,
 ): value is SelectedPatchResponse;
 export function isSettingsResponse(value: unknown): value is SettingsResponse;
+export function isSystemFactsResponse(
+  value: unknown,
+): value is SystemFactsResponse;
 export function isTerminalResponse(value: unknown): value is TerminalResponse;
 export function isTicketCommentsResponse(
   value: unknown,
@@ -349,6 +362,7 @@ export function isTicketDetailResponse(
 export function isTrackReviewResponse(
   value: unknown,
 ): value is TrackReviewResponse;
+export function isUninstallResponse(value: unknown): value is UninstallResponse;
 export function isVerifiedConnectionResponse(
   value: unknown,
 ): value is VerifiedConnectionResponse;

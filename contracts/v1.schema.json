@@ -5134,6 +5134,49 @@
       ],
       "type": "object"
     },
+    "LoginStart": {
+      "description": "The login state read back from systemd after the change.",
+      "properties": {
+        "startAtLogin": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "startAtLogin"
+      ],
+      "type": "object"
+    },
+    "LoginStartRequest": {
+      "additionalProperties": false,
+      "description": "Turns starting at login on or off. It never starts or stops ReviewQ now.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "LoginStartRequest",
+      "type": "object"
+    },
+    "LoginStartResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/LoginStart"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "LoginStartResponse",
+      "type": "object"
+    },
     "MergeRequestIidDto": {
       "description": "A positive merge request IID within its GitLab project.",
       "pattern": "^([1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6][0-9]{0}|9223372036854775807)$",
@@ -10842,6 +10885,90 @@
       ],
       "type": "object"
     },
+    "SystemFacts": {
+      "description": "What the System page shows about the running ReviewQ.",
+      "properties": {
+        "address": {
+          "description": "The dashboard address, such as `http://127.0.0.1:8766`.",
+          "type": "string"
+        },
+        "dataBytes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SafeCountDto"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The size of the data \"Also delete my data\" removes; null when it cannot be read."
+        },
+        "dataFolder": {
+          "description": "The data folder for display, with the home folder shortened to `~`.",
+          "type": "string"
+        },
+        "lastRefreshAt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UtcTimestampDto"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The queue's last successful refresh."
+        },
+        "mode": {
+          "$ref": "#/definitions/SystemMode"
+        },
+        "startAtLogin": {
+          "description": "Whether the service starts at login; null unless `mode` is `installed`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "mode",
+        "address",
+        "dataFolder",
+        "dataBytes",
+        "lastRefreshAt",
+        "startAtLogin"
+      ],
+      "type": "object"
+    },
+    "SystemFactsResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/SystemFacts"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "SystemFactsResponse",
+      "type": "object"
+    },
+    "SystemMode": {
+      "description": "How this ReviewQ was started. Only `installed` offers the login switch, Quit and Uninstall.",
+      "enum": [
+        "installed",
+        "foreground",
+        "validation"
+      ],
+      "type": "string"
+    },
     "Tab": {
       "enum": [
         "changes",
@@ -11605,6 +11732,54 @@
       ],
       "type": "object"
     },
+    "UninstallReceipt": {
+      "description": "An uninstall that passed its checks and was handed to a job outside the service.",
+      "properties": {
+        "dataFolder": {
+          "description": "The data folder for display, as in `SystemFacts`.",
+          "type": "string"
+        },
+        "deleteData": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "deleteData",
+        "dataFolder"
+      ],
+      "type": "object"
+    },
+    "UninstallRequest": {
+      "additionalProperties": false,
+      "description": "Uninstalls ReviewQ, and with `deleteData` also deletes its data once everything else is\nremoved.",
+      "properties": {
+        "deleteData": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "deleteData"
+      ],
+      "title": "UninstallRequest",
+      "type": "object"
+    },
+    "UninstallResponse": {
+      "description": "The resource and event head from the same authorized snapshot.",
+      "properties": {
+        "cursor": {
+          "$ref": "#/definitions/EventCursorDto"
+        },
+        "data": {
+          "$ref": "#/definitions/UninstallReceipt"
+        }
+      },
+      "required": [
+        "data",
+        "cursor"
+      ],
+      "title": "UninstallResponse",
+      "type": "object"
+    },
     "UnmatchedTicket": {
       "properties": {
         "assignee": {
@@ -11797,6 +11972,8 @@
     "LaunchReceiptResponse": "launch",
     "LoadSprintsRequest": "queue",
     "LoadSprintsResponse": "queue",
+    "LoginStartRequest": "system",
+    "LoginStartResponse": "system",
     "MessageHistoryPageResponse": "delivery",
     "NotificationPageResponse": "notifications",
     "NotificationStateRequest": "notifications",
@@ -11847,12 +12024,15 @@
     "SelectedPatchResponse": "changes",
     "SendMessageRequest": "delivery",
     "SettingsResponse": "settings",
+    "SystemFactsResponse": "system",
     "TerminalResponse": "hosts",
     "TestConnection": "settings",
     "TicketCommentsResponse": "tickets",
     "TicketDetailResponse": "tickets",
     "TrackReviewRequest": "queue",
     "TrackReviewResponse": "queue",
+    "UninstallRequest": "system",
+    "UninstallResponse": "system",
     "VerifiedConnectionResponse": "settings",
     "ViewNotificationResponse": "notifications"
   },
@@ -11872,6 +12052,7 @@
       "FollowupPreferencesRequest": "#/definitions/FollowupPreferencesRequest",
       "InterruptRequest": "#/definitions/InterruptRequest",
       "LoadSprintsRequest": "#/definitions/LoadSprintsRequest",
+      "LoginStartRequest": "#/definitions/LoginStartRequest",
       "NotificationStateRequest": "#/definitions/NotificationStateRequest",
       "QuestionAnswerRequest": "#/definitions/QuestionAnswerRequest",
       "RegisterSessionRequest": "#/definitions/RegisterSessionRequest",
@@ -11888,7 +12069,8 @@
       "SaveSettings": "#/definitions/SaveSettings",
       "SendMessageRequest": "#/definitions/SendMessageRequest",
       "TestConnection": "#/definitions/TestConnection",
-      "TrackReviewRequest": "#/definitions/TrackReviewRequest"
+      "TrackReviewRequest": "#/definitions/TrackReviewRequest",
+      "UninstallRequest": "#/definitions/UninstallRequest"
     },
     "responses": {
       "ApprovalViewResponse": "#/definitions/ApprovalViewResponse",
@@ -11920,6 +12102,7 @@
       "InterruptTargetResponse": "#/definitions/InterruptTargetResponse",
       "LaunchReceiptResponse": "#/definitions/LaunchReceiptResponse",
       "LoadSprintsResponse": "#/definitions/LoadSprintsResponse",
+      "LoginStartResponse": "#/definitions/LoginStartResponse",
       "MessageHistoryPageResponse": "#/definitions/MessageHistoryPageResponse",
       "NotificationPageResponse": "#/definitions/NotificationPageResponse",
       "NotificationStateResponse": "#/definitions/NotificationStateResponse",
@@ -11954,10 +12137,12 @@
       "RunPreviewResponse": "#/definitions/RunPreviewResponse",
       "SelectedPatchResponse": "#/definitions/SelectedPatchResponse",
       "SettingsResponse": "#/definitions/SettingsResponse",
+      "SystemFactsResponse": "#/definitions/SystemFactsResponse",
       "TerminalResponse": "#/definitions/TerminalResponse",
       "TicketCommentsResponse": "#/definitions/TicketCommentsResponse",
       "TicketDetailResponse": "#/definitions/TicketDetailResponse",
       "TrackReviewResponse": "#/definitions/TrackReviewResponse",
+      "UninstallResponse": "#/definitions/UninstallResponse",
       "VerifiedConnectionResponse": "#/definitions/VerifiedConnectionResponse",
       "ViewNotificationResponse": "#/definitions/ViewNotificationResponse"
     }

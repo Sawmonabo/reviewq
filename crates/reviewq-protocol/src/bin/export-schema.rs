@@ -19,6 +19,7 @@ use reviewq_protocol::{
 };
 use reviewq_protocol::{
     Success, actions, decisions, followups, launch, notifications, questions, reports, settings,
+    system,
 };
 use schemars::{JsonSchema, generate::SchemaSettings};
 use serde_json::{Value, json};
@@ -59,6 +60,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.request::<settings::SaveSettings>("settings", "SaveSettings")?;
     registry.request::<settings::CheckoutSkillsRequest>("settings", "CheckoutSkillsRequest")?;
     registry.response::<settings::CheckoutSkillsResponse>("settings", "CheckoutSkillsResponse")?;
+
+    registry.response::<system::SystemFactsResponse>("system", "SystemFactsResponse")?;
+    registry.request::<system::LoginStartRequest>("system", "LoginStartRequest")?;
+    registry.response::<system::LoginStartResponse>("system", "LoginStartResponse")?;
+    registry.request::<system::UninstallRequest>("system", "UninstallRequest")?;
+    registry.response::<system::UninstallResponse>("system", "UninstallResponse")?;
 
     registry.response::<QueuePageResponse>("queue", "QueuePageResponse")?;
     registry

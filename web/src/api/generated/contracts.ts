@@ -16,4 +16,5 @@ export type * from "./contracts/recovery.js";
 export type * from "./contracts/registry.js";
 export type * from "./contracts/reports.js";
 export type * from "./contracts/settings.js";
+export type * from "./contracts/system.js";
 export type * from "./contracts/tickets.js";

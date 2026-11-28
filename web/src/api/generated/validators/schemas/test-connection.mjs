@@ -4,7 +4,7 @@ import { validate40 } from "./connection-draft.mjs";
 import { validate35 } from "./event-cursor-dto.mjs";
 import { validate53 } from "./provider.mjs";
 import { validate57 } from "./token-input.mjs";
-function validate226(
+function validate227(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -24,7 +24,7 @@ function validate226(
         ((data.token === undefined || !func0.call(data, "token")) &&
           (missing0 = "token"))
       ) {
-        validate226.errors = [
+        validate227.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -42,7 +42,7 @@ function validate226(
             key0 === "provider" ||
             key0 === "token"
           )) {
-            validate226.errors = [
+            validate227.errors = [
               {
                 instancePath,
                 schemaPath: "#/additionalProperties",
@@ -147,7 +147,7 @@ function validate226(
         }
       }
     } else {
-      validate226.errors = [
+      validate227.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -158,7 +158,7 @@ function validate226(
       return false;
     }
   }
-  validate226.errors = vErrors;
+  validate227.errors = vErrors;
   return errors === 0;
 }
-export { validate226 };
+export { validate227 };

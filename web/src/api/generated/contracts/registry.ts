@@ -55,6 +55,14 @@ import type {
 } from "./queue.js";
 
 import type {
+  LoginStartRequest,
+  LoginStartResponse,
+  SystemFactsResponse,
+  UninstallRequest,
+  UninstallResponse,
+} from "./system.js";
+
+import type {
   NotificationPageResponse,
   NotificationStateRequest,
   NotificationStateResponse,
@@ -158,6 +166,7 @@ export interface Contracts {
   FollowupPreferencesRequest: FollowupPreferencesRequest;
   InterruptRequest: InterruptRequest;
   LoadSprintsRequest: LoadSprintsRequest;
+  LoginStartRequest: LoginStartRequest;
   NotificationStateRequest: NotificationStateRequest;
   QuestionAnswerRequest: QuestionAnswerRequest;
   RegisterSessionRequest: RegisterSessionRequest;
@@ -175,6 +184,7 @@ export interface Contracts {
   SendMessageRequest: SendMessageRequest;
   TestConnection: TestConnection;
   TrackReviewRequest: TrackReviewRequest;
+  UninstallRequest: UninstallRequest;
   ApprovalViewResponse: ApprovalViewResponse;
   ArchivePageResponse: ArchivePageResponse;
   CancelRecoveryResponse: CancelRecoveryResponse;
@@ -204,6 +214,7 @@ export interface Contracts {
   InterruptTargetResponse: InterruptTargetResponse;
   LaunchReceiptResponse: LaunchReceiptResponse;
   LoadSprintsResponse: LoadSprintsResponse;
+  LoginStartResponse: LoginStartResponse;
   MessageHistoryPageResponse: MessageHistoryPageResponse;
   NotificationPageResponse: NotificationPageResponse;
   NotificationStateResponse: NotificationStateResponse;
@@ -238,10 +249,12 @@ export interface Contracts {
   RunPreviewResponse: RunPreviewResponse;
   SelectedPatchResponse: SelectedPatchResponse;
   SettingsResponse: SettingsResponse;
+  SystemFactsResponse: SystemFactsResponse;
   TerminalResponse: TerminalResponse;
   TicketCommentsResponse: TicketCommentsResponse;
   TicketDetailResponse: TicketDetailResponse;
   TrackReviewResponse: TrackReviewResponse;
+  UninstallResponse: UninstallResponse;
   VerifiedConnectionResponse: VerifiedConnectionResponse;
   ViewNotificationResponse: ViewNotificationResponse;
 }
