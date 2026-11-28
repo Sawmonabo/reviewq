@@ -80,10 +80,13 @@ export async function deliver($, state, offer) {
     await defer($, state, attempt, `linked ${state.linked}, draft ${!!state.draft}, phase ${phaseOf(state)}, same session ${sameSession}`);
     return;
   }
+  // The row the prompt must follow. A conversation with no message yet has none, and the
+  // prompt is then its first.
   const prior = await $.session.messages({ last: 1 });
-  attempt.after = Array.isArray(prior) ? prior.at(-1)?.uuid : undefined;
-  if (!attempt.after || attempt.revision !== state.inputRevision) {
-    await defer($, state, attempt, attempt.after ? "new input" : `no last row (${prior?.deny ?? typeof prior})`);
+  const read = Array.isArray(prior) && (prior.length === 0 || !!prior[0].uuid);
+  attempt.after = read ? prior[0]?.uuid : undefined;
+  if (!read || attempt.revision !== state.inputRevision) {
+    await defer($, state, attempt, read ? "new input" : `no last row (${prior?.deny ?? typeof prior})`);
     return;
   }
   const authorization = await invoke($, "delivery-check", state, { offer });
@@ -142,7 +145,7 @@ export async function observeFirstStep($, state, event) {
   const attempt = state?.delivery;
   if (!attempt?.started || !attempt.candidate || attempt.competing ||
       attempt.turns.size !== 1 || !attempt.turns.has(event.turnId)) return;
-  const following = await $.session.messages({ after: attempt.after });
+  const following = await $.session.messages(attempt.after ? { after: attempt.after } : { last: 4096 });
   if (!Array.isArray(following)) return;
   const inputs = following.filter(row => row.role === "user");
   if (attempt.competing || attempt.turns.size !== 1 || inputs.length !== 1
