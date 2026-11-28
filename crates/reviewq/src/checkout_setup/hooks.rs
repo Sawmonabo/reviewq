@@ -7,10 +7,9 @@ use sha2::{Digest, Sha256};
 
 use super::files::{self, Edit, read};
 use super::git::Checkout;
-use super::{Failure, Unfinished};
+use super::{Failure, MARKER, Unfinished};
 
 const POST_CHECKOUT: &str = "hooks/post-checkout";
-const MARKER: &str = "# Managed by ReviewQ";
 
 /// Writes the hook for `checkout`, unless Git uses another hooks folder or the hook there is
 /// not ReviewQ's. A record ReviewQ cannot read stops setup with its step, then `again`.

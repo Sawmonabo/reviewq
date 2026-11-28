@@ -17,6 +17,26 @@ pub(super) struct Checkout {
     pub worktrees: Vec<PathBuf>,
 }
 
+/// Git could not read `folder`: `cause` is Git's own words, or why it gave none.
+#[derive(Debug)]
+pub(super) struct Unread {
+    pub(super) folder: PathBuf,
+    pub(super) cause: String,
+}
+
+impl std::fmt::Display for Unread {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "Git could not read {}: {}",
+            self.folder.display(),
+            self.cause
+        )
+    }
+}
+
+impl std::error::Error for Unread {}
+
 pub(super) async fn discover(directory: Option<&Path>) -> Result<Checkout, Failure> {
     let directory = selected(directory)?;
     let worktree = repo_path(&directory, "--show-toplevel").await?;
@@ -108,9 +128,8 @@ async fn tracked(root: &Path, paths: &[&str]) -> Result<bool, Failure> {
 }
 
 /// Whether `root` is still a worktree of the repository at `common`, its top level. It is not
-/// when Git names another, or when the folder is gone or holds no `.git`, so no repository can
-/// be there. Any other failure, such as a timeout or a bad line in a Git config, is an error
-/// with Git's words.
+/// when Git names another, or when `no_repository` holds for the folder. Any other failure,
+/// such as a timeout or a bad line in a Git config, is an error with Git's words.
 pub(super) async fn belongs(root: &Path, common: &Path) -> Result<bool, Failure> {
     for (name, expected) in [("--git-common-dir", common), ("--show-toplevel", root)] {
         let unsure = |cause: &dyn std::fmt::Display| {
@@ -126,23 +145,43 @@ pub(super) async fn belongs(root: &Path, common: &Path) -> Result<bool, Failure>
                 Ok(_) => return Ok(false),
                 Err(error) => return Err(unsure(&error).into()),
             },
-            Ok(Err(refusal)) => {
-                return match root.join(".git").symlink_metadata() {
-                    Err(error)
-                        if matches!(
-                            error.kind(),
-                            ErrorKind::NotFound | ErrorKind::NotADirectory
-                        ) =>
-                    {
-                        Ok(false)
-                    }
-                    _ => Err(unsure(&refusal).into()),
-                };
-            }
+            Ok(Err(_)) if no_repository(root) => return Ok(false),
+            Ok(Err(refusal)) => return Err(unsure(&refusal).into()),
             Err(error) => return Err(unsure(&unanswered(&error)).into()),
         }
     }
     Ok(true)
+}
+
+/// Whether no repository can be at `root`: the folder is gone or holds no `.git`, or its `.git`
+/// is a linked worktree's file whose `gitdir:` names a Git folder that is gone, as after the
+/// main repository moved. Such a folder is no checkout, so nothing there waits for Git.
+fn no_repository(root: &Path) -> bool {
+    let missing = |error: std::io::Error| {
+        matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory)
+    };
+    let file = root.join(".git");
+    match file.symlink_metadata() {
+        Err(error) => missing(error),
+        // Git reads `gitdir: <folder>`, without the line end, relative to the worktree.
+        Ok(metadata) if metadata.is_file() && metadata.len() <= 4096 => std::fs::read(&file)
+            .ok()
+            .and_then(|text| {
+                let folder = text.strip_prefix(b"gitdir: ")?;
+                let end = folder
+                    .iter()
+                    .rposition(|byte| !matches!(byte, b'\n' | b'\r'))?;
+                Some(root.join(OsStr::from_bytes(&folder[..=end])))
+            })
+            .is_some_and(|folder| folder.metadata().is_err_and(missing)),
+        Ok(_) => false,
+    }
+}
+
+/// Whether `folder` is in no Git checkout: neither it nor a folder above it can hold a
+/// repository, by `no_repository`. Read only once Git refused, to say what the user does.
+pub(super) fn outside_checkout(folder: &Path) -> bool {
+    folder.ancestors().all(no_repository)
 }
 
 pub(super) async fn require_ignored(root: &Path, paths: &[&str]) -> Result<(), Failure> {
@@ -206,7 +245,7 @@ pub(super) enum Destination {
     /// Its worktree is still the checkout's, but Git now tracks it.
     Tracked,
     /// Its folder is no longer a worktree of the checkout, such as a removed worktree whose
-    /// folder now holds another repository.
+    /// folder now holds another repository, or one whose Git folder is gone.
     Elsewhere,
 }
 
@@ -252,7 +291,10 @@ async fn answer(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, Failure
         Ok(Err(refusal)) => refusal.to_string(),
         Err(error) => unanswered(&error).to_owned(),
     };
-    Err(format!("Git could not read {}: {cause}", directory.display()).into())
+    Err(Box::new(Unread {
+        folder: directory.to_owned(),
+        cause,
+    }))
 }
 
 /// Why Git gave no answer, when it did not run to the end.

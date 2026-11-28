@@ -195,7 +195,7 @@ pub(super) async fn finish(paths: &Paths) -> Result<(), Failure> {
     remove(
         &mut paths,
         &options,
-        "run the same `bin/reviewq install --from <release folder>` command again",
+        "run the same `<release folder>/bin/reviewq install --from <release folder>` command again",
     )
     .await?;
     Ok(())
@@ -459,7 +459,7 @@ async fn retire_windows_if_removed(paths: &Paths) {
 /// release folder, which needs nothing but the install record.
 fn report_identity_kept(error: &Failure) {
     eprintln!(
-        "ReviewQ could not finish removing its Windows notification identity Personal.ReviewQ: {error} The next ReviewQ install reuses it. To try the removal again, run `bin/reviewq uninstall` from a ReviewQ release folder."
+        "ReviewQ could not finish removing its Windows notification identity Personal.ReviewQ: {error} The next ReviewQ install reuses it. To try the removal again, run `<release folder>/bin/reviewq uninstall`."
     );
 }
 
@@ -495,10 +495,7 @@ async fn failed(
                 };
                 // The journal keeps the whole reason; the notice keeps it short.
                 let reason = format!("{}.", error.to_string().trim_end_matches('.'));
-                format!(
-                    "{HEAD}. {next} {}",
-                    crate::checkout_setup::clip(reason, 300)
-                )
+                format!("{HEAD}. {next} {}", reviewq_domain::text::clip(reason, 300))
             }
         };
         notify(paths, &body).await;

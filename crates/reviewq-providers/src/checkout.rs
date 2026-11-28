@@ -67,25 +67,34 @@ pub async fn git_run(
             command.env_remove(key);
         }
         let mut child = command.spawn().map_err(|_| AppError::Unavailable)?;
-        let mut stdout = child
-            .stdout
-            .take()
-            .ok_or(AppError::Unavailable)?
-            .take(OUTPUT_LIMIT + 1);
-        let mut stderr = child
-            .stderr
-            .take()
-            .ok_or(AppError::Unavailable)?
-            .take(MESSAGE_LIMIT as u64 * 4);
+        let stdout = child.stdout.take().ok_or(AppError::Unavailable)?;
+        let stderr = child.stderr.take().ok_or(AppError::Unavailable)?;
         let (mut body, mut said) = (Vec::new(), Vec::new());
-        // Both are read at once, so a full pipe on either side cannot stall Git.
-        let (read, _) = tokio::join!(stdout.read_to_end(&mut body), stderr.read_to_end(&mut said));
-        drop((stdout, stderr));
+        // Both are read at once, so a full pipe on either side cannot stall Git. Past its cap
+        // the rest of what Git says is read and dropped. Output past its cap ends Git, which
+        // also ends what it says, so the answer comes at once.
+        let output = async {
+            let mut stdout = stdout.take(OUTPUT_LIMIT + 1);
+            let read = stdout.read_to_end(&mut body).await;
+            drop(stdout);
+            if body.len() as u64 > OUTPUT_LIMIT {
+                let _ = child.start_kill();
+            }
+            read
+        };
+        let message = async {
+            let mut stderr = stderr.take(MESSAGE_LIMIT as u64 * 4);
+            if stderr.read_to_end(&mut said).await.is_ok() {
+                let _ = tokio::io::copy(&mut stderr.into_inner(), &mut tokio::io::sink()).await;
+            }
+        };
+        let (read, ()) = tokio::join!(output, message);
+        // Git is reaped before any answer, so no child is left behind.
+        let status = child.wait().await.map_err(|_| AppError::Unavailable)?;
         read.map_err(|_| AppError::Unavailable)?;
         if body.len() as u64 > OUTPUT_LIMIT {
             return Err(AppError::PayloadTooLarge);
         }
-        let status = child.wait().await.map_err(|_| AppError::Unavailable)?;
         if !status.success() {
             return Ok(Err(GitRefusal {
                 code: status.code(),
@@ -101,7 +110,7 @@ pub async fn git_run(
 /// What Git wrote as one line of at most `MESSAGE_LIMIT` bytes, so it reads inside a sentence.
 fn one_line(said: &[u8]) -> String {
     let text = String::from_utf8_lossy(said);
-    let mut line = text
+    let line = text
         .lines()
         .map(|line| line.trim().trim_end_matches('.'))
         .filter(|line| !line.is_empty())
@@ -112,15 +121,7 @@ fn one_line(said: &[u8]) -> String {
         })
         .collect::<Vec<_>>()
         .join("; ");
-    if line.len() > MESSAGE_LIMIT {
-        let cut = (0..=MESSAGE_LIMIT - 3)
-            .rev()
-            .find(|at| line.is_char_boundary(*at))
-            .unwrap_or(0);
-        line.truncate(cut);
-        line.push('…');
-    }
-    line
+    reviewq_domain::text::clip(line, MESSAGE_LIMIT)
 }
 
 pub(crate) async fn verify_checkout(
@@ -162,4 +163,48 @@ async fn resolve(directory: &Path, target: &str) -> Result<AbsolutePath, AppErro
         return Err(AppError::InvalidRequest);
     }
     AbsolutePath::from_canonical(path).map_err(|_| AppError::InvalidRequest)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    /// Git blocks once a pipe ReviewQ no longer reads is full. An answer past its cap must
+    /// still come at once: too long on standard output, and Git's own words when it fails
+    /// after writing far more than a message holds to standard error.
+    #[tokio::test]
+    async fn output_past_its_cap_answers_at_once() {
+        let scratch = tempfile::tempdir().expect("scratch folder");
+        let status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .arg(scratch.path())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .expect("git runs");
+        assert!(status.success());
+        let started = Instant::now();
+        let word = "x".repeat(1024);
+        let mut quoted = vec!["rev-parse", "--sq-quote"];
+        quoted.extend(std::iter::repeat_n(word.as_str(), 1024));
+        let answer = git_run(scratch.path(), &quoted).await;
+        assert!(
+            matches!(answer, Err(AppError::PayloadTooLarge)),
+            "{answer:?}"
+        );
+        let paths = (0..1000)
+            .map(|at| format!("{word}{at}"))
+            .collect::<Vec<_>>();
+        let mut unmatched = vec!["ls-files", "--error-unmatch", "--"];
+        unmatched.extend(paths.iter().map(String::as_str));
+        let refusal = git_run(scratch.path(), &unmatched)
+            .await
+            .expect("Git answers")
+            .expect_err("Git refuses");
+        assert_eq!(refusal.code, Some(1));
+        assert!(refusal.message.starts_with("error: pathspec"), "{refusal}");
+        assert!(refusal.message.len() <= MESSAGE_LIMIT);
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 }

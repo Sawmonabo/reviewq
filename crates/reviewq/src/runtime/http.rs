@@ -1,3 +1,4 @@
+use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -5,6 +6,7 @@ use hyper::server::conn::http1;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::service::TowerToHyperService;
 use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
+use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -16,6 +18,30 @@ const EPISODE: Duration = Duration::from_secs(60);
 /// The most open files the service asks for: far above a burst of browser and MCP
 /// connections, and no more than the hard limits systems commonly set.
 const OPEN_FILES: u64 = 65_536;
+/// How many new connections each listener holds until the service accepts them, so a burst
+/// of agent calls waits instead of being dropped. Linux caps it at `net.core.somaxconn`,
+/// 4096 by default; Tokio's own bind asks for 128.
+const ACCEPT_BACKLOG: i32 = 4096;
+
+/// Listens on loopback `ip` at `port`, with `ACCEPT_BACKLOG`. An IPv6 listener takes IPv6
+/// only, so it never answers for the IPv4 port. Address reuse lets a restart bind while
+/// connections closed by the previous service linger, as Tokio's own bind allows.
+pub(super) fn loopback(ip: IpAddr, port: u16) -> std::io::Result<TcpListener> {
+    let address = SocketAddr::new(ip, port);
+    let socket = Socket::new(
+        Domain::for_address(address),
+        Type::STREAM,
+        Some(Protocol::TCP),
+    )?;
+    if ip.is_ipv6() {
+        socket.set_only_v6(true)?;
+    }
+    socket.set_reuse_address(true)?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&address.into())?;
+    socket.listen(ACCEPT_BACKLOG)?;
+    TcpListener::from_std(socket.into())
+}
 
 /// Raises the soft open-file limit to the hard one, at most `OPEN_FILES`. A service starts
 /// with a soft limit of 1024, which a burst of connections reaches. Child processes inherit

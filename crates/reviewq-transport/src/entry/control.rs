@@ -94,6 +94,12 @@ impl ServiceEndpoint {
     pub fn native(&self) -> SocketAddr {
         self.native
     }
+    /// The MCP address agents get: `http://[::1]:<native port>/mcp` while the IPv6 loopback
+    /// listener is up, otherwise the IPv4 browser listener's, which `native` then is. Both
+    /// listeners serve `/mcp`, so a session that loaded the other address keeps working.
+    pub fn mcp_url(&self) -> String {
+        format!("http://{}/mcp", self.native)
+    }
     pub fn instance(&self) -> &str {
         &self.instance
     }

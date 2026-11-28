@@ -23,6 +23,8 @@ pub(super) struct Edit {
     before: Option<Existing>,
     after: Option<Vec<u8>>,
     mode: u32,
+    /// A removal that also takes away the skill's own folder once it is empty.
+    folder: bool,
 }
 
 pub(super) struct Changes {
@@ -207,6 +209,7 @@ impl Edit {
             before,
             after: Some(after),
             mode,
+            folder: false,
         }
     }
 
@@ -216,6 +219,17 @@ impl Edit {
             before: Some(before),
             after: None,
             mode: 0,
+            folder: false,
+        }
+    }
+
+    /// Removes a skill file ReviewQ wrote, then its `reviewq-manage` folder when that is
+    /// then empty. The name is ReviewQ's own, and an empty folder holds nothing to lose; the
+    /// folders above it stay, since nothing proves ReviewQ made them.
+    pub(super) fn remove_skill(path: PathBuf, before: Existing) -> Self {
+        Self {
+            folder: true,
+            ..Self::remove(path, before)
         }
     }
 
@@ -239,17 +253,37 @@ impl Edit {
             Some(bytes) => write(&self.path, bytes, self.mode, expected),
             None => {
                 same(&self.path, expected)?;
-                fs::remove_file(&self.path).map_err(Into::into)
+                fs::remove_file(&self.path)?;
+                // Removing a folder that is not empty fails, and then it stays as it is.
+                if let Some(folder) = self.own_folder() {
+                    let _ = fs::remove_dir(folder);
+                }
+                Ok(())
             }
         }
     }
 
     fn sync(&self) -> Result<(), Failure> {
-        let dir = self
+        let mut dir = self
             .path
             .parent()
             .ok_or("Missing checkout destination directory.")?;
+        // A removed skill folder is synced through the folder that held it.
+        if self.own_folder().is_some_and(|folder| !folder.exists()) {
+            dir = dir
+                .parent()
+                .ok_or("Missing checkout destination directory.")?;
+        }
         Ok(File::open(dir)?.sync_all()?)
+    }
+
+    /// The skill's own `reviewq-manage` folder, for a removal made by `remove_skill`.
+    fn own_folder(&self) -> Option<&Path> {
+        let folder = self
+            .path
+            .parent()
+            .filter(|_| self.folder && self.after.is_none())?;
+        (folder.file_name()? == "reviewq-manage").then_some(folder)
     }
 
     fn unchanged(&self) -> bool {

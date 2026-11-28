@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{Read, Write};
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
@@ -29,7 +29,6 @@ use reviewq_transport::{
     BrowserDesktop, ServiceEndpoint, ServiceIdentity, StartupState, WorkflowIntegration,
 };
 use sha2::{Digest, Sha256};
-use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
@@ -107,8 +106,8 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         }
         None
     };
-    let v4 = TcpListener::bind((Ipv4Addr::LOCALHOST, browser_port)).await?;
-    let v6 = match native_listener(native_port) {
+    let v4 = http::loopback(Ipv4Addr::LOCALHOST.into(), browser_port)?;
+    let v6 = match http::loopback(Ipv6Addr::LOCALHOST.into(), native_port) {
         Ok(listener) => Some(listener),
         Err(error)
             if matches!(
@@ -443,7 +442,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             workers.push(tokio::spawn(crate::checkout_setup::reconcile::run(
                 store.clone(),
                 profile.clone(),
-                native,
+                endpoint.mcp_url(),
                 checkout_claude_profile,
             )));
         }
@@ -540,7 +539,7 @@ async fn dispatch_deliveries(
                         let task = running.spawn(async move {
                             if !matches!(
                                 tokio::time::timeout(
-                                    Duration::from_secs(60),
+                                    reviewq_app::hosts::DELIVERY_LIMIT,
                                     recover_delivery(store, host.as_ref(), candidate, sources)
                                 )
                                 .await,
@@ -597,15 +596,6 @@ async fn wait_until_due(due: Option<i64>) {
         .unwrap_or(due);
     let delay = due.saturating_sub(now).max(20) as u64;
     tokio::time::sleep(Duration::from_millis(delay)).await;
-}
-
-fn native_listener(port: u16) -> Result<TcpListener, std::io::Error> {
-    let socket = Socket::new(Domain::IPV6, Type::STREAM, Some(Protocol::TCP))?;
-    socket.set_only_v6(true)?;
-    socket.set_nonblocking(true)?;
-    socket.bind(&SocketAddr::new(Ipv6Addr::LOCALHOST.into(), port).into())?;
-    socket.listen(128)?;
-    TcpListener::from_std(socket.into())
 }
 
 async fn wait_for_stop(mut watch: watch::Receiver<bool>) {

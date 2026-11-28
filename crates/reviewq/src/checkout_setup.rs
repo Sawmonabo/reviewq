@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use crate::{native_client, runtime};
 
 mod claude;
+mod codex;
 pub(crate) mod files;
 mod git;
 mod hooks;
@@ -19,15 +20,21 @@ mod projection;
 pub(crate) mod reconcile;
 mod unfinished;
 
-pub(crate) use unfinished::{Unfinished, clip};
+pub(crate) use unfinished::Unfinished;
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 const GRANT: &str = "/api/v1/checkout/grant";
+/// The line that marks what ReviewQ wrote in a Codex config and in its Git hook.
+const MARKER: &str = "# Managed by ReviewQ";
 /// What finishes each command's cleanup once the user did what it left for them. The
 /// uninstall's step comes from its caller, which also names it in the dashboard job's notice.
 const SETUP_AGAIN: &str = "run the same `reviewq checkout setup` command again";
 const REVOKE_AGAIN: &str = "run the same `reviewq checkout revoke` command again";
 const SERVICE_AGAIN: &str = "ReviewQ tries again on its own";
+/// What the user does when the folder a command reads is in no Git checkout.
+const SETUP_OUTSIDE: &str = "Run `reviewq checkout setup` inside the Git checkout";
+const REVOKE_OUTSIDE: &str = "Run `reviewq checkout revoke` inside the Git checkout";
+const SERVICE_OUTSIDE: &str = "Change this project's checkout in ReviewQ's settings";
 
 pub(crate) async fn worktree(
     profile: &Path,
@@ -60,11 +67,11 @@ pub(crate) async fn install(
     project: ProjectId,
     claude_home: Option<PathBuf>,
 ) -> Result<(), Failure> {
-    let checkout = discover(directory.as_deref(), SETUP_AGAIN).await?;
+    let checkout = discover(directory.as_deref(), SETUP_OUTSIDE, SETUP_AGAIN).await?;
     let endpoint = runtime::read_endpoint(profile)?;
     let client = native_client::client()?;
     let revision = settings_revision(&client, &endpoint).await?;
-    let url = format!("http://{}/mcp", endpoint.native());
+    let url = endpoint.mcp_url();
     let claude = projection::claude_config(claude_home.as_deref())?;
     let lock = files::hold(profile, &checkout.common)?;
     // A key whose grant was withdrawn, by a revoke, a settings change or an uninstall whose
@@ -116,19 +123,45 @@ pub(crate) async fn install(
     Ok(())
 }
 
-/// The checkout Git finds at `directory`, the current folder when `None`. When Git cannot
-/// say, such as for a bad line in a worktree's Git config, the error gives Git's words and
-/// ends with `again`, the step that finishes the command once that is fixed.
-async fn discover(directory: Option<&Path>, again: &str) -> Result<git::Checkout, Failure> {
-    git::discover(directory).await.map_err(|error| {
-        let folder = directory
-            .map(Path::to_owned)
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("."));
-        let mut left = Unfinished::new(again);
-        left.failed("read the Git checkout at", &folder, &error);
-        Box::new(left) as Failure
-    })
+/// The checkout Git finds at `directory`, the current folder when `None`, or the error
+/// `unreadable` gives.
+async fn discover(
+    directory: Option<&Path>,
+    outside: &str,
+    again: &str,
+) -> Result<git::Checkout, Failure> {
+    git::discover(directory)
+        .await
+        .map_err(|error| unreadable(directory, outside, again, error))
+}
+
+/// What a command says when Git could not read the checkout at `directory`, the current
+/// folder when `None`. For a folder in no Git checkout it leads with `outside`, the user's
+/// step. Otherwise, such as for a bad line in a worktree's Git config, it gives Git's words
+/// and ends with `again`, the step that finishes the command once that is fixed.
+fn unreadable(directory: Option<&Path>, outside: &str, again: &str, error: Failure) -> Failure {
+    let folder = directory
+        .map(Path::to_owned)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let folder = folder
+        .canonicalize()
+        .or_else(|_| std::path::absolute(&folder))
+        .unwrap_or(folder);
+    if git::outside_checkout(&folder) {
+        let found = format!("ReviewQ found no Git checkout at {}.", folder.display());
+        return format!("{outside}. {found}").into();
+    }
+    let mut left = Unfinished::new(again);
+    match error.downcast::<git::Unread>() {
+        // Git's words are the cause, said once, at the folder Git could not read.
+        Ok(unread) => {
+            let cause = Failure::from(unread.cause);
+            left.failed("read the Git checkout at", &unread.folder, &cause);
+        }
+        Err(error) => left.failed("read the Git checkout at", &folder, &error),
+    }
+    Box::new(left)
 }
 
 async fn settings_revision(
@@ -247,7 +280,9 @@ fn verify_binding(
 }
 
 pub(crate) async fn revoke(profile: &Path, directory: Option<PathBuf>) -> Result<(), Failure> {
-    let common = git::common_directory(directory.as_deref()).await?;
+    let common = git::common_directory(directory.as_deref())
+        .await
+        .map_err(|error| unreadable(directory.as_deref(), REVOKE_OUTSIDE, REVOKE_AGAIN, error))?;
     let endpoint = runtime::read_endpoint(profile)?;
     let client = native_client::client()?;
     let status = native_client::signed(&client, &endpoint, "GET", "/api/v1/status", b"").await?;
@@ -397,7 +432,13 @@ mod tests {
         let key = files::existing_credential(&profile, &common)?.ok_or("no key")?;
         let bearer = URL_SAFE_NO_PAD.encode(key);
         let config = repo.join(".codex/config.toml");
-        assert!(std::fs::read_to_string(&config)?.contains(&bearer));
+        let written = std::fs::read_to_string(&config)?;
+        assert!(written.contains(&bearer));
+        // The user's comment above ReviewQ's table, which ends the file, stays as it was.
+        let user = "model = \"o3\"\n\n# Kept by the user\n";
+        let marker = "# Managed by ReviewQ";
+        let edited = written.replacen(&format!("\n{marker}"), &format!("{user}{marker}"), 1);
+        std::fs::write(&config, edited)?;
 
         std::fs::OpenOptions::new()
             .append(true)
@@ -407,8 +448,136 @@ mod tests {
             .await
             .expect_err("cleanup stops while Git cannot answer");
         assert!(error.to_string().contains("Git could not say"), "{error}");
-        assert!(!std::fs::read_to_string(&config).is_ok_and(|text| text.contains(&bearer)));
+        assert_eq!(std::fs::read_to_string(&config)?, user);
         assert!(files::existing_credential(&profile, &common)?.is_some());
+        Ok(())
+    }
+
+    /// A linked worktree whose Git folder is gone, as after the main repository moved, is no
+    /// checkout. Setup must skip it, and cleanup must still remove the table ReviewQ wrote
+    /// there, by its own proof, and finish, rather than wait for Git for good. A comment the
+    /// user wrote above that table stays there when its URL changes, and stays before the
+    /// header that follows it once the table is removed.
+    #[tokio::test]
+    async fn a_worktree_whose_git_folder_is_gone_blocks_nothing() -> Result<(), Failure> {
+        let scratch = tempfile::tempdir()?;
+        let root = scratch.path().canonicalize()?;
+        let (profile, repo) = (root.join("profile"), root.join("repo"));
+        std::fs::create_dir(&profile)?;
+        git(&root, &["init", "-q", "repo"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "start"]);
+        git(&repo, &["worktree", "add", "-q", "../linked"]);
+        git(&repo, &["worktree", "add", "-q", "../edited"]);
+        let config = root.join("linked/.codex/config.toml");
+        let skill = |worktree: &str| {
+            root.join(worktree)
+                .join(".agents/skills/reviewq-manage/SKILL.md")
+        };
+        let (user, marker) = ("# Kept by the user\n", "# Managed by ReviewQ");
+        let other = "\n[mcp_servers.other]\nurl = \"http://127.0.0.1:1/mcp\"\n";
+        for url in ["http://127.0.0.1:9/mcp", "http://[::1]:10/mcp"] {
+            let checkout = git::discover(Some(&repo)).await?;
+            let lock = files::hold(&profile, &checkout.common)?;
+            let mut changes = prepare(&profile, checkout, url, None, lock, SETUP_AGAIN).await?;
+            changes
+                .plan
+                .apply(&changes.inventory, &changes.checkout, None)
+                .await?;
+            changes.finish()?;
+            let written = std::fs::read_to_string(&config)?;
+            assert!(written.contains(url));
+            if !written.contains(user) {
+                let edited = written.replacen(marker, &format!("{user}{marker}"), 1);
+                std::fs::write(&config, format!("{edited}{other}"))?;
+            }
+        }
+        let text = std::fs::read_to_string(&config)?;
+        assert!(text.contains(&format!("\n{user}{marker}\n")) && text.ends_with(other));
+        // The skill ReviewQ wrote goes with the folder; one changed by hand is the user's.
+        std::fs::write(skill("edited"), "# Changed by the user\n")?;
+
+        let common = git::discover(Some(&repo)).await?.common;
+        let moved = root.join("moved");
+        std::fs::rename(&repo, &moved)?;
+        assert_eq!(git::discover(Some(&moved)).await?.worktrees, [moved]);
+        clean_owned(&profile, &common, SETUP_AGAIN).await?;
+        assert_eq!(
+            std::fs::read_to_string(&config)?,
+            format!("\n{user}{other}")
+        );
+        assert!(!skill("linked").exists());
+        // Its own folder goes once empty; the one holding the hand-edited skill stays.
+        assert!(!root.join("linked/.agents/skills/reviewq-manage").exists());
+        assert!(root.join("linked/.agents/skills").is_dir());
+        assert_eq!(
+            std::fs::read_to_string(skill("edited"))?,
+            "# Changed by the user\n"
+        );
+        assert!(files::existing_credential(&profile, &common)?.is_none());
+        Ok(())
+    }
+
+    /// The MCP address changes when a start has the IPv6 listener and the next has not, or
+    /// the other way round. Setup must take its own entries at the old address for ReviewQ's
+    /// and rewrite them, in every worktree and in Claude's config, and cleanup must remove them.
+    #[tokio::test]
+    async fn a_changed_mcp_address_is_rewritten_and_cleaned_up() -> Result<(), Failure> {
+        let scratch = tempfile::tempdir()?;
+        let root = scratch.path().canonicalize()?;
+        let (profile, repo, claude) =
+            (root.join("profile"), root.join("repo"), root.join("claude"));
+        std::fs::create_dir(&profile)?;
+        std::fs::create_dir(&claude)?;
+        let claude = claude.join(".claude.json");
+        git(&root, &["init", "-q", "repo"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "start"]);
+        git(&repo, &["worktree", "add", "-q", "../linked"]);
+        let configs = [
+            repo.join(".codex/config.toml"),
+            root.join("linked/.codex/config.toml"),
+        ];
+        let (ipv4, ipv6) = ("http://127.0.0.1:9/mcp", "http://[::1]:10/mcp");
+        for (url, other) in [(ipv4, ipv6), (ipv6, ipv4), (ipv4, ipv6)] {
+            let checkout = git::discover(Some(&repo)).await?;
+            let lock = files::hold(&profile, &checkout.common)?;
+            let selected = Some(claude.clone());
+            let mut changes = prepare(&profile, checkout, url, selected, lock, SETUP_AGAIN).await?;
+            changes
+                .plan
+                .apply(
+                    &changes.inventory,
+                    &changes.checkout,
+                    changes.claude.as_deref(),
+                )
+                .await?;
+            changes.finish()?;
+            for file in configs.iter().chain([&claude]) {
+                let text = std::fs::read_to_string(file)?;
+                assert!(
+                    text.contains(url) && !text.contains(other),
+                    "{}",
+                    file.display()
+                );
+            }
+        }
+        // Once the Claude entry is changed by hand, setup that no longer selects that config
+        // leaves it alone and finishes, rather than stopping every checkout's setup on it.
+        let edited = std::fs::read_to_string(&claude)?.replace(ipv4, "http://127.0.0.1:1/mcp");
+        std::fs::write(&claude, &edited)?;
+        let checkout = git::discover(Some(&repo)).await?;
+        let lock = files::hold(&profile, &checkout.common)?;
+        let mut changes = prepare(&profile, checkout, ipv4, None, lock, SETUP_AGAIN).await?;
+        changes
+            .plan
+            .apply(&changes.inventory, &changes.checkout, None)
+            .await?;
+        changes.finish()?;
+        assert_eq!(std::fs::read_to_string(&claude)?, edited);
+
+        let common = git::discover(Some(&repo)).await?.common;
+        clean_owned(&profile, &common, SETUP_AGAIN).await?;
+        assert!(configs.iter().all(|file| !file.exists()));
+        assert_eq!(std::fs::read_to_string(&claude)?, edited);
         Ok(())
     }
 }

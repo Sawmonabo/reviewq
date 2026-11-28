@@ -8,24 +8,26 @@ use reviewq_app::workspace::{
     CheckoutProjection, IssueGrant, ProjectionOutcome, RepositoryChatProjectionStore,
     WorkspaceStore,
 };
+use reviewq_domain::session::AbsolutePath;
+use reviewq_domain::text::clip;
 use reviewq_store::SqliteStore;
 use sha2::{Digest, Sha256};
 
 use super::observe::{Observers, Topology};
-use super::unfinished::clip;
-use super::{Failure, Unfinished, clean_owned, files, prepare, projection};
+use super::{Failure, SERVICE_AGAIN, Unfinished, clean_owned, files, git, prepare, projection};
 
 const ISSUE_LIMIT: usize = 1024;
 
 pub(crate) async fn run(
     store: Arc<SqliteStore>,
     profile: PathBuf,
-    endpoint: std::net::SocketAddr,
+    url: String,
     claude_profile: Option<PathBuf>,
 ) {
     let mut commits = store.subscribe_checkout_projections();
-    let url = format!("http://{endpoint}/mcp");
     let mut boot = true;
+    // Until each checkout only `reviewq checkout setup` set up has the current address.
+    let mut command_line = true;
     let mut retry = Duration::from_secs(15);
     let mut observations = Observers::new();
     let wake = observations.wake.clone();
@@ -38,7 +40,7 @@ pub(crate) async fn run(
             &profile,
             &url,
             claude_profile.as_deref(),
-            boot,
+            (boot, &mut command_line),
             &mut observations,
         )
         .await;
@@ -74,20 +76,25 @@ async fn reconcile(
     profile: &Path,
     url: &str,
     claude_profile: Option<&Path>,
-    boot: bool,
+    (boot, command_line): (bool, &mut bool),
     observations: &mut Observers,
 ) -> Result<bool, Failure> {
     let mut after = None;
     let mut pending = false;
     let mut wanted = HashSet::new();
+    let mut listed = HashSet::new();
     loop {
         let jobs = store.checkout_projections(after).await?;
         let Some(last) = jobs.last() else {
             observations.retain(&wanted);
-            return Ok(pending);
+            if *command_line {
+                *command_line = command_line_setups(store, profile, url, &listed).await?;
+            }
+            return Ok(pending || *command_line);
         };
         after = Some(last.checkout.common_dir.clone());
         for job in jobs {
+            listed.insert(job.checkout.common_dir.clone());
             if job.desired {
                 wanted.insert(job.checkout.common_dir.clone());
             }
@@ -138,7 +145,8 @@ async fn one(
         return Ok(None);
     }
     let topology = Topology::read(common)?;
-    let checkout = super::discover(Some(job.checkout.root.as_path()), super::SERVICE_AGAIN).await?;
+    let root = Some(job.checkout.root.as_path());
+    let checkout = super::discover(root, super::SERVICE_OUTSIDE, super::SERVICE_AGAIN).await?;
     if checkout.root != job.checkout.root.as_path() || checkout.common != common {
         return Err("The local Git checkout has changed. Update its binding in Settings.".into());
     }
@@ -184,4 +192,81 @@ async fn one(
     }
     changes.finish()?;
     Ok(Some(topology))
+}
+
+/// Gives every checkout ReviewQ wrote into that Settings does not list, so one only
+/// `reviewq checkout setup` set up, the address ReviewQ hands out now, such as after a start
+/// that has IPv6 loopback where the one before had not. Returns whether one is left to retry.
+async fn command_line_setups(
+    store: &SqliteStore,
+    profile: &Path,
+    url: &str,
+    listed: &HashSet<AbsolutePath>,
+) -> Result<bool, Failure> {
+    let mut after = None;
+    let mut left = false;
+    loop {
+        let directories = store.installed_checkout_paths(after).await?;
+        let Some(last) = directories.last() else {
+            return Ok(left);
+        };
+        after = Some(last.clone());
+        for common in directories
+            .iter()
+            .filter(|common| !listed.contains(*common))
+        {
+            let common = common.as_path();
+            if let Err(error) = readdress(store, profile, common, url).await {
+                left = true;
+                eprintln!(
+                    "ReviewQ could not give the checkout at {} its new address and tries again: {error}",
+                    common.display()
+                );
+            }
+        }
+    }
+}
+
+/// Runs setup again for the checkout at `common` with its own key, so its grant and bearer
+/// stay, when what it wrote names another address than `url`. It uses the Claude config that
+/// setup chose. A key whose grant was withdrawn is left for setup or revoke, which remove it.
+async fn readdress(
+    store: &SqliteStore,
+    profile: &Path,
+    common: &Path,
+    url: &str,
+) -> Result<(), Failure> {
+    if !files::owned_setup_exists(profile, common)? {
+        return Ok(());
+    }
+    let lock = files::hold(profile, common)?;
+    let inventory = projection::Inventory::load(&files::inventory(profile, common)?)?;
+    let Some(key) = files::existing_credential(profile, common)? else {
+        return Ok(());
+    };
+    if inventory.addressed(url) {
+        return Ok(());
+    }
+    let verifier = Sha256::digest(key).into();
+    if store
+        .retired_grant(Actor::local_operator(), verifier)
+        .await?
+        .value
+    {
+        return Ok(());
+    }
+    let (roots, claude) = inventory.places();
+    for root in roots {
+        // Git finds the checkout from any worktree setup wrote into that is still one of it.
+        match git::discover(Some(&root)).await {
+            Ok(checkout) if checkout.common == common => {
+                let mut changes =
+                    prepare(profile, checkout, url, claude, lock, SERVICE_AGAIN).await?;
+                changes.apply().await?;
+                return changes.finish();
+            }
+            _ => continue,
+        }
+    }
+    Ok(())
 }

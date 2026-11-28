@@ -4,6 +4,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use reviewq_domain::text::clip;
+
 use super::Failure;
 
 /// What setup or cleanup left, for one checkout or several, and the step that then finishes
@@ -167,17 +169,6 @@ impl std::fmt::Display for Unfinished {
 }
 
 impl std::error::Error for Unfinished {}
-
-/// `text` cut to at most `limit` bytes at a character boundary, ending in "…" when cut.
-pub(crate) fn clip(mut text: String, limit: usize) -> String {
-    if text.len() > limit {
-        let room = limit.saturating_sub('…'.len_utf8());
-        let cut = (0..=room).rev().find(|at| text.is_char_boundary(*at));
-        text.truncate(cut.unwrap_or(0));
-        text.push('…');
-    }
-    text
-}
 
 #[cfg(test)]
 mod tests {
