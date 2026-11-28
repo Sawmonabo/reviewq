@@ -1,5 +1,5 @@
 use std::env;
-use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
+use std::fs::{self, DirBuilder, File, OpenOptions, Permissions, TryLockError};
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt, symlink};
 use std::path::{Component, Path, PathBuf};
@@ -89,6 +89,23 @@ impl Paths {
         private(&file, &path)?;
         file.lock()?;
         Ok(file)
+    }
+
+    /// Returns once no install, uninstall or start holds the installation lock. Creates
+    /// nothing; a missing or unreadable lock file counts as free.
+    pub(crate) async fn wait_unlocked(&self) {
+        let path = self.state.join("install.lock");
+        loop {
+            let held = OpenOptions::new()
+                .read(true)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .open(&path)
+                .is_ok_and(|file| matches!(file.try_lock_shared(), Err(TryLockError::WouldBlock)));
+            if !held {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
     }
 }
 

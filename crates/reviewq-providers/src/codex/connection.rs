@@ -26,7 +26,7 @@ use super::questions::Questions;
 
 const REQUEST_LIMIT: usize = 8;
 const DISCOVERY_LIMIT: u64 = 16 * 1024;
-const FRAME_LIMIT: usize = 2 * 1024 * 1024;
+pub(super) const FRAME_LIMIT: usize = 2 * 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(5);
 const IDLE_TIME: Duration = Duration::from_secs(60);
 
@@ -424,23 +424,11 @@ impl Daemon {
         let (mut ws, _) = client_async_with_config("ws://localhost/", stream, Some(config))
             .await
             .map_err(|_| AppError::Unavailable)?;
-        let result = exchange(
-            &mut ws,
-            1,
-            "initialize",
-            json!({
-                "clientInfo": {"name":"reviewq","version":env!("CARGO_PKG_VERSION")},
-                "capabilities": {"experimentalApi":true}
-            }),
-        )
-        .await
-        .map_err(|_| AppError::Unavailable)??;
-        let initialized: Initialized =
-            serde_json::from_value(result).map_err(|_| AppError::Unavailable)?;
-        if initialized.codex_home != self.profile {
-            return Err(AppError::Forbidden);
-        }
-        send(&mut ws, json!({"method":"initialized"}))
+        let result = exchange(&mut ws, 1, "initialize", initialize_params())
+            .await
+            .map_err(|_| AppError::Unavailable)??;
+        let (_, initialized) = accept_initialize(result, &self.profile)?;
+        send(&mut ws, initialized)
             .await
             .map_err(|_| AppError::Unavailable)?;
         Ok(ws)
@@ -676,7 +664,30 @@ async fn exchange(
     }
 }
 
-fn rpc_result(mut frame: Value) -> Result<Value, AppError> {
+/// The parameters of the `initialize` request that opens every Codex app-server session.
+pub(super) fn initialize_params() -> Value {
+    json!({
+        "clientInfo": {"name":"reviewq","version":env!("CARGO_PKG_VERSION")},
+        "capabilities": {"experimentalApi":true}
+    })
+}
+
+/// Accepts an `initialize` result only from a server whose Codex home leads to the real path
+/// `profile`, and returns that home as the server names it with the `initialized`
+/// notification to send next.
+pub(super) fn accept_initialize(
+    result: Value,
+    profile: &Path,
+) -> Result<(PathBuf, Value), AppError> {
+    let initialized: Initialized =
+        serde_json::from_value(result).map_err(|_| AppError::Unavailable)?;
+    if initialized.codex_home.canonicalize().ok().as_deref() != Some(profile) {
+        return Err(AppError::Forbidden);
+    }
+    Ok((initialized.codex_home, json!({"method":"initialized"})))
+}
+
+pub(super) fn rpc_result(mut frame: Value) -> Result<Value, AppError> {
     if let Some(result) = frame
         .as_object_mut()
         .and_then(|object| object.remove("result"))

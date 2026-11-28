@@ -213,6 +213,12 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             .flatten()
             .filter(|home| home.is_dir())
     });
+    // Only the installed service trusts the Codex hooks the installer wrote.
+    let installed = options
+        .managed
+        .then(install::paths::Paths::resolve)
+        .and_then(Result::ok)
+        .filter(|paths| paths.profile == profile);
     let codex = match (codex_executable.as_ref(), codex_home.as_ref()) {
         (Some(executable), Some(home)) => {
             let metadata = home.canonicalize()?.metadata()?;
@@ -220,11 +226,11 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
                 return Err("the selected Codex profile must belong to the service user".into());
             }
             let settings = options.codex_model.zip(options.codex_effort);
-            Some(Arc::new(Codex::new(
-                executable.clone(),
-                home.clone(),
-                settings,
-            )?))
+            let hook_command = installed.as_ref().and_then(install::codex_hook_command);
+            Some(Arc::new(
+                Codex::new(executable.clone(), home.clone(), settings)?
+                    .with_hook_command(hook_command),
+            ))
         }
         _ => None,
     };
@@ -407,6 +413,7 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     }
     .await;
     let mut workers = Vec::new();
+    let hooks_host = host.clone();
     if matches!(&start, Ok(true)) {
         if let Some(host) = host.filter(|_| sends_allowed) {
             workers.push(tokio::spawn(dispatch_deliveries(
@@ -433,6 +440,9 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         }
         if let Some(desktop) = browser_desktop {
             workers.push(desktop::start(store.clone(), browser, desktop, windows));
+        }
+        if let Some((host, paths)) = hooks_host.zip(installed) {
+            workers.push(tokio::spawn(check_codex_hooks(host, paths)));
         }
         activate.send_replace(StartupState::Operational);
         println!("ReviewQ http://{browser}/");
@@ -477,6 +487,13 @@ fn default_executable(name: &str, configured: Option<&str>, validation: bool) ->
         .filter(|home| home.is_absolute())?;
     let executable = home.join(".local/bin").join(name);
     executable.is_file().then_some(executable)
+}
+
+/// Trusts ReviewQ's Codex hooks again when a Codex update or a moved entry left them
+/// untrusted. A running install trusts them itself and says so, so this waits for it.
+async fn check_codex_hooks(host: Arc<dyn NativeHost>, paths: install::paths::Paths) {
+    paths.wait_unlocked().await;
+    let _ = host.approve_hooks().await;
 }
 
 async fn dispatch_deliveries(

@@ -72,6 +72,9 @@ pub(in crate::entry) async fn register(
         return Err(AppError::Conflict.into());
     }
     let registered = register_proven(entry.store.as_ref(), proof, remote, revision).await?;
+    if let (HostProvider::Codex, Some(host)) = (provider, &entry.host) {
+        let _ = host.approve_hooks().await;
+    }
     let lead = registered.value;
     Ok(Json(success(
         RegisteredSession {

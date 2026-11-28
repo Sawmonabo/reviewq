@@ -13,6 +13,7 @@ mod history;
 mod history_navigation;
 mod history_reads;
 mod history_search;
+mod hook_trust;
 mod launch;
 mod live;
 mod questions;
@@ -21,8 +22,13 @@ mod session;
 mod turn_lookup;
 mod workflow;
 
+pub use hook_trust::{HookRevocation, approve_hooks, revoke_hooks};
+
 pub struct Codex {
+    executable: PathBuf,
     profile: AbsolutePath,
+    hook_command: Option<String>,
+    last_hook_check: hook_trust::LastCheck,
     connection: connection::Connection,
     question_proofs: tokio::sync::Semaphore,
     capacity: tokio::sync::Mutex<Option<(std::time::Instant, recovery::Usage)>>,
@@ -62,7 +68,14 @@ impl Codex {
             return Err(AppError::InvalidRequest);
         }
         Ok(Self {
-            connection: connection::Connection::new(executable, profile.clone(), metadata.uid()),
+            connection: connection::Connection::new(
+                executable.clone(),
+                profile.clone(),
+                metadata.uid(),
+            ),
+            executable,
+            hook_command: None,
+            last_hook_check: Default::default(),
             question_proofs: tokio::sync::Semaphore::new(4),
             capacity: tokio::sync::Mutex::new(None),
             profile: AbsolutePath::from_canonical(profile).map_err(|_| AppError::InvalidRequest)?,
@@ -71,5 +84,12 @@ impl Codex {
             document: Default::default(),
             restore_grace: attention::RESTORE_GRACE,
         })
+    }
+
+    /// Names the command of ReviewQ's own hooks in this profile, which `approve_hooks` may
+    /// trust. Only the installed service knows it.
+    pub fn with_hook_command(mut self, command: Option<String>) -> Self {
+        self.hook_command = command;
+        self
     }
 }

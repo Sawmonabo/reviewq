@@ -53,10 +53,17 @@ struct Linked {
     /// The rule the model reads after linking, absent from a reply that carries none.
     #[serde(default)]
     rule: Option<String>,
-    /// Whether a Codex `Stop` hook has reported on this installation; only a Codex link
-    /// reply carries it.
+    /// What to tell the person about ReviewQ's Codex hooks; only a Codex link reply carries
+    /// it, and only when there is something to say.
     #[serde(default)]
-    stop_hook_reported: bool,
+    hooks_notice: Option<HooksNotice>,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum HooksNotice {
+    Pending,
+    Restart,
 }
 
 #[derive(Deserialize)]
@@ -80,19 +87,27 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
     if let Some(rule) = &linked.rule {
         println!("\n{rule}");
     }
-    if !linked.stop_hook_reported {
-        println!("\n{CODEX_HOOKS_PENDING}");
+    match linked.hooks_notice {
+        Some(HooksNotice::Pending) => println!("\n{CODEX_HOOKS_PENDING}"),
+        Some(HooksNotice::Restart) => println!("\n{CODEX_HOOKS_RESTART}"),
+        None => {}
     }
     Ok(())
 }
 
-/// Shown by `reviewq link` and the installer while no Codex `Stop` hook has reported on this
-/// installation.
+/// Shown by `reviewq link` when Codex does not trust ReviewQ's hooks and could not be made
+/// to, and by the installer when it could not make Codex trust them while no Codex `Stop`
+/// hook has reported on this installation.
 pub(crate) const CODEX_HOOKS_PENDING: &str = "The ReviewQ hooks have not run in Codex yet: open /hooks in Codex to review and trust them. Until then a review still files, closes and shows as unfinished when it is not closed; only the end-of-turn reminder and the reminder after compaction are missing.";
 
-/// Whether the service behind `endpoint` has never had a Codex `Stop` hook report, so the
-/// installer still shows `CODEX_HOOKS_PENDING`. A service that cannot say counts as never.
-pub(crate) async fn codex_hooks_pending(endpoint: &ServiceEndpoint) -> bool {
+/// Shown by `reviewq link` when Codex trusts ReviewQ's hooks but no Codex `Stop` hook has
+/// reported on this installation yet. A Codex conversation reads its hooks when Codex loads
+/// it, and Codex reloads no conversation for a change another process wrote.
+const CODEX_HOOKS_RESTART: &str = "ReviewQ's hooks are approved in Codex. A Codex conversation that was already open when they were approved runs them only once Codex loads it again, for example after Codex restarts; until then it misses the end-of-turn reminder and the reminder after compaction. New conversations run them.";
+
+/// Whether the service behind `endpoint` has never had a Codex `Stop` hook report. A service
+/// that cannot say counts as never.
+pub(crate) async fn codex_stop_hook_unreported(endpoint: &ServiceEndpoint) -> bool {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct CodexHooks {
@@ -114,6 +129,17 @@ pub(crate) async fn codex_hooks_pending(endpoint: &ServiceEndpoint) -> bool {
         )
     };
     !reported.await.unwrap_or(false)
+}
+
+/// `path` under the Claude profile's real folder. Claude Code names its files under the
+/// profile as it is configured, which may be a symlink, and the service knows the profile by
+/// its real path.
+pub(crate) fn in_claude_home(path: PathBuf) -> Result<PathBuf, Failure> {
+    let home = runtime::claude_home()?;
+    Ok(match path.strip_prefix(&home) {
+        Ok(rest) => home.canonicalize()?.join(rest),
+        Err(_) => path,
+    })
 }
 
 pub(crate) async fn claude(
@@ -138,6 +164,7 @@ pub(crate) async fn claude(
     let client = client()?;
     let cwd = std::env::current_dir()?.canonicalize()?;
     let home = runtime::claude_home()?.canonicalize()?;
+    let transcript = transcript.map(in_claude_home).transpose()?;
     let body = serde_json::to_vec(&serde_json::json!({
         "protocolVersion": 1,
         "sessionId": native.as_str(),

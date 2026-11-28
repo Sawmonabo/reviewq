@@ -72,17 +72,13 @@ pub(super) fn locate(
     session: &HistorySession,
     cancelled: &AtomicBool,
 ) -> Result<Option<Source>, AppError> {
-    if let Some(path) = &session.source {
-        return verify(
-            &session.binding,
-            session.parent.as_ref(),
-            path.as_path(),
-            cancelled,
-        )?
+    let (binding, parent) = (&session.binding, session.parent.as_ref());
+    let Some(path) = &session.source else {
+        return discover(binding, parent, cancelled);
+    };
+    verify(binding, parent, path.as_path(), cancelled)?
         .ok_or(AppError::NotFound)
-        .map(Some);
-    }
-    discover(&session.binding, session.parent.as_ref(), cancelled)
+        .map(Some)
 }
 
 pub(crate) fn verified_claude_source(
@@ -99,10 +95,13 @@ pub(crate) fn verified_claude_source(
         .transpose()
 }
 
-/// The file of the Claude lead conversation `binding` names, for a link or a report of it:
-/// the one whose rows prove the binding, or `path` itself while Claude Code has written no
-/// row there, which it first does at the conversation's first prompt. `path` is only ever
-/// where this conversation's file belongs, and every read of the file proves its rows again.
+/// The file of the Claude lead conversation `binding` names, for a link or a report of it.
+/// It is `path` when rows there prove the binding, the file found for the conversation under
+/// the profile's project folders when `path` holds no conversation, and `path` itself when
+/// none is found or the folders cannot be searched: Claude Code writes a conversation's file
+/// only with its first row. `None` when `path` holds another conversation, or no path is
+/// given and no file is found. A path kept unwritten proves nothing, and every read of the
+/// file proves its rows.
 pub(crate) fn claude_lead_source(
     binding: &NativeBinding,
     path: Option<&AbsolutePath>,
@@ -112,7 +111,11 @@ pub(crate) fn claude_lead_source(
         return verified_claude_source(binding, None, cancelled);
     };
     Ok(match check(binding, None, path.as_path(), cancelled)? {
-        Check::Proven(_) | Check::Unwritten => Some(path.clone()),
+        Check::Proven(_) => Some(path.clone()),
+        Check::Unwritten => verified_claude_source(binding, None, cancelled)
+            .ok()
+            .flatten()
+            .or_else(|| Some(path.clone())),
         Check::Other => None,
     })
 }
@@ -288,13 +291,15 @@ pub(super) fn verify(
     })
 }
 
-/// What the file where a conversation belongs shows of it.
+/// What the opening rows of a candidate file show of the conversation a binding names.
 enum Check {
     /// A row proves the binding.
     Proven(Source),
-    /// No file, or no row naming a folder yet: the host has not written the conversation.
+    /// No file, or one read to its end whose rows name no folder and no other conversation:
+    /// the host has not written the conversation there.
     Unwritten,
-    /// Rows of another conversation or another folder.
+    /// A written file that does not prove the binding: a row of another conversation or
+    /// folder, a row that cannot be read, or more rows than are read here.
     Other,
 }
 
@@ -389,15 +394,19 @@ fn check(
                 path: candidate.to_path_buf(),
             }));
         }
-        // A host's opening rows name only the conversation. One naming a folder, or another
-        // conversation, shows this file is written and is not the binding's.
-        written |= record.is_ok_and(|record| {
-            let other = |session: String| session != identity.native_id().as_str();
-            record.cwd.is_some() || record.session.is_some_and(other)
-        });
+        // A host's opening rows name only the conversation. One naming a folder or another
+        // conversation shows this file is written and is not the binding's, and so does one
+        // that cannot be read, unless it is the last and may still be being written.
+        written |= match record {
+            Ok(record) => {
+                let other = |session: String| session != identity.native_id().as_str();
+                record.cwd.is_some() || record.session.is_some_and(other)
+            }
+            Err(_) => end < metadata.len(),
+        };
         offset = end;
     }
-    Ok(if written {
+    Ok(if written || offset < metadata.len() {
         Check::Other
     } else {
         Check::Unwritten
@@ -542,3 +551,6 @@ fn fs_error(error: io::Error) -> AppError {
         },
     }
 }
+
+#[cfg(test)]
+mod tests;

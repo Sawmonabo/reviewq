@@ -58,6 +58,8 @@ impl Codex {
         {
             return NativeLaunchResult::Rejected;
         }
+        // A new thread reads Codex's config from disk, so ReviewQ's hooks are trusted first.
+        let _ = self.approve_own_hooks().await;
         let mut params = json!({"cwd":input.checkout.root.as_path(),"ephemeral":false});
         if let Some(model) = &input.model {
             params["model"] = json!(model);

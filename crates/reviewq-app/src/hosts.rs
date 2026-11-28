@@ -190,15 +190,34 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
         require_new_turn: bool,
         latest_only: bool,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = DeliveryObservation> + Send + '_>>;
+
+    /// Asks the host to trust ReviewQ's own hooks in its profile, and only those, and returns
+    /// what the host says of them. Cheap when nothing that decides trust changed since the
+    /// last check. The host logs a failure.
+    fn approve_hooks(&self) -> AppFuture<'_, HookApproval>;
+}
+
+/// What asking a host to trust ReviewQ's own hooks found.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HookApproval {
+    /// The host now trusts this many hooks it did not trust before.
+    Approved(usize),
+    /// The host already trusted every hook of ReviewQ's it lists.
+    AlreadyTrusted,
+    /// The host lists no hook of ReviewQ's.
+    NotListed,
+    /// This host version cannot say or record which hooks it trusts.
+    Unsupported,
 }
 
 /// Resolves the companion's identity against the service-selected Claude profile.
 pub trait ClaudeCompanion: QuestionsPort + Send + Sync {
     fn accepts_profile(&self, profile: &AbsolutePath) -> bool;
     fn inspect_lead(&self, session: NativeSessionId) -> AppFuture<'_, HostProof>;
-    /// Proves the lead conversation `context` names from the rows of its file, or names only
-    /// where that file belongs while Claude Code has written none. `NotFound` when the file
-    /// holds another conversation or folder, or no file is named or found.
+    /// Proves the lead conversation `context` names from the rows of its file, at the place
+    /// the context names or wherever it is found, or names only that place while Claude Code
+    /// has written the conversation nowhere. `NotFound` when the named file holds another
+    /// conversation or folder, or no place is named and no file is found.
     fn prove(&self, context: ClaudeContext) -> AppFuture<'_, HostProof>;
     fn prove_child(
         &self,

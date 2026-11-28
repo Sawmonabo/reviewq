@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::history::{HistorySession, NativeHistoryPage, NativePosition};
 use reviewq_app::hosts::{
-    DeliveryObservation, DispatchGuard, FollowupResume, HostActivity, HostPhase, HostProof,
-    MessageBody, NativeHost, NativeSessionMetadata, ReportRef,
+    DeliveryObservation, DispatchGuard, FollowupResume, HookApproval, HostActivity, HostPhase,
+    HostProof, MessageBody, NativeHost, NativeSessionMetadata, ReportRef,
 };
 use reviewq_domain::identity::{DeliveryId, NativeSessionId};
 use reviewq_domain::session::{
@@ -194,6 +194,10 @@ impl NativeHost for Codex {
         latest_only: bool,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = DeliveryObservation> + Send + '_>> {
         Box::pin(self.find_input(target, delivery, cursor, require_new_turn, latest_only))
+    }
+
+    fn approve_hooks(&self) -> AppFuture<'_, HookApproval> {
+        Box::pin(self.approve_own_hooks())
     }
 }
 

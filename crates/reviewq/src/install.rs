@@ -1,7 +1,9 @@
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
+use reviewq_app::hosts::HookApproval;
 use reviewq_domain::session::AbsolutePath;
+use reviewq_providers::HookRevocation;
 use reviewq_store::SqliteStore;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
@@ -163,7 +165,9 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
             .claude_home_is_explicit
             .then_some(paths.claude_home.as_path()),
     )?;
-    let skill = native_command(&paths, "codex", settings.codex_command.as_deref())
+    let codex = native_command(&paths, "codex", settings.codex_command.as_deref());
+    let skill = codex
+        .as_ref()
         .map(|_| paths.codex_home.join("skills/reviewq"));
     let claude = native_command(&paths, "claude", settings.claude_command.as_deref())
         .map(|executable| claude::plan(&paths, &bundle, executable))
@@ -360,8 +364,24 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
             false
         }
     };
-    if hooks_installed && native_client::codex_hooks_pending(&endpoint).await {
-        println!("{}", native_client::CODEX_HOOKS_PENDING);
+    if hooks_installed {
+        let approval = match &codex {
+            Some(executable) => approve_codex_hooks(&paths, executable).await,
+            None => Err("Codex is unavailable.".into()),
+        };
+        match approval {
+            Ok(HookApproval::Approved(count)) => println!(
+                "ReviewQ approved {count} of its Codex hooks in {}. Review or turn them off on Codex's /hooks screen.",
+                paths.codex_home.join("config.toml").display()
+            ),
+            Ok(HookApproval::AlreadyTrusted) => {}
+            // Codex lists none of the entries just written when it will not run them.
+            Ok(HookApproval::NotListed | HookApproval::Unsupported) | Err(_) => {
+                if native_client::codex_stop_hook_unreported(&endpoint).await {
+                    println!("{}", native_client::CODEX_HOOKS_PENDING);
+                }
+            }
+        }
     }
     if next.claude.is_none() {
         println!("Claude Code unavailable. Set claudeCommand in runtime.json and retry install.");
@@ -369,6 +389,28 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         println!("Use /reload-plugins in open Claude Code sessions to load this release.");
     }
     Ok(())
+}
+
+/// Asks the Codex at `executable` to trust the hooks this installation wrote.
+async fn approve_codex_hooks(paths: &Paths, executable: &Path) -> Result<HookApproval, Failure> {
+    let command = codex_hook::command(paths)?;
+    Ok(reviewq_providers::approve_codex_hooks(executable, &paths.codex_home, &command).await?)
+}
+
+/// Asks the Codex the runtime settings name to remove its trust in this installation's hooks.
+async fn revoke_codex_hooks(paths: &Paths) -> Result<HookRevocation, Failure> {
+    let configured = runtime_settings::Settings::load(&paths.profile, false)
+        .ok()
+        .and_then(|settings| settings.codex_command);
+    let executable =
+        native_command(paths, "codex", configured.as_deref()).ok_or("Codex is unavailable")?;
+    let command = codex_hook::command(paths)?;
+    Ok(reviewq_providers::revoke_codex_hooks(&executable, &paths.codex_home, &command).await?)
+}
+
+/// The command of the Codex hooks this installation writes.
+pub(crate) fn codex_hook_command(paths: &Paths) -> Option<String> {
+    codex_hook::command(paths).ok()
 }
 
 fn report_preserved(entries: Vec<PathBuf>) {
@@ -527,9 +569,28 @@ fn verified_unit(paths: &Paths, release: &Release, bundle: &Bundle) -> Result<Ve
 
 /// Removes ReviewQ's Codex hooks while uninstalling and returns the `hooks.json` files that
 /// still hold an entry it could not remove, usually because the user changed it, after
-/// saying what to remove there. The uninstall continues. Fails when the ownership file cannot
-/// be written or removed.
-fn retire_codex_hooks(paths: &Paths) -> Result<Vec<PathBuf>, Failure> {
+/// saying what to remove there. Codex's trust in them is removed first, while Codex still
+/// lists them; when that fails, one line says so. The uninstall continues. Fails when the
+/// ownership file cannot be written or removed.
+async fn retire_codex_hooks(paths: &Paths) -> Result<Vec<PathBuf>, Failure> {
+    if paths::exists(&paths.codex_home.join("hooks.json"))? {
+        let config = paths.codex_home.join("config.toml");
+        match revoke_codex_hooks(paths).await {
+            Ok(HookRevocation::Revoked(count)) => println!(
+                "ReviewQ removed Codex's approval of {count} of its hooks from {}.",
+                config.display()
+            ),
+            Ok(HookRevocation::NoneTrusted | HookRevocation::NotListed) => {}
+            Ok(HookRevocation::Unsupported) => eprintln!(
+                "This Codex cannot say which hooks it trusts, so any approval of ReviewQ's hooks stays in {}.",
+                config.display()
+            ),
+            Err(error) => eprintln!(
+                "ReviewQ could not remove Codex's approval of its hooks from {} ({error}).",
+                config.display()
+            ),
+        }
+    }
     match codex_hook::reconcile(paths, false)? {
         codex_hook::Reconciled::Done => Ok(Vec::new()),
         codex_hook::Reconciled::Kept { files, reason } => {
@@ -565,7 +626,7 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
         return Err("Finish the interrupted activation before uninstalling.".into());
     }
     let Some(active) = inventory.active.as_ref() else {
-        let kept_hooks = retire_codex_hooks(&paths)?;
+        let kept_hooks = retire_codex_hooks(&paths).await?;
         if !kept_hooks.is_empty() {
             return Err(preserved_entries(&kept_hooks));
         }
@@ -609,7 +670,7 @@ pub(crate) async fn uninstall() -> Result<(), Failure> {
     let removed = crate::checkout_setup::remove_installation(&paths.profile, &store).await;
     store.close(std::time::Duration::from_secs(10)).await?;
     removed?;
-    let kept_hooks = retire_codex_hooks(&paths)?;
+    let kept_hooks = retire_codex_hooks(&paths).await?;
     claude::remove(&paths, active).await?;
     if let Some(windows) = &active.windows {
         windows.remove().await?;

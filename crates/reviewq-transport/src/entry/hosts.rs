@@ -5,9 +5,11 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use reviewq_app::access::AppError;
-use reviewq_app::hosts::{ClaudeContext, NativeLink, link_codex, link_proven};
+use reviewq_app::hosts::{
+    ClaudeContext, HookApproval, NativeHost, NativeLink, link_codex, link_proven,
+};
 use reviewq_app::ledger::readback::RULE;
-use reviewq_domain::session::{AbsolutePath, HostProvider, LeadTarget};
+use reviewq_domain::session::{AbsolutePath, LeadTarget};
 use reviewq_protocol::queue::ReviewSelection;
 use reviewq_protocol::{EventCursorDto, Failure, ReviewIdDto, RunIdDto, SessionKeyDto, Success};
 use serde::{Deserialize, Serialize};
@@ -61,7 +63,11 @@ pub(super) async fn link(
         command.target,
     )
     .await?;
-    link_response(&entry, HostProvider::Codex, linked).await
+    let notice = match linked {
+        NativeLink::Linked(_) => codex_hooks_notice(&entry, host).await?,
+        NativeLink::Ambiguous(_) => None,
+    };
+    link_response(linked, notice)
 }
 
 pub(super) async fn codex_registration(
@@ -182,7 +188,7 @@ pub(super) async fn claude_link(
     let target = command.target.ok_or(AppError::InvalidRequest)?;
     claude::require_companion_to_link(&entry, &headers, &proof.binding).await?;
     let linked = link_proven(entry.store.as_ref(), source.as_ref(), proof, target).await?;
-    link_response(&entry, HostProvider::Claude, linked).await
+    link_response(linked, None)
 }
 
 fn protocol(version: u16) -> Result<(), ApiError> {
@@ -193,8 +199,7 @@ fn protocol(version: u16) -> Result<(), ApiError> {
 }
 
 /// The reply to a successful link: the linked review, the rule the model reads once linked,
-/// and for Codex whether its stop hook has reported on this installation, which it does only
-/// after the user trusts the hook.
+/// and for Codex what to tell the person about its hooks, when anything.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Linked {
@@ -202,15 +207,25 @@ struct Linked {
     selection: ReviewSelection,
     rule: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    stop_hook_reported: Option<bool>,
+    hooks_notice: Option<HooksNotice>,
+}
+
+/// What the person needs to know about ReviewQ's Codex hooks after a link.
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum HooksNotice {
+    /// Codex does not trust them, and could not be made to.
+    Pending,
+    /// Codex trusts them, but no Codex stop hook has reported on this installation yet, so a
+    /// Codex session opened before they were trusted does not run them.
+    Restart,
 }
 
 /// Answers a link: `Linked` for one review, or `409` with the candidates when the target named
 /// several.
-async fn link_response(
-    entry: &Entry,
-    provider: HostProvider,
+fn link_response(
     result: NativeLink,
+    hooks_notice: Option<HooksNotice>,
 ) -> Result<Response, ApiError> {
     let registered = match result {
         NativeLink::Linked(registered) => registered,
@@ -226,19 +241,32 @@ async fn link_response(
                 .into_response());
         }
     };
-    let stop_hook_reported = match provider {
-        HostProvider::Codex => Some(entry.store.codex_stop_hook_reported().await?),
-        HostProvider::Claude => None,
-    };
     let response = Success {
         data: Linked {
             selection: selection(&registered.value)?,
             rule: RULE,
-            stop_hook_reported,
+            hooks_notice,
         },
         cursor: EventCursorDto::new(registered.cursor.get()).ok_or(AppError::Internal)?,
     };
     Ok(Json(response).into_response())
+}
+
+/// What a Codex link tells the person about ReviewQ's hooks, after asking `host` to trust
+/// them: `Pending` when Codex does not trust them, whatever reported before, and `Restart`
+/// when it does but no stop hook has ever reported.
+async fn codex_hooks_notice(
+    entry: &Entry,
+    host: &dyn NativeHost,
+) -> Result<Option<HooksNotice>, AppError> {
+    let trusted = matches!(
+        host.approve_hooks().await,
+        Ok(HookApproval::Approved(_) | HookApproval::AlreadyTrusted)
+    );
+    if !trusted {
+        return Ok(Some(HooksNotice::Pending));
+    }
+    Ok((!entry.store.codex_stop_hook_reported().await?).then_some(HooksNotice::Restart))
 }
 
 fn selection(target: &LeadTarget) -> Result<ReviewSelection, AppError> {

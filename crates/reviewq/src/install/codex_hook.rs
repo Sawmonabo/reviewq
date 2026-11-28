@@ -206,7 +206,7 @@ pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<Reconciled, Fa
 /// The installed launcher running `internal codex-hook` for the installed profile. `|| :`
 /// keeps a missing or older launcher from exiting 2, which Codex reads as a block; stdout
 /// stays the hook's answer.
-fn command(paths: &Paths) -> Result<String, Failure> {
+pub(super) fn command(paths: &Paths) -> Result<String, Failure> {
     Ok(format!("{}codex-hook || :", own_prefix(paths)?))
 }
 

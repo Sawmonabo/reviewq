@@ -386,10 +386,14 @@ pub(crate) async fn claude_hook(profile: &Path) -> Result<(), Failure> {
         ),
         _ => return Ok(()),
     };
+    let transcript = hook
+        .transcript_path
+        .map(super::in_claude_home)
+        .transpose()?;
     let body = serde_json::to_vec(&serde_json::json!({
         "context": {
             "protocolVersion": 1, "sessionId": session.as_str(), "cwd": hook.cwd.canonicalize()?,
-            "profile": runtime::claude_home()?.canonicalize()?, "transcript": hook.transcript_path,
+            "profile": runtime::claude_home()?.canonicalize()?, "transcript": transcript,
         },
         "classic": event,
     }))?;

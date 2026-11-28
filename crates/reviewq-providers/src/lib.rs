@@ -15,7 +15,9 @@ mod workflow;
 
 pub use checkout::git_output;
 pub use claude::{Claude, ClaudeCli, ClaudeWorkflow};
-pub use codex::Codex;
+pub use codex::{
+    Codex, HookRevocation, approve_hooks as approve_codex_hooks, revoke_hooks as revoke_codex_hooks,
+};
 pub use desktop::{
     LinuxDesktopNotifier, WindowsDesktop, WindowsDesktopNotifier, WindowsRegistration,
     open_windows_browser,

@@ -1,6 +1,7 @@
 //! The restarted Claude companion of `publish_is_conditional`'s run: unknown after a restart,
-//! a permission prompt stored unbound and when a report binds it, and when the process
-//! hosting the companion is proven dead, and when a link needs the companion's proof.
+//! a permission prompt stored unbound and when a report binds it, a delivery authorized under
+//! its offer's fence, and when the process hosting the companion is proven dead, and when a
+//! link needs the companion's proof.
 
 use std::time::Duration;
 

@@ -24,9 +24,10 @@ export async function invoke($, action, state, value, timeoutMs = 5000) {
       // A link carries the proof: ReviewQ moves a session whose companion is live only for it.
       if (value) {
         argv.push("--target", value, "--proof-stdin");
-        // Where Claude Code keeps this conversation, which it writes only at the first prompt.
-        const { transcriptPath } = await $.session.info();
-        if (transcriptPath?.endsWith(`/${state.id}.jsonl`)) argv.push("--transcript", transcriptPath);
+        // Where Claude Code keeps this conversation, which it writes only with its first row.
+        // Without it ReviewQ looks for the file itself.
+        const info = await $.session.info().catch(() => undefined);
+        if (info?.transcriptPath?.endsWith(`/${state.id}.jsonl`)) argv.push("--transcript", info.transcriptPath);
         stdin = JSON.stringify({ proof: state.proof });
       }
     } else {
