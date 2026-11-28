@@ -123,36 +123,49 @@ fn setenv(key: &str, value: &Path) -> OsString {
     argument
 }
 
-/// `reviewq uninstall`. Fails when anything was left in place, after saying why. The
-/// dashboard's job also says so in a desktop notification, as it does for a failure.
+/// Something an uninstall left in place, already reported with the reason.
+struct Left {
+    name: String,
+    /// Removing it failed, rather than a rule keeping it, such as a link or a changed entry.
+    failed: bool,
+}
+
+/// `reviewq uninstall`. Lists anything left in place at the end, and fails when removing any
+/// of it failed; entries kept by rule leave nothing to retry. The dashboard's job also says
+/// so in one desktop notification, as it does for a failure.
 pub(crate) async fn uninstall(options: Options) -> Result<(), Failure> {
     let mut paths = Paths::resolve()?;
     let _lock = paths.lock()?;
     let job = options.expect_store.is_some();
     // A data deletion that stopped part way is finished even when not asked again.
     let delete_data = options.delete_data || load(&paths).is_ok_and(|record| record.deleting_data);
-    let mut kept = match remove(&mut paths, &options).await {
-        Ok(kept) => kept,
+    let mut left = match remove(&mut paths, &options).await {
+        Ok(left) => left,
         Err(error) => return failed(&paths, delete_data, error, job).await,
     };
-    if job && !kept.is_empty() {
-        notify(&paths, &left_in_place(&kept, true)).await;
+    // Sent while the Windows identity is still registered, so it shows on Windows.
+    let noticed = job && !left.is_empty();
+    if noticed {
+        notify(&paths, &left_in_place(&left, true)).await;
     }
     match retire_windows(&paths, delete_data).await {
-        Ok(None) => {}
-        Ok(Some(identity)) => {
-            kept.push(identity);
-            if job {
-                notify(&paths, &left_in_place(&kept, true)).await;
+        Ok(more) => {
+            if job && !noticed && !more.is_empty() {
+                notify(&paths, &left_in_place(&more, true)).await;
             }
+            left.extend(more);
         }
         Err(error) => return failed(&paths, delete_data, error, job).await,
     }
-    if kept.is_empty() {
-        Ok(())
-    } else {
-        Err(left_in_place(&kept, false).into())
+    if left.is_empty() {
+        return Ok(());
     }
+    let sentence = left_in_place(&left, false);
+    if left.iter().any(|entry| entry.failed) {
+        return Err(sentence.into());
+    }
+    println!("{sentence}");
+    Ok(())
 }
 
 /// Finishes an uninstall that stopped part way, for `reviewq install`, which holds the
@@ -174,7 +187,7 @@ pub(super) async fn finish(paths: &Paths) -> Result<(), Failure> {
 /// Removes everything but the Windows identity, under the caller's installation lock, and
 /// returns what it left in place, each already reported with the reason. Resumes an
 /// interrupted removal or data deletion.
-async fn remove(paths: &mut Paths, options: &Options) -> Result<Vec<String>, Failure> {
+async fn remove(paths: &mut Paths, options: &Options) -> Result<Vec<Left>, Failure> {
     let mut inventory = preflight(paths).await?;
     if let Some(expected) = &options.expect_store
         && inventory.store_id.as_deref() != Some(expected)
@@ -185,19 +198,26 @@ async fn remove(paths: &mut Paths, options: &Options) -> Result<Vec<String>, Fai
         );
     }
     let Some(active) = inventory.active.clone() else {
-        let mut kept = names(&retire_codex_hooks(paths).await?);
+        let mut left = by_rule(&retire_codex_hooks(paths).await?);
         if options.delete_data || inventory.deleting_data {
-            kept.extend(delete_data(paths, inventory.store_id.as_deref())?);
-        } else if kept.is_empty() {
-            println!(
-                "ReviewQ is already removed. Retained data {}",
-                paths.profile.display()
-            );
+            left.extend(delete_data(paths, inventory.store_id.as_deref())?);
+        } else if left.is_empty() {
+            if paths::exists(&paths.profile.join("reviewq.sqlite3"))? {
+                println!(
+                    "ReviewQ is already removed. Retained data {}",
+                    paths.profile.display()
+                );
+            } else {
+                println!(
+                    "ReviewQ is already removed. It has no data at {}.",
+                    paths.profile.display()
+                );
+            }
         }
-        return Ok(kept);
+        return Ok(left);
     };
     // Nothing may start the service while it is being removed.
-    start_door::retire(paths).await?;
+    start_door::retire().await?;
     if inventory.removal_stage.is_none() {
         inventory.removal_stage = Some(files::reserve_removal(paths)?);
         inventory.removing = true;
@@ -251,20 +271,20 @@ async fn remove(paths: &mut Paths, options: &Options) -> Result<Vec<String>, Fai
     // open: it is reported once the removal is recorded.
     retention::clear_assets_journal(paths)?;
     // The Windows identity stays registered until last, so every notice before then still
-    // shows on Windows. With `--delete-data` the record keeps the store's ID until the data
-    // is gone, so an interrupted deletion resumes against the same store.
+    // shows on Windows. With `--delete-data` the record keeps the store's ID, so the deletion
+    // checks it is deleting that store; the deletion itself marks the record once its checks
+    // pass, so a refused deletion leaves a record that keeps the data.
     let store_id = inventory.store_id.take();
     inventory = Inventory {
         store_id: store_id.clone().filter(|_| options.delete_data),
-        deleting_data: options.delete_data,
         windows_left: active.windows.clone().or(inventory.windows_left.take()),
         ..Inventory::default()
     };
     paths::write_json(&journal(paths), &inventory)?;
-    let mut kept = names(&kept_hooks);
+    let mut left = by_rule(&kept_hooks);
     if options.delete_data {
         println!("ReviewQ removed.");
-        kept.extend(delete_data(paths, store_id.as_deref())?);
+        left.extend(delete_data(paths, store_id.as_deref())?);
     } else {
         println!(
             "ReviewQ removed. Retained data at {} and runtime settings at {}.",
@@ -272,15 +292,16 @@ async fn remove(paths: &mut Paths, options: &Options) -> Result<Vec<String>, Fai
             runtime_settings::config_path(&paths.profile, false).display()
         );
     }
-    Ok(kept)
+    Ok(left)
 }
 
 /// Deletes the owned data after ReviewQ is removed, and returns what it kept. Refuses while
 /// ReviewQ's unit or launcher is still in place, since then it belongs to an installation
 /// this record does not name. Holds the store's own lock first, which proves nothing still
-/// has the data open, and refuses a store other than `expected`. Deletes the record last;
-/// while a Windows identity is left, the record keeps only that.
-fn delete_data(paths: &Paths, expected: Option<&str>) -> Result<Vec<String>, Failure> {
+/// has the data open, and refuses a store other than `expected`. Only then marks the record
+/// as deleting, so an interrupted deletion resumes and a refused one keeps the data. Deletes
+/// the record last; while a Windows identity is left, the record keeps only that.
+fn delete_data(paths: &Paths, expected: Option<&str>) -> Result<Vec<Left>, Failure> {
     for installed in [&paths.unit, &paths.launcher] {
         if paths::exists(installed)? {
             return Err(refused(format!(
@@ -298,15 +319,19 @@ fn delete_data(paths: &Paths, expected: Option<&str>) -> Result<Vec<String>, Fai
         if let (Some(expected), Some(identity)) = (expected, &held.identity)
             && identity.store_id.to_string() != expected
         {
-            return Err(refused(
-                "The data folder holds a different store than the one ReviewQ installed, so nothing was deleted.",
-            ));
+            return Err(refused(format!(
+                "The data folder holds a different store than the one ReviewQ installed, so nothing was deleted. If you no longer need it, delete {} yourself.",
+                paths.profile.display()
+            )));
         }
         Some(held)
     } else {
         None
     };
-    let windows_left = load(paths)?.windows_left;
+    let mut record = load(paths)?;
+    record.deleting_data = true;
+    paths::write_json(&journal(paths), &record)?;
+    let windows_left = record.windows_left;
     let deletion = data::Folders::installed(paths).delete(windows_left.is_some())?;
     drop(held);
     if windows_left.is_some() {
@@ -322,43 +347,51 @@ fn delete_data(paths: &Paths, expected: Option<&str>) -> Result<Vec<String>, Fai
 }
 
 /// Prints a deletion and returns what it kept.
-fn report(deletion: data::Deletion) -> Vec<String> {
+fn report(deletion: data::Deletion) -> Vec<Left> {
     for path in &deletion.deleted {
         println!("Deleted {}", path.display());
     }
     deletion
         .kept
         .into_iter()
-        .map(|(path, reason)| {
-            println!("Kept {} because {reason}.", path.display());
-            path.display().to_string()
+        .map(|(path, kept)| {
+            println!("Kept {} because {}.", path.display(), kept.reason());
+            Left {
+                name: path.display().to_string(),
+                failed: kept.failed(),
+            }
         })
         .collect()
 }
 
-/// Removes the Windows notification identity an uninstall left registered, last of all.
-/// Returns it when Windows could not remove it: the record keeps it, so the next uninstall
-/// tries again and the next install adopts it. After `--delete-data`, the record that only
-/// named it is deleted too.
-async fn retire_windows(paths: &Paths, delete_data: bool) -> Result<Option<String>, Failure> {
+/// Removes the Windows notification identity an uninstall left registered, last of all, and
+/// returns what it left. When Windows cannot remove it, the record keeps it, so the next
+/// uninstall tries again and the next install adopts it. Otherwise a record left with
+/// nothing in it is deleted, which `--delete-data` reports with the folders it leaves empty.
+async fn retire_windows(paths: &Paths, delete_data: bool) -> Result<Vec<Left>, Failure> {
     let mut inventory = load(paths)?;
     let Some(windows) = inventory.windows_left.take() else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
     if let Err(error) = windows.remove().await {
         eprintln!(
             "ReviewQ could not remove its Windows notification identity Personal.ReviewQ: {error} Run `reviewq uninstall` again to retry."
         );
-        return Ok(Some(
-            "the Windows notification identity Personal.ReviewQ".into(),
-        ));
+        return Ok(vec![Left {
+            name: "the Windows notification identity Personal.ReviewQ".into(),
+            failed: true,
+        }]);
+    }
+    if !inventory.is_empty() {
+        paths::write_json(&journal(paths), &inventory)?;
+        return Ok(Vec::new());
     }
     if delete_data {
-        report(data::Folders::installed(paths).delete(false)?);
-    } else {
-        paths::write_json(&journal(paths), &inventory)?;
+        return Ok(report(data::Folders::installed(paths).delete_record()));
     }
-    Ok(None)
+    std::fs::remove_file(journal(paths))?;
+    paths::sync(&paths.state)?;
+    Ok(Vec::new())
 }
 
 /// Reports `error`, in a desktop notification for the dashboard's job, and returns it.
@@ -385,22 +418,37 @@ async fn failed(
     Err(error)
 }
 
-/// The sentence for an uninstall that finished but left `kept` in place. The notification
+/// The sentence for an uninstall that finished but left `left` in place. The notification
 /// names at most three and points to the job's journal for the reasons.
-fn left_in_place(kept: &[String], notice: bool) -> String {
+fn left_in_place(left: &[Left], notice: bool) -> String {
+    let kept = left
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect::<Vec<_>>();
     if !notice {
         return format!(
             "ReviewQ is uninstalled, but left in place: {}",
             kept.join(", ")
         );
     }
-    let mut named = kept.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+    let mut named = kept[..kept.len().min(3)].join(", ");
     if kept.len() > 3 {
         named.push_str(&format!(" and {} more", kept.len() - 3));
     }
     format!(
         "ReviewQ is uninstalled, but left in place: {named}. `journalctl --user -u reviewq-uninstall` says why."
     )
+}
+
+/// Entries a rule kept, such as hook entries the user changed.
+fn by_rule(paths: &[PathBuf]) -> Vec<Left> {
+    names(paths)
+        .into_iter()
+        .map(|name| Left {
+            name,
+            failed: false,
+        })
+        .collect()
 }
 
 fn names(paths: &[PathBuf]) -> Vec<String> {

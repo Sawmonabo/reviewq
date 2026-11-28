@@ -15,6 +15,8 @@ pub(crate) const START_SOCKET: &str = "reviewq-start.socket";
 /// An instance of the start door's per-connection template, named only to ask the user
 /// manager which file the template loads from.
 const START_DOOR_INSTANCE: &str = "reviewq-start@check.service";
+/// Every running start door connection.
+pub(crate) const START_DOOR_INSTANCES: &str = "reviewq-start@*.service";
 /// The transient service the dashboard's uninstall runs in, outside `reviewq.service`.
 pub(crate) const UNINSTALL_JOB: &str = "reviewq-uninstall";
 const CLAUDE_DEFAULT: &str = "UnsetEnvironment=CLAUDE_CONFIG_DIR";
@@ -264,11 +266,14 @@ pub(crate) async fn logs() -> Result<(), Failure> {
     unit_location(&paths).await?;
     let (_, text) = capture(
         "journalctl",
-        // Without `--user`, every journal this user can read is searched, so the unit's
-        // entries are found where the user manager logs to the system journal as well.
+        // Without `--user`, every journal this user can read is searched, so the units'
+        // entries are found where the user manager logs to the system journal as well. The
+        // start door's connections are included, so a failed start from the stopped page shows.
         &[
             "--user-unit",
             UNIT,
+            "--user-unit",
+            "reviewq-start@*",
             "--lines",
             "100",
             "--no-pager",

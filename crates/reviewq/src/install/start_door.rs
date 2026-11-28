@@ -80,9 +80,19 @@ pub(super) fn write(paths: &Paths) -> Result<bool, Failure> {
     Ok(written)
 }
 
-/// Stops the start socket when it is listening, so no connection starts the service.
-pub(super) async fn stop(paths: &Paths) -> Result<(), Failure> {
-    if paths::exists(&paths.start_socket)? && service::unit_state(service::START_SOCKET).await?.1 {
+/// Stops the start socket, then any door still answering a connection it accepted, so
+/// nothing starts the service while an install, rollback or uninstall works.
+pub(super) async fn stop() -> Result<(), Failure> {
+    stop_socket().await?;
+    // Tolerated: with no door running there may be nothing to stop.
+    let _ = service::control("stop", service::START_DOOR_INSTANCES).await;
+    Ok(())
+}
+
+/// Stops the start socket when it is listening. A unit the user manager does not know is
+/// not listening.
+async fn stop_socket() -> Result<(), Failure> {
+    if service::unit_state(service::START_SOCKET).await?.1 {
         service::control("stop", service::START_SOCKET).await?;
     }
     Ok(())
@@ -101,12 +111,9 @@ pub(super) async fn open() {
     }
 }
 
-/// Stops and disables the start socket before an uninstall removes anything else.
-pub(super) async fn retire(paths: &Paths) -> Result<(), Failure> {
-    if !paths::exists(&paths.start_socket)? {
-        return Ok(());
-    }
-    stop(paths).await?;
+/// Stops and disables the start door before its files are removed.
+pub(super) async fn retire() -> Result<(), Failure> {
+    stop().await?;
     if service::unit_state(service::START_SOCKET).await?.0 {
         service::control("disable", service::START_SOCKET).await?;
     }
@@ -128,25 +135,36 @@ pub(super) fn remove(paths: &Paths) -> Result<(), Failure> {
 /// Puts the start door back as the current `runtime.json` wants it: rewrites the files when
 /// either differs, enables the socket, clears a failed state such as a hit start limit, and
 /// starts it listening. Works while `reviewq.service` runs. Fails without changing anything
-/// when either file is not ReviewQ's.
+/// when either file is not ReviewQ's. A failure after it stopped the socket still tries to
+/// start it again, so a failed repair does not leave the door shut.
 pub(crate) async fn repair(paths: &Paths) -> Result<(), Failure> {
     check(paths)?;
-    if differs(paths)? {
-        stop(paths).await?;
-        write(paths)?;
-        service::reload().await?;
+    let rewrite = differs(paths)?;
+    if rewrite {
+        stop_socket().await?;
     }
-    let (enabled, active) = service::unit_state(service::START_SOCKET).await?;
-    if !enabled {
-        service::control("enable", service::START_SOCKET).await?;
+    let repaired = async {
+        if rewrite {
+            write(paths)?;
+            service::reload().await?;
+        }
+        let (enabled, active) = service::unit_state(service::START_SOCKET).await?;
+        if !enabled {
+            service::control("enable", service::START_SOCKET).await?;
+        }
+        if service::failed(service::START_SOCKET).await? {
+            service::control("reset-failed", service::START_SOCKET).await?;
+        }
+        if !active {
+            service::control("start", service::START_SOCKET).await?;
+        }
+        Ok(())
     }
-    if service::failed(service::START_SOCKET).await? {
-        service::control("reset-failed", service::START_SOCKET).await?;
+    .await;
+    if repaired.is_err() && rewrite {
+        let _ = service::control("start", service::START_SOCKET).await;
     }
-    if !active {
-        service::control("start", service::START_SOCKET).await?;
-    }
-    Ok(())
+    repaired
 }
 
 /// The installed service's repair after its dashboard is ready. Looks first, without the

@@ -86,6 +86,13 @@ struct Activation {
     store_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     recovery: Option<RecoveryApproval>,
+    /// Whether ReviewQ's start door socket file was in place before this activation; a
+    /// rollback to a release without it removes the door. Absent when false, since a release
+    /// from before the door reads this record with `deny_unknown_fields` at its service start
+    /// during that very rollback, and the field is only ever true when the release rolled
+    /// back to has the door.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    door_existed: bool,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -105,14 +112,29 @@ struct Inventory {
     removing: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     removal_stage: Option<String>,
-    /// Set once an uninstall with `--delete-data` has removed ReviewQ, until the data is
-    /// gone. `store_id` names the store being deleted, and the record is deleted last.
+    /// Set once a data deletion's checks have passed, until the data is gone. `store_id`
+    /// names the store being deleted, and the record is deleted last. A refused deletion
+    /// leaves it unset, so the data counts as kept.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     deleting_data: bool,
     /// The Windows notification identity an uninstall has yet to remove. The next uninstall
     /// removes it and the next install adopts it.
     #[serde(skip_serializing_if = "Option::is_none")]
     windows_left: Option<windows::Registration>,
+}
+
+impl Inventory {
+    /// Whether the record holds nothing, so it can be deleted.
+    fn is_empty(&self) -> bool {
+        self.active.is_none()
+            && self.store_id.is_none()
+            && self.pending.is_none()
+            && self.known.is_empty()
+            && !self.removing
+            && self.removal_stage.is_none()
+            && !self.deleting_data
+            && self.windows_left.is_none()
+    }
 }
 
 fn journal(paths: &Paths) -> PathBuf {
@@ -278,7 +300,24 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
                 probe(&paths, next.store).await?
             };
             if inventory.store_id.is_some() && inventory.store_id != store_id {
-                return Err("The installed profile's retained store is missing or changed.".into());
+                // An installed release must keep the store it has been using. After an
+                // uninstall nothing uses the retained store, so the install takes the data
+                // folder as it is now and says so, and later checks follow that store.
+                if old.is_some() {
+                    return Err(
+                        "The installed profile's retained store is missing or changed.".into(),
+                    );
+                }
+                let folder = paths.profile.display();
+                match &store_id {
+                    Some(_) => println!(
+                        "ReviewQ's data at {folder} changed while ReviewQ was uninstalled. Installing with the data that is there now."
+                    ),
+                    None => {
+                        println!("ReviewQ's earlier data at {folder} is gone. Installing fresh.")
+                    }
+                }
+                inventory.store_id.clone_from(&store_id);
             }
             paths.prepare()?;
             if !inventory.known.iter().any(|id| id == &next.id) {
@@ -291,6 +330,7 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
                 was_running,
                 store_id,
                 recovery: None,
+                door_existed: paths::exists(&paths.start_socket)?,
             });
             paths::write_json(&journal(&paths), &inventory)?;
             inventory
@@ -502,7 +542,7 @@ async fn activate(
     unit: &[u8],
     store_id: Option<&str>,
 ) -> Result<reviewq_transport::ServiceIdentity, Failure> {
-    start_door::stop(paths).await?;
+    start_door::stop().await?;
     if service::state().await?.1 {
         service::switch("stop").await?;
     }
@@ -549,7 +589,11 @@ async fn rollback(
         Some(unit) => unit,
         None => verified_unit(paths, previous, &bundle)?,
     };
-    start_door::stop(paths).await?;
+    if pending.door_existed {
+        start_door::stop().await?;
+    } else {
+        start_door::retire().await?;
+    }
     if service::state().await?.1 {
         service::switch("stop").await?;
     }
@@ -561,7 +605,12 @@ async fn rollback(
         return Err("The previous installation's retained store is missing or changed.".into());
     }
     files::set(paths, Some(&pending.next), previous, &unit)?;
-    start_door::write(paths)?;
+    // A release from before the start door has no `start-door` command and never removes it.
+    if pending.door_existed {
+        start_door::write(paths)?;
+    } else {
+        start_door::remove(paths)?;
+    }
     if previous.claude.is_some() {
         let previous_paths = Paths {
             claude_home_is_explicit: service::unit_has_claude_override(&unit),
@@ -579,7 +628,9 @@ async fn rollback(
         windows.remove().await?;
     }
     service::reload().await?;
-    start_door::open().await;
+    if pending.door_existed {
+        start_door::open().await;
+    }
     service::switch(if pending.was_enabled {
         "enable"
     } else {

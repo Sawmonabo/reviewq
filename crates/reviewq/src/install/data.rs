@@ -63,7 +63,47 @@ pub(crate) struct Folders {
 #[derive(Default)]
 pub(crate) struct Deletion {
     pub deleted: Vec<PathBuf>,
-    pub kept: Vec<(PathBuf, &'static str)>,
+    pub kept: Vec<(PathBuf, Kept)>,
+}
+
+/// Why a deletion left an entry in place.
+#[derive(Clone, Copy)]
+pub(crate) enum Kept {
+    Link,
+    OtherUser,
+    NotFolder,
+    NotEmpty,
+    Unreadable,
+    NotRemoved,
+}
+
+impl Kept {
+    /// The reason, as it completes "Kept <path> because …".
+    pub(crate) fn reason(self) -> &'static str {
+        match self {
+            Self::Link => "it is a symbolic link",
+            Self::OtherUser => "it belongs to another user",
+            Self::NotFolder => "it is not a folder",
+            Self::NotEmpty => "it is not empty",
+            Self::Unreadable => "it cannot be read",
+            Self::NotRemoved => "it could not be removed",
+        }
+    }
+
+    /// Whether removing the entry failed, rather than a rule keeping it.
+    pub(crate) fn failed(self) -> bool {
+        matches!(self, Self::Unreadable | Self::NotRemoved)
+    }
+}
+
+/// One walk over the owned entries: a deletion, or a measure of what a deletion would
+/// remove. Both follow the same rules, so the System page's size never counts a kept entry.
+#[derive(Default)]
+struct Walk {
+    /// Remove entries, rather than only count their bytes.
+    remove: bool,
+    bytes: u64,
+    deletion: Deletion,
 }
 
 impl Folders {
@@ -107,6 +147,10 @@ impl Folders {
         roots
     }
 
+    fn record(&self) -> Option<PathBuf> {
+        self.state.as_ref().map(|state| state.join(RECORD))
+    }
+
     /// The owned entries present now, each with how it is removed, and the folders passed
     /// over, each with the reason: a folder that is a link or another user's is not read.
     fn present(&self) -> Result<(Vec<(PathBuf, Name)>, Deletion), std::io::Error> {
@@ -148,42 +192,67 @@ impl Folders {
         }
         found.sort_by(|left, right| left.0.cmp(&right.0));
         // The record goes last.
-        if let Some(state) = &self.state {
-            let record = state.join(RECORD);
+        if let Some(record) = self.record() {
             found.sort_by_key(|(path, _)| *path == record);
         }
         Ok((found, passed))
     }
 
-    /// The total size of what a deletion would remove, counting files only and never
-    /// following a link. A folder removed only when empty adds nothing.
-    pub(crate) fn size(&self) -> Option<u64> {
-        let mut total = 0_u64;
-        for (path, rule) in self.present().ok()?.0 {
-            if !matches!(rule, Name::EmptyFolder(_)) {
-                total = total.checked_add(tree_size(&path).ok()?)?;
-            }
-        }
-        Some(total)
-    }
-
-    /// Deletes the owned data, the install record last unless `keep_record`, then each
-    /// ReviewQ folder left empty.
-    pub(crate) fn delete(&self, keep_record: bool) -> Result<Deletion, std::io::Error> {
-        let (found, mut deletion) = self.present()?;
-        let record = self.state.as_ref().map(|state| state.join(RECORD));
+    /// Walks the owned entries, passing over the install record when `keep_record`.
+    fn walk(&self, remove: bool, keep_record: bool) -> Result<Walk, std::io::Error> {
+        let (found, deletion) = self.present()?;
+        let mut walk = Walk {
+            remove,
+            bytes: 0,
+            deletion,
+        };
+        let record = self.record();
         for (path, rule) in found {
             if keep_record && Some(&path) == record.as_ref() {
                 continue;
             }
             let removed = match rule {
-                Name::EmptyFolder(_) => remove_empty(&path, &mut deletion),
-                Name::Exact(_) | Name::Prefix(_) => remove_tree(&path, &mut deletion),
+                Name::EmptyFolder(_) => walk.empty_folder(&path),
+                Name::Exact(_) | Name::Prefix(_) => walk.tree(&path),
             };
             if removed {
-                deletion.deleted.push(path);
+                walk.deletion.deleted.push(path);
             }
         }
+        Ok(walk)
+    }
+
+    /// The total size of what a deletion would remove, counting files only and never
+    /// following a link.
+    pub(crate) fn size(&self) -> Option<u64> {
+        Some(self.walk(false, false).ok()?.bytes)
+    }
+
+    /// Deletes the owned data, the install record last unless `keep_record`, then each
+    /// ReviewQ folder left empty.
+    pub(crate) fn delete(&self, keep_record: bool) -> Result<Deletion, std::io::Error> {
+        let mut deletion = self.walk(true, keep_record)?.deletion;
+        self.remove_empty_roots(&mut deletion);
+        Ok(deletion)
+    }
+
+    /// Deletes the install record a deletion kept, then each ReviewQ folder left empty.
+    pub(crate) fn delete_record(&self) -> Deletion {
+        let mut walk = Walk {
+            remove: true,
+            ..Walk::default()
+        };
+        if let Some(record) = self.record()
+            && record.symlink_metadata().is_ok()
+            && walk.tree(&record)
+        {
+            walk.deletion.deleted.push(record);
+        }
+        self.remove_empty_roots(&mut walk.deletion);
+        walk.deletion
+    }
+
+    fn remove_empty_roots(&self, deletion: &mut Deletion) {
         for root in self.roots() {
             if deletion.kept.iter().any(|(kept, _)| kept == root) {
                 continue;
@@ -194,7 +263,6 @@ impl Folders {
                 deletion.deleted.push(root.to_path_buf());
             }
         }
-        Ok(deletion)
     }
 }
 
@@ -208,96 +276,74 @@ impl Name {
 }
 
 /// Why `path` must stay, or `None` when it is the user's own file or folder.
-fn refusal(metadata: &fs::Metadata) -> Option<&'static str> {
+fn refusal(metadata: &fs::Metadata) -> Option<Kept> {
     if metadata.file_type().is_symlink() {
-        Some("it is a symbolic link")
+        Some(Kept::Link)
     } else if metadata.uid() != rustix::process::getuid().as_raw() {
-        Some("it belongs to another user")
+        Some(Kept::OtherUser)
     } else {
         None
     }
 }
 
-fn tree_size(path: &Path) -> Result<u64, std::io::Error> {
-    let metadata = match path.symlink_metadata() {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(0),
-        Err(error) => return Err(error),
-    };
-    if metadata.file_type().is_symlink() {
-        return Ok(0);
+impl Walk {
+    fn keep(&mut self, path: &Path, reason: Kept) -> bool {
+        self.deletion.kept.push((path.to_path_buf(), reason));
+        false
     }
-    if !metadata.is_dir() {
-        return Ok(metadata.len());
-    }
-    let mut total = 0_u64;
-    for entry in fs::read_dir(path)? {
-        total = total.saturating_add(tree_size(&entry?.path())?);
-    }
-    Ok(total)
-}
 
-/// Removes `path` and everything under it that is the user's own, keeping links and other
-/// users' entries, and with them the folders that hold them. Returns whether `path` is gone.
-fn remove_tree(path: &Path, deletion: &mut Deletion) -> bool {
-    let metadata = match path.symlink_metadata() {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == ErrorKind::NotFound => return true,
-        Err(_) => {
-            deletion
-                .kept
-                .push((path.to_path_buf(), "it cannot be read"));
-            return false;
+    /// Removes, or counts, `path` and everything under it that is the user's own, keeping
+    /// links and other users' entries, and with them the folders that hold them. Returns
+    /// whether `path` is, or would be, gone.
+    fn tree(&mut self, path: &Path) -> bool {
+        let metadata = match path.symlink_metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => return true,
+            Err(_) => return self.keep(path, Kept::Unreadable),
+        };
+        if let Some(reason) = refusal(&metadata) {
+            return self.keep(path, reason);
         }
-    };
-    if let Some(reason) = refusal(&metadata) {
-        deletion.kept.push((path.to_path_buf(), reason));
-        return false;
+        if !metadata.is_dir() {
+            if !self.remove {
+                self.bytes = self.bytes.saturating_add(metadata.len());
+                return true;
+            }
+            return self.removed(fs::remove_file(path), path);
+        }
+        let Ok(entries) = fs::read_dir(path) else {
+            return self.keep(path, Kept::Unreadable);
+        };
+        let mut emptied = true;
+        for entry in entries {
+            emptied &= entry.is_ok_and(|entry| self.tree(&entry.path()));
+        }
+        emptied && (!self.remove || self.removed(fs::remove_dir(path), path))
     }
-    if !metadata.is_dir() {
-        return keep_on_error(fs::remove_file(path), path, deletion);
-    }
-    let Ok(entries) = fs::read_dir(path) else {
-        deletion
-            .kept
-            .push((path.to_path_buf(), "it cannot be read"));
-        return false;
-    };
-    let mut emptied = true;
-    for entry in entries {
-        emptied &= entry.is_ok_and(|entry| remove_tree(&entry.path(), deletion));
-    }
-    emptied && keep_on_error(fs::remove_dir(path), path, deletion)
-}
 
-/// Removes the folder at `path` when it is the user's own and holds nothing.
-fn remove_empty(path: &Path, deletion: &mut Deletion) -> bool {
-    let metadata = match path.symlink_metadata() {
-        Ok(metadata) => metadata,
-        Err(error) => return error.kind() == ErrorKind::NotFound,
-    };
-    let reason =
-        refusal(&metadata).or_else(|| (!metadata.is_dir()).then_some("it is not a folder"));
-    if let Some(reason) = reason {
-        deletion.kept.push((path.to_path_buf(), reason));
-        return false;
+    /// Removes the folder at `path` when it is the user's own and holds nothing. It adds
+    /// nothing to a measure.
+    fn empty_folder(&mut self, path: &Path) -> bool {
+        let metadata = match path.symlink_metadata() {
+            Ok(metadata) => metadata,
+            Err(error) => return error.kind() == ErrorKind::NotFound,
+        };
+        if let Some(reason) =
+            refusal(&metadata).or_else(|| (!metadata.is_dir()).then_some(Kept::NotFolder))
+        {
+            return self.keep(path, reason);
+        }
+        if self.remove && fs::remove_dir(path).is_err() {
+            return self.keep(path, Kept::NotEmpty);
+        }
+        true
     }
-    if fs::remove_dir(path).is_err() {
-        deletion.kept.push((path.to_path_buf(), "it is not empty"));
-        return false;
-    }
-    true
-}
 
-fn keep_on_error(result: std::io::Result<()>, path: &Path, deletion: &mut Deletion) -> bool {
-    match result {
-        Ok(()) => true,
-        Err(error) if error.kind() == ErrorKind::NotFound => true,
-        Err(_) => {
-            deletion
-                .kept
-                .push((path.to_path_buf(), "it could not be removed"));
-            false
+    fn removed(&mut self, result: std::io::Result<()>, path: &Path) -> bool {
+        match result {
+            Ok(()) => true,
+            Err(error) if error.kind() == ErrorKind::NotFound => true,
+            Err(_) => self.keep(path, Kept::NotRemoved),
         }
     }
 }
