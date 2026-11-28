@@ -29,14 +29,6 @@ pub struct SystemFacts {
     pub start_at_login: Option<bool>,
 }
 
-/// An uninstall handed to a job outside the service.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UninstallStarted {
-    pub delete_data: bool,
-    /// The data folder for display, as in `SystemFacts`.
-    pub data_folder: String,
-}
-
 /// Why a System page change was refused before anything changed. Its text is the sentence the
 /// page shows.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -66,10 +58,7 @@ pub trait SystemControl: Send + Sync {
 
     /// Checks that an uninstall can run, then starts it as a job outside the service, which
     /// it stops.
-    fn uninstall(
-        &self,
-        delete_data: bool,
-    ) -> AppFuture<'_, Result<UninstallStarted, SystemRefusal>>;
+    fn uninstall(&self, delete_data: bool) -> AppFuture<'_, Result<(), SystemRefusal>>;
 }
 
 impl Display for SystemRefusal {

@@ -11732,23 +11732,6 @@
       ],
       "type": "object"
     },
-    "UninstallReceipt": {
-      "description": "An uninstall that passed its checks and was handed to a job outside the service.",
-      "properties": {
-        "dataFolder": {
-          "description": "The data folder for display, as in `SystemFacts`.",
-          "type": "string"
-        },
-        "deleteData": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "deleteData",
-        "dataFolder"
-      ],
-      "type": "object"
-    },
     "UninstallRequest": {
       "additionalProperties": false,
       "description": "Uninstalls ReviewQ, and with `deleteData` also deletes its data once everything else is\nremoved.",
@@ -11761,23 +11744,6 @@
         "deleteData"
       ],
       "title": "UninstallRequest",
-      "type": "object"
-    },
-    "UninstallResponse": {
-      "description": "The resource and event head from the same authorized snapshot.",
-      "properties": {
-        "cursor": {
-          "$ref": "#/definitions/EventCursorDto"
-        },
-        "data": {
-          "$ref": "#/definitions/UninstallReceipt"
-        }
-      },
-      "required": [
-        "data",
-        "cursor"
-      ],
-      "title": "UninstallResponse",
       "type": "object"
     },
     "UnmatchedTicket": {
@@ -12032,7 +11998,6 @@
     "TrackReviewRequest": "queue",
     "TrackReviewResponse": "queue",
     "UninstallRequest": "system",
-    "UninstallResponse": "system",
     "VerifiedConnectionResponse": "settings",
     "ViewNotificationResponse": "notifications"
   },
@@ -12142,7 +12107,6 @@
       "TicketCommentsResponse": "#/definitions/TicketCommentsResponse",
       "TicketDetailResponse": "#/definitions/TicketDetailResponse",
       "TrackReviewResponse": "#/definitions/TrackReviewResponse",
-      "UninstallResponse": "#/definitions/UninstallResponse",
       "VerifiedConnectionResponse": "#/definitions/VerifiedConnectionResponse",
       "ViewNotificationResponse": "#/definitions/ViewNotificationResponse"
     }

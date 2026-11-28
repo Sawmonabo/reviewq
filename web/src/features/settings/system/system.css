@@ -44,20 +44,111 @@
 .settings-check-hint {
   margin: 4px 0 0 21px;
 }
-/* public/stopped.html repeats these rules, since it cannot load the app's styles. */
+/* One centred card for the uninstall screen. public/stopped.html repeats the card, mark, title
+   and lead rules, since it cannot load the app's styles. */
 .system-screen {
   display: grid;
-  align-content: center;
-  justify-items: start;
-  gap: 14px;
-  width: min(480px, calc(100% - 32px));
+  place-items: center;
   min-height: 100%;
-  margin-inline: auto;
-  padding-block: 48px;
+  padding: 32px 16px;
 }
-.system-screen .brand-wordmark {
-  margin-bottom: 14px;
+.system-card {
+  display: grid;
+  justify-items: center;
+  width: min(420px, 100%);
+  padding: 40px 32px 30px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  text-align: center;
 }
-.system-screen > p {
-  max-width: 62ch;
+/* The state mark: a ring that turns while working, a green tick when done. */
+.system-mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 22px;
+  border-radius: 50%;
+  background: var(--raised);
+  color: var(--muted);
+}
+.system-mark.working {
+  background: transparent;
+}
+.system-mark.working::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border: 2px solid var(--line);
+  border-top-color: var(--focus);
+  border-radius: 50%;
+  animation: spinner 0.85s linear infinite;
+}
+.system-mark.done {
+  background: var(--green-bg);
+  color: var(--green);
+  animation: system-mark-in 0.28s ease-out;
+}
+@keyframes system-mark-in {
+  from {
+    opacity: 0;
+    scale: 0.8;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .system-mark.working::before,
+  .system-mark.done {
+    animation: none;
+  }
+}
+.system-card h1 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3em;
+  margin: 0;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+.system-lead {
+  max-width: 44ch;
+  margin: 8px 0 0;
+  text-wrap: balance;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.system-foot {
+  max-width: 44ch;
+  margin: 20px 0 0;
+  text-wrap: balance;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* The Wordmark inside a heading or box title, at the heading's size. */
+.settings-confirm h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+}
+.title-name {
+  display: inline-flex;
+  align-items: center;
+}
+.system-card h1 .brand-wordmark,
+.settings-confirm h2 .brand-wordmark {
+  margin: 0;
+  font: inherit;
+  letter-spacing: -0.044em;
+}
+.system-card h1 .brand-q,
+.settings-confirm h2 .brand-q {
+  width: 0.8em;
+  height: 1.04em;
 }

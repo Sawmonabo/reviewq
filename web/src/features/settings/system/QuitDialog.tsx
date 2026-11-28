@@ -2,7 +2,9 @@ import { useState } from "react";
 import { lostReply, quitReviewQ, stillAnswers } from "../../../api/system";
 import { Modal } from "../../../components/Modal";
 import { Notice } from "../../../components/PanelState";
+import { Wordmark } from "../../../components/Wordmark";
 import { describeError } from "../../../lib/presentation";
+import { DraftsLine } from "./DraftsLine";
 
 export function QuitDialog({
   startAtLogin,
@@ -31,6 +33,14 @@ export function QuitDialog({
   return (
     <Modal
       title="Quit ReviewQ?"
+      heading={
+        <>
+          Quit{" "}
+          <span className="title-name">
+            <Wordmark />?
+          </span>
+        </>
+      }
       className="settings-confirm"
       onClose={onClose}
       busy={busy}
@@ -47,10 +57,11 @@ export function QuitDialog({
     >
       <div className="stack">
         <p>Monitoring, alerts and follow-ups stop.</p>
+        <DraftsLine />
         <p className="meta">
           {startAtLogin
-            ? "It will start again when you log in. To start it sooner, open ReviewQ and click Start ReviewQ."
-            : "It stays off until you open ReviewQ and click Start ReviewQ."}
+            ? "It starts again when you log in. To start it sooner, open the app and click Start."
+            : "It stays off until you open the app and click Start."}
         </p>
         {error && <Notice>{error}</Notice>}
       </div>

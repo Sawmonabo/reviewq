@@ -99,6 +99,5 @@ export { validate1687 as isTerminalResponse } from "./validators/schemas/termina
 export { validate1705 as isTicketCommentsResponse } from "./validators/schemas/ticket-comments-response.mjs";
 export { validate1719 as isTicketDetailResponse } from "./validators/schemas/ticket-detail-response.mjs";
 export { validate1736 as isTrackReviewResponse } from "./validators/schemas/track-review-response.mjs";
-export { validate1744 as isUninstallResponse } from "./validators/schemas/uninstall-response.mjs";
-export { validate1748 as isVerifiedConnectionResponse } from "./validators/schemas/verified-connection-response.mjs";
-export { validate1754 as isViewNotificationResponse } from "./validators/schemas/view-notification-response.mjs";
+export { validate1744 as isVerifiedConnectionResponse } from "./validators/schemas/verified-connection-response.mjs";
+export { validate1750 as isViewNotificationResponse } from "./validators/schemas/view-notification-response.mjs";

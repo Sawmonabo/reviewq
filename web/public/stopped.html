@@ -30,7 +30,7 @@
     </script>
     <style>
       /* This page loads nothing from the service, so it repeats the app's tokens (styles/tokens.css),
-         base rules (styles/base.css), wordmark and .system-screen (settings/system/system.css). */
+         base rules (styles/base.css), wordmark and status card (settings/system/system.css). */
       :root {
         font-family:
           Inter,
@@ -109,12 +109,6 @@
       p {
         margin: 0;
       }
-      h1 {
-        font-size: 25px;
-        font-weight: 650;
-        line-height: 1.2;
-        letter-spacing: -0.55px;
-      }
       button {
         min-width: 0;
         min-height: 31px;
@@ -159,10 +153,6 @@
       [hidden] {
         display: none !important;
       }
-      .meta {
-        color: var(--muted);
-        font-size: 12px;
-      }
       .actions {
         display: flex;
         flex-wrap: wrap;
@@ -197,19 +187,108 @@
       }
       .system-screen {
         display: grid;
-        align-content: center;
-        justify-items: start;
-        gap: 14px;
-        width: min(480px, calc(100% - 32px));
+        place-items: center;
         min-height: 100%;
-        margin-inline: auto;
-        padding-block: 48px;
+        padding: 32px 16px;
       }
-      .system-screen .brand-wordmark {
-        margin-bottom: 14px;
+      .system-card {
+        display: grid;
+        justify-items: center;
+        width: min(420px, 100%);
+        padding: 40px 32px 30px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--surface);
+        text-align: center;
       }
-      .system-screen > p {
-        max-width: 62ch;
+      /* The state mark: a quiet power glyph, and a turning ring while starting. */
+      .system-mark {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 52px;
+        height: 52px;
+        margin-bottom: 22px;
+        border-radius: 50%;
+        background: var(--raised);
+        color: var(--muted);
+      }
+      [data-state="starting"] .system-mark {
+        background: transparent;
+      }
+      [data-state="starting"] .system-mark > * {
+        display: none;
+      }
+      [data-state="starting"] .system-mark::before {
+        content: "";
+        position: absolute;
+        inset: 4px;
+        border: 2px solid var(--line);
+        border-top-color: var(--focus);
+        border-radius: 50%;
+        animation: spinner 0.85s linear infinite;
+      }
+      @keyframes spinner {
+        to {
+          rotate: 1turn;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        [data-state="starting"] .system-mark::before {
+          animation: none;
+        }
+      }
+      .system-card h1 {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.3em;
+        margin: 0;
+        font-size: 21px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        line-height: 1.25;
+      }
+      .system-card h1 .brand-wordmark {
+        margin: 0;
+        font: inherit;
+        letter-spacing: -0.044em;
+      }
+      .system-card h1 .brand-q {
+        width: 0.8em;
+        height: 1.04em;
+      }
+      .system-lead {
+        max-width: 44ch;
+        margin: 8px 0 0;
+        text-wrap: balance;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      .system-card > .actions {
+        margin-top: 24px;
+      }
+      .system-card > .actions > button.primary {
+        min-width: 132px;
+        min-height: 36px;
+        font-size: 14px;
+      }
+      .system-foot {
+        max-width: 44ch;
+        margin: 20px 0 0;
+        text-wrap: balance;
+        color: var(--muted);
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+      .system-card .notice {
+        display: grid;
+        justify-items: start;
+        gap: 8px;
+        width: 100%;
+        margin-top: 20px;
+        text-align: left;
       }
       @media (pointer: coarse) {
         button {
@@ -220,46 +299,70 @@
   </head>
   <body>
     <main class="system-screen">
-      <span class="brand-wordmark" aria-hidden="true"
-        ><span>Review</span
-        ><svg class="brand-q" viewBox="7 3 20 26">
-          <path
-            d="M22.5 17V12a6.5 6.5 0 0 0-13 0v7a6.5 6.5 0 0 0 6.5 6.5h2"
+      <div class="system-card">
+        <div class="system-mark" aria-hidden="true">
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            stroke-width="3"
-            stroke-linecap="square"
-          />
-          <path
-            d="m17 19 7 7"
-            fill="none"
-            stroke="var(--link)"
-            stroke-width="3"
-            stroke-linecap="square"
-          /></svg
-      ></span>
-      <h1>ReviewQ isn’t running</h1>
-      <p class="meta" data-show="off" hidden>Start the server again, then reload this page.</p>
-      <div class="actions" data-show="idle starting unreached nostart" hidden>
-        <button type="button" class="primary" id="start">Start ReviewQ</button>
-      </div>
-      <p class="meta" data-show="idle starting" hidden>
-        If you uninstalled ReviewQ, remove this app: right-click its icon and choose Uninstall.
-      </p>
-      <div class="notice" role="alert" data-show="unreached" hidden>
-        <span
-          >Couldn’t reach ReviewQ. If you uninstalled it, remove this app: right-click its icon and
-          choose Uninstall. Otherwise, its logs show why it can’t start:</span
-        >
-        <span class="actions"
-          ><code>reviewq logs</code><button type="button" data-copy>Copy</button></span
-        >
-      </div>
-      <div class="notice" role="alert" data-show="nostart" hidden>
-        <span>ReviewQ didn’t start.</span>
-        <span class="actions"
-          ><code>reviewq logs</code><button type="button" data-copy>Copy</button></span
-        >
+            stroke-width="1.65"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 3v9M6.3 6.6a8 8 0 1 0 11.4 0" />
+          </svg>
+        </div>
+        <h1 aria-label="ReviewQ isn’t running">
+          <span class="brand-wordmark" aria-hidden="true"
+            ><span>Review</span
+            ><svg class="brand-q" viewBox="7 3 20 26">
+              <path
+                d="M22.5 17V12a6.5 6.5 0 0 0-13 0v7a6.5 6.5 0 0 0 6.5 6.5h2"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="3"
+                stroke-linecap="square"
+              />
+              <path
+                d="m17 19 7 7"
+                fill="none"
+                stroke="var(--link)"
+                stroke-width="3"
+                stroke-linecap="square"
+              /></svg
+          ></span>
+          isn’t running
+        </h1>
+        <p class="system-lead" data-show="idle starting unreached nostart" hidden>
+          Monitoring, alerts and follow-ups are paused.
+        </p>
+        <p class="system-lead" data-show="off" hidden>
+          Start the server again, then reload this page.
+        </p>
+        <div class="actions" data-show="idle starting unreached nostart" hidden>
+          <button type="button" class="primary" id="start">Start</button>
+        </div>
+        <div class="notice" role="alert" data-show="unreached" hidden>
+          <span data-window="app"
+            >Couldn’t start it. If you uninstalled it, remove this app: right&#8209;click its icon
+            and choose Uninstall. Otherwise, its logs show why it can’t start:</span
+          >
+          <span data-window="tab">Couldn’t start it. Its logs show why:</span>
+          <span class="actions"
+            ><code>reviewq logs</code><button type="button" data-copy>Copy</button></span
+          >
+        </div>
+        <div class="notice" role="alert" data-show="nostart" hidden>
+          <span>It didn’t start. Its logs show why:</span>
+          <span class="actions"
+            ><code>reviewq logs</code><button type="button" data-copy>Copy</button></span
+          >
+        </div>
+        <p class="system-foot" data-show="idle starting" data-window="app" hidden>
+          If you uninstalled it, remove this app: right&#8209;click its icon and choose Uninstall.
+        </p>
       </div>
     </main>
     <script>
@@ -269,12 +372,18 @@
         const startUrl = `http://127.0.0.1:${Number(location.port) + 4}/start`;
         const startButton = document.getElementById("start");
         const copyButtons = document.querySelectorAll("[data-copy]");
+        // Only the installed app window says how to remove the app.
+        const windowKind = matchMedia("(display-mode: standalone)").matches ? "app" : "tab";
 
         function show(state) {
-          for (const node of document.querySelectorAll("[data-show]"))
-            node.hidden = !node.dataset.show.split(" ").includes(state);
+          document.documentElement.dataset.state = state;
+          for (const node of document.querySelectorAll("[data-show], [data-window]")) {
+            const states = node.dataset.show?.split(" ") ?? [state];
+            node.hidden =
+              !states.includes(state) || (node.dataset.window ?? windowKind) !== windowKind;
+          }
           startButton.disabled = state === "starting";
-          startButton.textContent = startButton.disabled ? "Starting…" : "Start ReviewQ";
+          startButton.textContent = startButton.disabled ? "Starting…" : "Start";
           for (const button of copyButtons) button.textContent = "Copy";
         }
 

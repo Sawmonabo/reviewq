@@ -58,18 +58,3 @@ export interface SystemFacts {
   version: string;
   [k: string]: unknown;
 }
-
-export interface UninstallResponse {
-  cursor: EventCursorDto;
-  data: UninstallReceipt;
-  [k: string]: unknown;
-}
-
-export interface UninstallReceipt {
-  /**
-   * The data folder for display, as in `SystemFacts`.
-   */
-  dataFolder: string;
-  deleteData: boolean;
-  [k: string]: unknown;
-}

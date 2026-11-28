@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import type { SystemFacts, SystemMode, UninstallReceipt } from "../../../api/generated/contracts";
+import type { SystemFacts, SystemMode } from "../../../api/generated/contracts";
 import { readSystem, setLoginStart } from "../../../api/system";
 import { Loading, Notice } from "../../../components/PanelState";
 import { useResource } from "../../../hooks/useResource";
@@ -34,18 +34,14 @@ const statuses: Record<SystemMode, ReactNode> = {
 
 const desktopLines: Record<InstallState, string> = {
   offered: "Opens in its own window with its own icon, so you never type the address.",
-  standalone: "You’re using the ReviewQ app.",
-  installed: "Installed. Open ReviewQ from its icon.",
+  standalone: "You’re using the app.",
+  installed: "Installed. Open it from its icon.",
   chromium:
-    "ReviewQ is already installed in this browser, or the browser hasn’t offered it yet. You can also use the install icon in the address bar.",
-  other: "Open ReviewQ in Chrome or Edge to install it as an app.",
+    "Already installed in this browser, or the browser hasn’t offered it yet. You can also use the install icon in the address bar.",
+  other: "Open this page in Chrome or Edge to install it as an app.",
 };
 
-export function SystemPage({
-  onUninstall,
-}: {
-  readonly onUninstall: (receipt: UninstallReceipt) => void;
-}) {
+export function SystemPage() {
   const facts = useResource("system", readSystem);
   const [login, setLogin] = useState<LoginChange>({});
   const [dialog, setDialog] = useState<"quit" | "uninstall">();
@@ -86,13 +82,13 @@ export function SystemPage({
             {system.mode === "installed" ? (
               <>
                 <Policy
-                  title="Start ReviewQ when I log in"
-                  description="Starts ReviewQ in the background each time you log in."
+                  title="Start when I log in"
+                  description="Runs in the background each time you log in."
                   notice={login.error && <Notice>{login.error}</Notice>}
                 >
                   {startAtLogin !== null && (
                     <Switch
-                      label="Start ReviewQ when I log in"
+                      label="Start when I log in"
                       checked={startAtLogin}
                       onChange={(enabled) => void changeLogin(enabled)}
                     />
@@ -140,12 +136,7 @@ export function SystemPage({
         <QuitDialog startAtLogin={startAtLogin === true} onClose={() => setDialog(undefined)} />
       )}
       {dialog === "uninstall" && system && (
-        <UninstallDialog
-          dataFolder={system.dataFolder}
-          dataSize={dataSize}
-          onClose={() => setDialog(undefined)}
-          onUninstall={onUninstall}
-        />
+        <UninstallDialog dataSize={dataSize} onClose={() => setDialog(undefined)} />
       )}
     </div>
   );
@@ -183,7 +174,7 @@ function DesktopApp() {
     <section className="settings-section" aria-labelledby="settings-system-desktop">
       <h3 id="settings-system-desktop">Desktop app</h3>
       <div className="settings-agent-policies">
-        <Policy title="Install ReviewQ as an app" description={desktopLines[state]}>
+        <Policy title="Install as an app" description={desktopLines[state]}>
           {state === "offered" && (
             <button type="button" onClick={install}>
               Install app

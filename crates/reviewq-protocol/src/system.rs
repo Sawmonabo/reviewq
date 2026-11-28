@@ -58,16 +58,5 @@ pub struct UninstallRequest {
     pub delete_data: bool,
 }
 
-/// An uninstall that passed its checks and was handed to a job outside the service.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct UninstallReceipt {
-    pub delete_data: bool,
-    /// The data folder for display, as in `SystemFacts`.
-    pub data_folder: String,
-}
-
 pub type SystemFactsResponse = Success<SystemFacts>;
 pub type LoginStartResponse = Success<LoginStart>;
-pub type UninstallResponse = Success<UninstallReceipt>;

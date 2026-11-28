@@ -99,13 +99,8 @@ async fn uninstall(
     entry.auth.browser_actor(&headers, true)?;
     let system = port(&entry)?;
     let input: dto::UninstallRequest = read(&bytes)?;
-    let started = decided(system.uninstall(input.delete_data)).await?;
-    let receipt = dto::UninstallReceipt {
-        delete_data: started.delete_data,
-        data_folder: started.data_folder,
-    };
-    let response: dto::UninstallResponse = success(receipt, *entry.commits.borrow())?;
-    Ok((StatusCode::ACCEPTED, Json(response)).into_response())
+    decided(system.uninstall(input.delete_data)).await?;
+    Ok(StatusCode::ACCEPTED.into_response())
 }
 
 /// `GET /stopped.html`: the page shown while ReviewQ is stopped, read from the build. In the

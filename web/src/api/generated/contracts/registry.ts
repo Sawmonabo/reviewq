@@ -59,7 +59,6 @@ import type {
   LoginStartResponse,
   SystemFactsResponse,
   UninstallRequest,
-  UninstallResponse,
 } from "./system.js";
 
 import type {
@@ -254,7 +253,6 @@ export interface Contracts {
   TicketCommentsResponse: TicketCommentsResponse;
   TicketDetailResponse: TicketDetailResponse;
   TrackReviewResponse: TrackReviewResponse;
-  UninstallResponse: UninstallResponse;
   VerifiedConnectionResponse: VerifiedConnectionResponse;
   ViewNotificationResponse: ViewNotificationResponse;
 }

@@ -101,7 +101,6 @@ import type {
   TicketCommentsResponse,
   TicketDetailResponse,
   TrackReviewResponse,
-  UninstallResponse,
   VerifiedConnectionResponse,
   ViewNotificationResponse,
 } from "./contracts.js";
@@ -362,7 +361,6 @@ export function isTicketDetailResponse(
 export function isTrackReviewResponse(
   value: unknown,
 ): value is TrackReviewResponse;
-export function isUninstallResponse(value: unknown): value is UninstallResponse;
 export function isVerifiedConnectionResponse(
   value: unknown,
 ): value is VerifiedConnectionResponse;

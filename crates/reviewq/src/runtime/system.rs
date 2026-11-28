@@ -6,9 +6,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use reviewq_app::access::{AppError, AppFuture};
-use reviewq_app::system::{
-    SystemControl, SystemFacts, SystemMode, SystemRefusal, UninstallStarted,
-};
+use reviewq_app::system::{SystemControl, SystemFacts, SystemMode, SystemRefusal};
 use tokio::sync::watch;
 
 use crate::install::{self, data::Folders, paths::Paths};
@@ -120,10 +118,7 @@ impl SystemControl for System {
         })
     }
 
-    fn uninstall(
-        &self,
-        delete_data: bool,
-    ) -> AppFuture<'_, Result<UninstallStarted, SystemRefusal>> {
+    fn uninstall(&self, delete_data: bool) -> AppFuture<'_, Result<(), SystemRefusal>> {
         Box::pin(async move {
             let (paths, lock) = match self.hold()? {
                 Ok(held) => held,
@@ -132,10 +127,7 @@ impl SystemControl for System {
             let started = install::uninstall::start_job(paths, delete_data).await;
             drop(lock);
             match started {
-                Ok(()) => Ok(Ok(UninstallStarted {
-                    delete_data,
-                    data_folder: self.data_folder.clone(),
-                })),
+                Ok(()) => Ok(Ok(())),
                 // Only a refusal's sentence reaches the page; anything else is logged.
                 Err(error) => match error.downcast::<install::Refusal>() {
                     Ok(refusal) => Ok(Err(SystemRefusal::Blocked(refusal.0))),

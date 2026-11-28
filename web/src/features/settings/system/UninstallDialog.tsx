@@ -1,20 +1,18 @@
 import { useState } from "react";
-import type { UninstallReceipt } from "../../../api/generated/contracts";
 import { lostReply, stillAnswers, uninstallReviewQ } from "../../../api/system";
 import { Modal } from "../../../components/Modal";
 import { Notice } from "../../../components/PanelState";
+import { Wordmark } from "../../../components/Wordmark";
 import { describeError } from "../../../lib/presentation";
+import { DraftsLine } from "./DraftsLine";
+import { markUninstallStarted } from "./uninstall-state";
 
 export function UninstallDialog({
-  dataFolder,
   dataSize,
   onClose,
-  onUninstall,
 }: {
-  readonly dataFolder: string;
   readonly dataSize: string | undefined;
   readonly onClose: () => void;
-  readonly onUninstall: (receipt: UninstallReceipt) => void;
 }) {
   const [deleteData, setDeleteData] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -24,12 +22,13 @@ export function UninstallDialog({
     setBusy(true);
     setError(undefined);
     try {
-      return onUninstall((await uninstallReviewQ({ deleteData })).data);
+      await uninstallReviewQ({ deleteData });
+      return markUninstallStarted();
     } catch (failure) {
       if (!lostReply(failure)) setError(describeError(failure));
       else if (await stillAnswers()) setError("Couldn’t reach ReviewQ. Try again.");
       // With no reply and no answer, the uninstall most likely started.
-      else return onUninstall({ deleteData, dataFolder });
+      else return markUninstallStarted();
     }
     setBusy(false);
   }
@@ -37,6 +36,14 @@ export function UninstallDialog({
   return (
     <Modal
       title="Uninstall ReviewQ?"
+      heading={
+        <>
+          Uninstall{" "}
+          <span className="title-name">
+            <Wordmark />?
+          </span>
+        </>
+      }
       className="settings-confirm"
       onClose={onClose}
       busy={busy}
@@ -58,8 +65,8 @@ export function UninstallDialog({
     >
       <div className="stack">
         <p>
-          Removes the background service, the <code>reviewq</code> command, and ReviewQ’s Claude
-          plugin and Codex hooks.
+          Removes the background service, the <code>reviewq</code> command, and the Claude plugin
+          and Codex hooks.
         </p>
         <div>
           <label className="settings-check">
@@ -80,6 +87,7 @@ export function UninstallDialog({
         <p className="meta">
           Your Claude and Codex conversations and your GitLab merge requests are not touched.
         </p>
+        <DraftsLine />
         {error && <Notice>{error}</Notice>}
       </div>
     </Modal>

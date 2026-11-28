@@ -13,6 +13,7 @@ export class DraftStore {
 
   getSnapshot = () => this.#snapshot;
   isFull = () => this.#snapshot.full;
+  count = () => this.#snapshot.entries.length;
 
   subscribe = (listener: () => void) => {
     this.#listeners.add(listener);

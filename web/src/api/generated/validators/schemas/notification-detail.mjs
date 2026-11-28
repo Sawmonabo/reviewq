@@ -2,7 +2,7 @@
 import { func0 } from "../runtime.mjs";
 import { validate951 } from "./notification.mjs";
 import { validate968 } from "./review-context.mjs";
-function validate1756(
+function validate1752(
   data,
   { instancePath = "", parentData, parentDataProperty, rootData = data } = {},
 ) {
@@ -20,7 +20,7 @@ function validate1756(
         ((data.dismissed === undefined || !func0.call(data, "dismissed")) &&
           (missing0 = "dismissed"))
       ) {
-        validate1756.errors = [
+        validate1752.errors = [
           {
             instancePath,
             schemaPath: "#/required",
@@ -33,7 +33,7 @@ function validate1756(
         if (data.dismissed !== undefined && func0.call(data, "dismissed")) {
           const _errs1 = errors;
           if (typeof data.dismissed !== "boolean") {
-            validate1756.errors = [
+            validate1752.errors = [
               {
                 instancePath: instancePath + "/dismissed",
                 schemaPath: "#/properties/dismissed/type",
@@ -96,7 +96,7 @@ function validate1756(
         }
       }
     } else {
-      validate1756.errors = [
+      validate1752.errors = [
         {
           instancePath,
           schemaPath: "#/type",
@@ -107,7 +107,7 @@ function validate1756(
       return false;
     }
   }
-  validate1756.errors = vErrors;
+  validate1752.errors = vErrors;
   return errors === 0;
 }
-export { validate1756 };
+export { validate1752 };

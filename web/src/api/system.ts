@@ -1,10 +1,6 @@
 import { read, request, write } from "./client";
 import type { LoginStartRequest, UninstallRequest } from "./generated/contracts";
-import {
-  isLoginStartResponse,
-  isSystemFactsResponse,
-  isUninstallResponse,
-} from "./generated/validators.mjs";
+import { isLoginStartResponse, isSystemFactsResponse } from "./generated/validators.mjs";
 import { ApiTransportError } from "./transport-error";
 
 export function readSystem(signal: AbortSignal) {
@@ -19,8 +15,12 @@ export async function quitReviewQ() {
   await request("/system/quit", { method: "POST" });
 }
 
-export function uninstallReviewQ(body: UninstallRequest) {
-  return write("/system/uninstall", "POST", body, isUninstallResponse);
+export async function uninstallReviewQ(body: UninstallRequest) {
+  await request("/system/uninstall", {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 export function lostReply(error: unknown) {

@@ -65,7 +65,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     registry.request::<system::LoginStartRequest>("system", "LoginStartRequest")?;
     registry.response::<system::LoginStartResponse>("system", "LoginStartResponse")?;
     registry.request::<system::UninstallRequest>("system", "UninstallRequest")?;
-    registry.response::<system::UninstallResponse>("system", "UninstallResponse")?;
 
     registry.response::<QueuePageResponse>("queue", "QueuePageResponse")?;
     registry

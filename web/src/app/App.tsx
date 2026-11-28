@@ -1,12 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { findRunSession, readOverview, readRun, resolveReview } from "../api/client";
-import type {
-  Notification,
-  RunDetail,
-  SessionSummary,
-  UninstallReceipt,
-} from "../api/generated/contracts";
+import type { Notification, RunDetail, SessionSummary } from "../api/generated/contracts";
 import type { Tab } from "../api/generated/contracts/notifications";
 import { readNotifications } from "../api/workspace";
 import { ActionMenu } from "../components/ActionMenu";
@@ -17,8 +12,10 @@ import { Wordmark } from "../components/Wordmark";
 import { startBrowserAlerts } from "../features/notifications/browser-alerts";
 import { BrowserAlertsButton } from "../features/notifications/BrowserAlertsButton";
 import type { LaunchMode, LaunchTarget } from "../features/queue/types";
+import { onUninstallStarted, uninstallStarted } from "../features/settings/system/uninstall-state";
 import { UninstallScreen } from "../features/settings/system/UninstallScreen";
 import { useAppearance } from "../hooks/useAppearance";
+import { DraftsContext } from "../hooks/useDraftCount";
 import { useResource } from "../hooks/useResource";
 import { WorkspaceRecoveryContext } from "../hooks/useWorkspaceRecovery";
 import { useWorkspaceResource } from "../hooks/useWorkspaceResource";
@@ -71,22 +68,16 @@ type Overlay =
 
 export function App() {
   const { recovery, warning } = useWorkspaceConnection();
-  const [uninstall, setUninstall] = useState<UninstallReceipt>();
-  if (uninstall) return <UninstallScreen receipt={uninstall} />;
+  const uninstalling = useSyncExternalStore(onUninstallStarted, uninstallStarted);
+  if (uninstalling) return <UninstallScreen />;
   return (
     <WorkspaceRecoveryContext value={recovery}>
-      <Workspace warning={warning} onUninstall={setUninstall} />
+      <Workspace warning={warning} />
     </WorkspaceRecoveryContext>
   );
 }
 
-function Workspace({
-  warning,
-  onUninstall,
-}: {
-  readonly warning: WorkspaceConnection | undefined;
-  readonly onUninstall: (receipt: UninstallReceipt) => void;
-}) {
+function Workspace({ warning }: { readonly warning: WorkspaceConnection | undefined }) {
   const [route, setRoute] = useState(readRoute);
   const [split, setSplit] = useState(() => {
     const saved = savedValue("split");
@@ -730,16 +721,17 @@ function Workspace({
             />
           )}
           {settings && (
-            <SettingsPane
-              appearance={appearance}
-              onAppearance={changeAppearance}
-              onClose={() => setSettings(false)}
-              onUninstall={onUninstall}
-              onSave={() => {
-                setRevision((value) => value + 1);
-                overview.retry();
-              }}
-            />
+            <DraftsContext value={drafts}>
+              <SettingsPane
+                appearance={appearance}
+                onAppearance={changeAppearance}
+                onClose={() => setSettings(false)}
+                onSave={() => {
+                  setRevision((value) => value + 1);
+                  overview.retry();
+                }}
+              />
+            </DraftsContext>
           )}
         </Suspense>
       </PanelBoundary>

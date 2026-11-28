@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiResponseError } from "../../api/client";
 import { disconnectSettings, readSettings, saveSettings, testConnection } from "../../api/settings";
-import type { UninstallReceipt } from "../../api/generated/contracts";
 import type {
   CatalogItem,
   Identity,
@@ -55,7 +54,6 @@ type Props = {
   readonly onSave: () => void;
   readonly appearance: Appearance;
   readonly onAppearance: (appearance: Appearance) => void;
-  readonly onUninstall: (receipt: UninstallReceipt) => void;
 };
 
 const settingsMark = (
@@ -82,7 +80,6 @@ function UnavailableWorkspace({
   onClose,
   appearance,
   onAppearance,
-  onUninstall,
   pending,
   error,
   onRetry,
@@ -112,7 +109,7 @@ function UnavailableWorkspace({
             {active === "appearance" ? (
               <AppearancePage appearance={appearance} onChange={onAppearance} />
             ) : active === "system" ? (
-              <SystemPage onUninstall={onUninstall} />
+              <SystemPage />
             ) : pending ? (
               <Loading label="Loading workspace settings…" />
             ) : (
@@ -131,7 +128,6 @@ function SettingsEditor({
   onSave,
   appearance,
   onAppearance,
-  onUninstall,
 }: Props & { readonly initial: SettingsView }) {
   const [editor, setEditor] = useState(() => fromSaved(initial));
   const [active, setActive] = useState(() => savedPage(savedValue("settings.page")));
@@ -681,7 +677,7 @@ function SettingsEditor({
               <AppearancePage appearance={appearance} onChange={onAppearance} />
             </SettingsPage>
             <SettingsPage page="system" active={active}>
-              {active === "system" && <SystemPage onUninstall={onUninstall} />}
+              {active === "system" && <SystemPage />}
             </SettingsPage>
           </form>
         </div>

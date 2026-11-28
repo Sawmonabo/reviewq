@@ -3,6 +3,8 @@ import type { ReactNode, RefObject } from "react";
 
 type DialogProps = {
   readonly title: string;
+  // Visible heading content in place of `title`, which stays the dialog's accessible name.
+  readonly heading?: ReactNode;
   readonly eyebrow?: string;
   readonly headingMark?: ReactNode;
   readonly headerActions?: ReactNode;
@@ -29,6 +31,7 @@ export function Modal({
 
 export function ModalFrame({
   title,
+  heading,
   eyebrow,
   headingMark,
   headerActions,
@@ -109,7 +112,9 @@ export function ModalFrame({
         <header>
           <div>
             {eyebrow && <p className="modal-eyebrow">{eyebrow}</p>}
-            <h2 id={titleId}>{title}</h2>
+            <h2 id={titleId} aria-label={heading ? title : undefined}>
+              {heading ?? title}
+            </h2>
             {headingMark}
           </div>
           {headerActions ? (
