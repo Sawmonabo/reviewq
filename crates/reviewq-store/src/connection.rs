@@ -186,7 +186,16 @@ impl SqliteStore {
         T: Send + 'static,
         F: FnOnce(&Transaction<'_>) -> Result<T, StoreError> + Send + 'static,
     {
-        self.submit(false, move |connection, _| {
+        self.read_spending(&wait::Budget::default(), f).await
+    }
+
+    /// `read` for a call that waits more than once: its wait for room spends `budget`.
+    async fn read_spending<T, F>(&self, budget: &wait::Budget, f: F) -> Result<T, StoreError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Transaction<'_>) -> Result<T, StoreError> + Send + 'static,
+    {
+        self.submit_spending(false, budget, move |connection, _| {
             let tx = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
             let value = f(&tx)?;
             tx.commit()?;
@@ -250,12 +259,29 @@ impl SqliteStore {
             + Send
             + 'static,
     {
+        self.submit_spending(write, &wait::Budget::default(), f)
+            .await
+    }
+
+    /// `submit` for a call that waits more than once: its wait for room spends `budget`.
+    async fn submit_spending<T, F>(
+        &self,
+        write: bool,
+        budget: &wait::Budget,
+        f: F,
+    ) -> Result<T, StoreError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection, &Arc<profile::Profile>) -> Result<T, StoreError>
+            + Send
+            + 'static,
+    {
         let (response, receiver) = oneshot::channel();
         // The lock only hands out the worker's sender; waiting for room happens without it.
         // The channel serves waiters in arrival order, and a waiter that is dropped, as when its
-        // caller's deadline passes, enqueues nothing. A waiter waits for room at most
-        // `wait::LONGEST`, and leaves with `Unavailable` once `close` begins, dropping its copy
-        // of the sender so the worker can finish.
+        // caller's deadline passes, enqueues nothing. A waiter waits for room for at most what
+        // is left of `budget`, and leaves with `Unavailable` once `close` begins, dropping its
+        // copy of the sender so the worker can finish.
         let mut closing = self.closing.subscribe();
         let sender = {
             let workers = self.workers.lock().map_err(|_| AppError::Internal)?;
@@ -271,17 +297,20 @@ impl SqliteStore {
                 let _ = response.send(f(connection, profile));
             }
         });
-        let sent = {
-            let mut closed = pin!(closing.wait_for(|closed| *closed));
-            let mut send = pin!(wait::within(sender.send(job)));
-            poll_fn(|context| {
-                if closed.as_mut().poll(context).is_ready() {
-                    return Poll::Ready(Err(AppError::Unavailable));
-                }
-                send.as_mut().poll(context)
+        let (closing, waiting) = (&mut closing, &sender);
+        let sent = budget
+            .spend_async(move |deadline| async move {
+                let mut closed = pin!(closing.wait_for(|closed| *closed));
+                let mut send = pin!(wait::until(deadline, waiting.send(job)));
+                poll_fn(|context| {
+                    if closed.as_mut().poll(context).is_ready() {
+                        return Poll::Ready(Err(AppError::Unavailable));
+                    }
+                    send.as_mut().poll(context)
+                })
+                .await
             })
-            .await
-        };
+            .await;
         sent?.map_err(|_| AppError::Unavailable)?;
         drop(sender);
         receiver.await.map_err(|_| AppError::Unavailable)?

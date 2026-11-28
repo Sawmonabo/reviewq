@@ -141,9 +141,11 @@ impl GitLab {
         if page == 0 || page > 1000 || !(1..=50).contains(&limit) {
             return Err(AppError::InvalidRequest);
         }
-        // One deadline for both waits for a place, so together they wait at most `LONGEST`.
-        let deadline = reviewq_app::wait::deadline();
         let (current, mr_id) = self.discussion_context(&source, &scope.revision).await?;
+        // One deadline for both waits for a place, so together they wait at most `LONGEST`.
+        // It starts after the GitLab call above, and nothing between the two waits awaits
+        // GitLab, so it bounds only waiting.
+        let deadline = reviewq_app::wait::deadline();
         let (_place, observation) = self
             .discussions
             .observe(&source, mr_id, &scope, deadline)

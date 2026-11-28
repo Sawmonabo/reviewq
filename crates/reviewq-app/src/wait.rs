@@ -1,14 +1,16 @@
 //! How a call waits for its turn. A call that finds every slot, queue place or lock taken
 //! waits until one is free, in arrival order, instead of being refused: only a real limit
 //! refuses a call. A caller with a deadline of its own, such as an MCP tool call, is cut by that
-//! deadline first; `LONGEST` bounds every other wait, so nothing waits without a bound. A call
-//! that waits more than once takes one `deadline` at its start and spends it across its waits,
-//! so all of them together wait at most `LONGEST`.
+//! deadline first; `LONGEST` bounds every other wait, so nothing waits without a bound. The
+//! bound is on waiting only: work a call has started runs under its own bounds. A call that
+//! waits more than once before its work takes one `deadline` and spends it across those waits;
+//! a call that also waits between pieces of work spends one `Budget`, which counts only the
+//! time it waits. Either way all its waits together last at most `LONGEST`.
 
 use std::future::{Future, poll_fn};
 use std::pin::{Pin, pin};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Poll;
 use std::time::Duration;
 
@@ -56,14 +58,15 @@ pub fn blocking<T>(
         if stop.load(Ordering::Relaxed) {
             return Err(AppError::Unavailable);
         }
+        // The turn is looked at before the deadline, so one that is free needs no time left.
         let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return Err(AppError::Busy);
-        }
         if let Ok(value) =
             runtime.block_on(tokio::time::timeout(left.min(STOP_CHECK), turn.as_mut()))
         {
             return Ok(value);
+        }
+        if left <= STOP_CHECK {
+            return Err(AppError::Busy);
         }
     }
 }
@@ -88,6 +91,49 @@ pub async fn owned_until(
     until(deadline, slots.acquire_owned())
         .await?
         .map_err(|_| AppError::Unavailable)
+}
+
+/// The time a call may still spend waiting, for a call that waits between pieces of work, as
+/// a search does for a document it reaches partway through its scan. Each wait is given what
+/// is left as its deadline and spends only the time it took, so the work between waits uses
+/// none of it.
+pub struct Budget {
+    left: Mutex<Duration>,
+}
+
+impl Default for Budget {
+    fn default() -> Self {
+        Self {
+            left: Mutex::new(LONGEST),
+        }
+    }
+}
+
+impl Budget {
+    /// Runs one wait, given what is left as its deadline, and spends the time it took.
+    pub fn spend<T>(&self, wait: impl FnOnce(Instant) -> T) -> T {
+        let started = Instant::now();
+        let value = wait(started + self.left());
+        self.take(started.elapsed());
+        value
+    }
+
+    /// `spend` for a wait that is awaited.
+    pub async fn spend_async<F: Future>(&self, wait: impl FnOnce(Instant) -> F) -> F::Output {
+        let started = Instant::now();
+        let value = wait(started + self.left()).await;
+        self.take(started.elapsed());
+        value
+    }
+
+    fn left(&self) -> Duration {
+        *self.left.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn take(&self, spent: Duration) {
+        let mut left = self.left.lock().unwrap_or_else(PoisonError::into_inner);
+        *left = left.saturating_sub(spent);
+    }
 }
 
 /// One of a cache's places, shared by every caller using one entry. The entry keeps a

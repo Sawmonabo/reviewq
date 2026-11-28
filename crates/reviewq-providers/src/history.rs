@@ -371,32 +371,41 @@ impl NativeHistoryReader for FileHistory {
         query: HistorySearch,
     ) -> AppFuture<'_, Option<SearchPage>> {
         Box::pin(async move {
-            // One deadline for the whole search. Its waits for a document's place and lock
-            // run on the blocking thread; when the deadline cuts the call, its stop flag is
-            // set and they leave at once, so all its waits together last at most `LONGEST`.
-            let deadline = reviewq_app::wait::deadline();
-            let _slot = reviewq_app::wait::until(deadline, self.searches.acquire())
+            // One budget for every wait of the search: for the search slot and a read slot
+            // here, and for a document's place and lock when its scan reaches one. It counts
+            // only waiting, so the scan itself runs under its read budget and its stop flag,
+            // which is set when the caller leaves.
+            let budget = reviewq_app::wait::Budget::default();
+            let _slot = budget
+                .spend_async(|deadline| reviewq_app::wait::until(deadline, self.searches.acquire()))
                 .await?
                 .map_err(|_| AppError::Unavailable)?;
-            let permit = reviewq_app::wait::owned_until(self.reads.clone(), deadline).await?;
-            let owner = session.target.clone();
+            let permit = budget
+                .spend_async(|deadline| {
+                    reviewq_app::wait::owned_until(self.reads.clone(), deadline)
+                })
+                .await?;
+            let request = search::Request {
+                owner: session.target.clone(),
+                query,
+                waits: budget,
+            };
             let large = self.large_records.clone();
             let index = self.search_index.clone();
             let documents = self.documents.clone();
-            let search = self.inspect_in(permit, session, move |source, stop| {
+            self.inspect_in(permit, session, move |source, stop| {
                 // Only the expiry sweep shares this lock, and only for a moment.
                 let mut large = large.lock().map_err(|_| AppError::Internal)?;
                 search::read(
                     &source,
-                    &owner,
-                    query,
+                    &request,
                     stop,
                     &mut large,
                     &documents,
                     index.as_deref(),
                 )
-            });
-            reviewq_app::wait::until(deadline, search).await?
+            })
+            .await
         })
     }
 

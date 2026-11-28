@@ -6,7 +6,7 @@ use reviewq_app::history::document::{Position, Query, WindowResult};
 use reviewq_app::history::search::SearchPoint;
 use reviewq_app::history::search::document::{Projection, occurrences, project};
 use reviewq_app::reading::table::paged::MAX_INDEXED_BYTES;
-use reviewq_app::wait;
+use reviewq_app::wait::{self, Budget};
 use reviewq_domain::session::SessionTarget;
 
 use crate::history::documents::{self, Documents};
@@ -35,7 +35,7 @@ pub(super) fn scan(
         &matches.reference,
         offset,
         reader.cancel,
-        Reader::Search,
+        Reader::Search(reader.waits),
     ) {
         Ok(projection) => projection,
         Err(AppError::NotFound) => {
@@ -104,11 +104,12 @@ pub(super) fn scan(
 }
 
 /// Who reads a document's window.
-#[derive(Clone, Copy, PartialEq)]
-pub(super) enum Reader {
-    /// A user's search: it waits its turn for the document's place and lock, leaving once it
-    /// is cancelled, and reads the canonical context of a match.
-    Search,
+#[derive(Clone, Copy)]
+pub(super) enum Reader<'a> {
+    /// A user's search: it waits its turn for the document's place and lock, spending its
+    /// wait budget and leaving once it is cancelled, and reads the canonical context of a
+    /// match.
+    Search(&'a Budget),
     /// The background search index: it skips a document whose place or lock is taken, with
     /// `Busy`, and reads no context.
     Index,
@@ -121,21 +122,19 @@ pub(super) fn read(
     reference: &FileContentRef,
     offset: u64,
     cancel: &AtomicBool,
-    reader: Reader,
+    reader: Reader<'_>,
 ) -> Result<Projection, AppError> {
     let claim = match reader {
-        // The search's own deadline cuts these waits through `cancel`; `wait::deadline` is
-        // only their backstop.
-        Reader::Search => {
-            documents.claim_blocking(owner.clone(), reference.clone(), wait::deadline(), cancel)?
-        }
+        Reader::Search(budget) => budget.spend(|deadline| {
+            documents.claim_blocking(owner.clone(), reference.clone(), deadline, cancel)
+        })?,
         Reader::Index => documents.try_claim(owner.clone(), reference.clone())?,
     };
     // Declared after the claim, so the lock is let go of before the document's place.
     let mut cached = match reader {
-        Reader::Search => {
-            wait::blocking(claim.handle.clone().lock_owned(), wait::deadline(), cancel)?
-        }
+        Reader::Search(budget) => budget.spend(|deadline| {
+            wait::blocking(claim.handle.clone().lock_owned(), deadline, cancel)
+        })?,
         Reader::Index => claim
             .handle
             .clone()
@@ -152,7 +151,7 @@ pub(super) fn read(
         },
         cancel,
     )?;
-    if reader == Reader::Search
+    if matches!(reader, Reader::Search(_))
         && matches!(
             window.result,
             WindowResult::Source {

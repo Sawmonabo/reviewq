@@ -10,6 +10,7 @@ use reviewq_app::reports::{
     DisplayWindow, DisplayWindowBlock, DisplayWindowPosition, DisplayWindowState,
     MAX_DISPLAY_BLOCKS, MAX_DISPLAY_HEADINGS_BYTES, ReportReference, build_report_display_index,
 };
+use reviewq_app::wait::{self, Budget};
 use reviewq_domain::identity::{ReportHash, RunId};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
@@ -101,8 +102,8 @@ struct Spans {
 
 impl SqliteStore {
     /// One window of a report. Its waits, for a window read slot and for each turn on the
-    /// store's queue, share one deadline, so together they wait at most `LONGEST`. Every step
-    /// is safe to cut, as a browser that leaves cuts it.
+    /// store's queue, spend one budget, so together they wait at most `LONGEST`; the reads
+    /// between them are work and use none of it.
     pub(crate) async fn report_display_window(
         &self,
         actor: Actor,
@@ -110,22 +111,15 @@ impl SqliteStore {
         reference: ReportReference,
         position: DisplayWindowPosition,
     ) -> Result<Snapshot<DisplayWindow>, StoreError> {
-        let window = self.display_window(actor, run, reference, position);
-        reviewq_app::wait::within(window).await?
-    }
-
-    async fn display_window(
-        &self,
-        actor: Actor,
-        run: RunId,
-        reference: ReportReference,
-        position: DisplayWindowPosition,
-    ) -> Result<Snapshot<DisplayWindow>, StoreError> {
-        let slot = Arc::new(reviewq_app::wait::owned(self.display_builds.reads.clone()).await?);
+        let budget = Budget::default();
+        let slot = budget
+            .spend_async(|deadline| wait::owned_until(self.display_builds.reads.clone(), deadline))
+            .await?;
+        let slot = Arc::new(slot);
         let (version, profile) = {
             let (actor, run, reference, slot) =
                 (actor.clone(), run.clone(), reference.clone(), slot.clone());
-            self.submit(false, move |db, profile| {
+            self.submit_spending(false, &budget, move |db, profile| {
                 let _slot = slot;
                 let tx = db.transaction_with_behavior(TransactionBehavior::Deferred)?;
                 let version = authorized_version(&tx, &actor, &run, &reference)?;
@@ -151,12 +145,13 @@ impl SqliteStore {
         };
         let window = match window {
             CacheWindow::Missing => {
-                self.request_display_build(cache_read, key, &actor, &run, &reference, position)
+                let request = (&actor, &run, &reference, position);
+                self.request_display_build(cache_read, key, request, &budget)
                     .await?
             }
             found => found,
         };
-        self.read(move |tx| {
+        self.read_spending(&budget, move |tx| {
             let _slot = slot;
             let version = authorized_version(tx, &actor, &run, &reference)?;
             let state = match window {
@@ -210,10 +205,13 @@ impl SqliteStore {
         &self,
         cache_read: CacheRead,
         key: IndexKey,
-        actor: &Actor,
-        run: &RunId,
-        reference: &ReportReference,
-        position: DisplayWindowPosition,
+        (actor, run, reference, position): (
+            &Actor,
+            &RunId,
+            &ReportReference,
+            DisplayWindowPosition,
+        ),
+        budget: &Budget,
     ) -> Result<CacheWindow, StoreError> {
         let build = match self.display_builds.claim(&key, Lane::Cold)? {
             Claim::Started(build) => build,
@@ -236,7 +234,7 @@ impl SqliteStore {
 
         let (actor, run, reference) = (actor.clone(), run.clone(), reference.clone());
         let runtime = Handle::current();
-        self.submit(false, move |db, _| {
+        self.submit_spending(false, budget, move |db, _| {
             // A canceled queued read is skipped by submit. If the SQLite read
             // has started, finish scheduling the build regardless of the caller.
             let CacheRead {
