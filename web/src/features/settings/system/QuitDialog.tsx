@@ -69,7 +69,7 @@ export function QuitDialog({
   );
 }
 
-// While the service drains it serves this page itself; once stopped, the worker serves its copy.
+// The service answers this navigation if it is still accepting; after that the worker serves its copy.
 function showStopped() {
   location.replace("/stopped.html");
 }

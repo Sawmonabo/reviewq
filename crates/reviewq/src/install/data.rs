@@ -254,7 +254,11 @@ impl Folders {
 
     fn remove_empty_roots(&self, deletion: &mut Deletion) {
         for root in self.roots() {
-            if deletion.kept.iter().any(|(kept, _)| kept == root) {
+            // A folder that is a link or another user's stays, as its entries would.
+            if root
+                .symlink_metadata()
+                .is_ok_and(|metadata| refusal(&metadata).is_some())
+            {
                 continue;
             }
             if fs::read_dir(root).is_ok_and(|mut entries| entries.next().is_none())

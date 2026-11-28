@@ -5,6 +5,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
 use super::{
     Failure, files,
@@ -167,18 +168,29 @@ pub(crate) async fn repair(paths: &Paths) -> Result<(), Failure> {
     repaired
 }
 
+/// How often the service's repair asks for the installation lock, and for how long.
+const LOCK_RETRY: Duration = Duration::from_secs(2);
+const LOCK_WAIT: Duration = Duration::from_secs(120);
+
 /// The installed service's repair after its dashboard is ready. Looks first, without the
-/// installation lock, so a sound door never holds the lock; then repairs under it, skipped
-/// while an install holds it, since the install handles the door itself.
+/// installation lock, so a sound door never holds the lock; then repairs under it. A rollback
+/// removes the door and starts this service while it still holds the lock, so the repair
+/// asks again for up to two minutes; after that the next start repairs.
 pub(crate) async fn repair_after_start(paths: Paths) {
     let repaired = async {
         let (enabled, active) = service::unit_state(service::START_SOCKET).await?;
         if enabled && active && !differs(&paths)? {
             return Ok(());
         }
-        match paths.try_lock()? {
-            Some(_lock) => repair(&paths).await,
-            None => Ok(()),
+        let deadline = tokio::time::Instant::now() + LOCK_WAIT;
+        loop {
+            if let Some(_lock) = paths.try_lock()? {
+                return repair(&paths).await;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Ok(());
+            }
+            tokio::time::sleep(LOCK_RETRY).await;
         }
     };
     if let Err(error) = repaired.await {

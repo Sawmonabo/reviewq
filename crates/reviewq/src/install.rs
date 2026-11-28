@@ -86,13 +86,6 @@ struct Activation {
     store_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     recovery: Option<RecoveryApproval>,
-    /// Whether ReviewQ's start door socket file was in place before this activation; a
-    /// rollback to a release without it removes the door. Absent when false, since a release
-    /// from before the door reads this record with `deny_unknown_fields` at its service start
-    /// during that very rollback, and the field is only ever true when the release rolled
-    /// back to has the door.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    door_existed: bool,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -204,6 +197,14 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     if inventory.removing || inventory.deleting_data {
         uninstall::finish(&paths).await?;
         inventory = load(&paths)?;
+        // Installing over a record still marked would let a later install delete the new data.
+        if inventory.removing || inventory.deleting_data {
+            return Err(format!(
+                "ReviewQ could not finish the interrupted uninstall, so nothing was installed. The lines above say what is still in place. Remove it, or delete {}, then install again.",
+                journal(&paths).display()
+            )
+            .into());
+        }
     }
     let settings = runtime_settings::Settings::load(&paths.profile, false)?;
     // A Windows identity an uninstall could not remove is this installation's to reuse.
@@ -330,7 +331,6 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
                 was_running,
                 store_id,
                 recovery: None,
-                door_existed: paths::exists(&paths.start_socket)?,
             });
             paths::write_json(&journal(&paths), &inventory)?;
             inventory
@@ -589,11 +589,11 @@ async fn rollback(
         Some(unit) => unit,
         None => verified_unit(paths, previous, &bundle)?,
     };
-    if pending.door_existed {
-        start_door::stop().await?;
-    } else {
-        start_door::retire().await?;
-    }
+    // The door goes with the release that wrote it. The previous release may be from before
+    // the door, with no `start-door` command and nothing that would ever remove it, and no
+    // record could say so: an older release reads the install record with unknown fields
+    // refused. A release that has the door puts it back once its service is up.
+    start_door::retire().await?;
     if service::state().await?.1 {
         service::switch("stop").await?;
     }
@@ -605,12 +605,7 @@ async fn rollback(
         return Err("The previous installation's retained store is missing or changed.".into());
     }
     files::set(paths, Some(&pending.next), previous, &unit)?;
-    // A release from before the start door has no `start-door` command and never removes it.
-    if pending.door_existed {
-        start_door::write(paths)?;
-    } else {
-        start_door::remove(paths)?;
-    }
+    start_door::remove(paths)?;
     if previous.claude.is_some() {
         let previous_paths = Paths {
             claude_home_is_explicit: service::unit_has_claude_override(&unit),
@@ -628,9 +623,6 @@ async fn rollback(
         windows.remove().await?;
     }
     service::reload().await?;
-    if pending.door_existed {
-        start_door::open().await;
-    }
     service::switch(if pending.was_enabled {
         "enable"
     } else {

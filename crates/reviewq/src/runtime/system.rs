@@ -13,8 +13,7 @@ use tokio::sync::watch;
 use crate::install::{self, data::Folders, paths::Paths};
 use crate::service;
 
-/// How long Quit waits for ReviewQ's own stop signal after the command that asked systemd
-/// for the stop ended without success.
+/// How long Quit waits for ReviewQ's own stop signal once systemd has been asked.
 const STOP_SIGNAL: Duration = Duration::from_secs(2);
 
 pub(super) struct System {
@@ -112,31 +111,13 @@ impl SystemControl for System {
 
     fn quit(&self) -> AppFuture<'_, Result<(), SystemRefusal>> {
         Box::pin(async move {
-            let _lock = match self.hold()? {
+            let lock = match self.hold()? {
                 Ok((_, lock)) => lock,
                 Err(refusal) => return Ok(Err(refusal)),
             };
-            // systemd makes the stop, so a start asked for while ReviewQ shuts down is queued
-            // behind it. The stop signals every process in the service, the command that
-            // asked included, so that command can die before it exits; ReviewQ's own stop
-            // signal then shows the stop is under way.
-            let mut stopping = self.shutdown.subscribe();
-            let asked = tokio::select! {
-                asked = service::stop_without_waiting() => asked,
-                () = signalled(&mut stopping) => Ok(()),
-            };
-            if let Err(error) = asked
-                && tokio::time::timeout(STOP_SIGNAL, signalled(&mut stopping))
-                    .await
-                    .is_err()
-            {
-                // systemd could not be asked. Exiting with status 0 is left stopped by
-                // `Restart=on-failure`, so Quit still quits.
-                eprintln!(
-                    "ReviewQ could not ask systemd to stop it and is exiting itself: {error}"
-                );
-                self.shutdown.send_replace(true);
-            }
+            // Its own task: a browser that closes the connection drops this reply, and must
+            // not drop the stop with it.
+            tokio::spawn(stop(self.shutdown.clone(), lock));
             Ok(Ok(()))
         })
     }
@@ -159,6 +140,33 @@ impl SystemControl for System {
             }
         })
     }
+}
+
+/// Quit's stop, under the installation lock. systemd makes it, so a start asked for while
+/// ReviewQ shuts down is queued behind it. The stop signals every process in the service, the
+/// command that asked included, so that command can die before it exits; ReviewQ's own stop
+/// signal is what shows the stop is under way. Without that signal, because systemd could
+/// not be asked or does not run this process, ReviewQ exits by itself with status 0, which
+/// `Restart=on-failure` leaves stopped.
+async fn stop(shutdown: watch::Sender<bool>, lock: File) {
+    let mut stopping = shutdown.subscribe();
+    let asked = tokio::select! {
+        asked = service::stop_without_waiting() => asked,
+        () = signalled(&mut stopping) => Ok(()),
+    };
+    if tokio::time::timeout(STOP_SIGNAL, signalled(&mut stopping))
+        .await
+        .is_err()
+    {
+        match asked {
+            Ok(()) => eprintln!("systemd sent ReviewQ no stop signal, so it is exiting itself."),
+            Err(error) => {
+                eprintln!("ReviewQ could not ask systemd to stop it and is exiting itself: {error}")
+            }
+        }
+        shutdown.send_replace(true);
+    }
+    drop(lock);
 }
 
 /// Resolves once the service's shutdown has been tripped.

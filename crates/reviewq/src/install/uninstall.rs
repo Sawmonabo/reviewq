@@ -313,15 +313,19 @@ fn delete_data(paths: &Paths, expected: Option<&str>) -> Result<Vec<Left>, Failu
     }
     let held = if paths::exists(&paths.profile)? {
         let database = AbsolutePath::from_canonical(paths.profile.join("reviewq.sqlite3"))?;
-        let held = SqliteStore::hold_stopped(&database)?.ok_or_else(|| refused(
-            "Another ReviewQ process, such as `reviewq serve`, still has the data open, so nothing was deleted. Stop it and run `reviewq uninstall --delete-data` again.",
-        ))?;
+        // ReviewQ is already removed here, so no `reviewq` command is left to run again.
+        let held = SqliteStore::hold_stopped(&database)?.ok_or_else(|| {
+            refused(format!(
+                "Another ReviewQ process, such as `reviewq serve`, still has the data open, so nothing was deleted. Stop it, then delete {} yourself.",
+                folders(paths)
+            ))
+        })?;
         if let (Some(expected), Some(identity)) = (expected, &held.identity)
             && identity.store_id.to_string() != expected
         {
             return Err(refused(format!(
                 "The data folder holds a different store than the one ReviewQ installed, so nothing was deleted. If you no longer need it, delete {} yourself.",
-                paths.profile.display()
+                folders(paths)
             )));
         }
         Some(held)
@@ -344,6 +348,16 @@ fn delete_data(paths: &Paths, expected: Option<&str>) -> Result<Vec<Left>, Failu
         )?;
     }
     Ok(report(deletion))
+}
+
+/// ReviewQ's own folders, for a sentence that tells the user to delete them by hand.
+fn folders(paths: &Paths) -> String {
+    format!(
+        "{}, {} and {}",
+        paths.profile.display(),
+        paths.config.display(),
+        paths.state.display()
+    )
 }
 
 /// Prints a deletion and returns what it kept.
