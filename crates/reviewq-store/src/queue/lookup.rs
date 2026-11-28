@@ -3,16 +3,16 @@ use reviewq_app::events::Snapshot;
 use reviewq_app::queue::{
     ManagementFilter, ManagementReviews, ManagementRuns, ReviewLookup, ReviewSource, SelectedLead,
 };
-use reviewq_app::sources::ReviewAddress;
+use reviewq_app::sources::MergeRequestAddress;
 use reviewq_domain::identity::{MrIdentity, ReviewId, Revision, RunId, SessionKey};
 use reviewq_domain::session::SessionTarget;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::workspace::read_scope;
 use super::{
-    SCOPE_PREDICATE, allow_review, check_limit, find_review_id, identity_for_review, lead_for_run,
-    management, parse, scope, settings_revision, snapshot, source_for_review, text,
+    allow_review, check_limit, find_review_id, identity_for_review, lead_for_run, management,
+    parse, scope, settings_revision, snapshot, source_for_review, text,
 };
+use crate::refresh::read_sync;
 use crate::{SqliteStore, StoreError};
 
 impl ReviewLookup for SqliteStore {
@@ -61,13 +61,9 @@ impl ReviewLookup for SqliteStore {
         })
     }
 
-    fn known_review(
-        &self,
-        actor: Actor,
-        address: ReviewAddress,
-    ) -> AppFuture<'_, Option<ReviewSource>> {
+    fn known_review(&self, address: MergeRequestAddress) -> AppFuture<'_, Option<ReviewSource>> {
         Box::pin(async move {
-            self.read(move |db| known_review(db, &actor, &address))
+            self.read(move |db| known_review(db, &address))
                 .await
                 .map_err(StoreError::app)
         })
@@ -174,58 +170,31 @@ impl ReviewLookup for SqliteStore {
 
 fn known_review(
     db: &Connection,
-    actor: &Actor,
-    address: &ReviewAddress,
+    address: &MergeRequestAddress,
 ) -> Result<Option<ReviewSource>, StoreError> {
-    let access = scope(db, actor)?;
-    let (code, owner) = read_scope(&access);
-    let mut found = match address {
-        ReviewAddress::MergeRequest {
-            origin,
-            project_path,
-            iid,
-        } => candidates(
-            db,
-            "r.project_path=?4 AND r.iid=?5",
-            params![
-                code,
-                owner,
-                origin.as_str(),
-                project_path,
-                iid.as_sqlite_integer()
-            ],
-        )?,
-        ReviewAddress::Ticket { origin, key } => candidates(
-            db,
-            "r.state='open' AND r.review_id IN (
-               SELECT review_id FROM scoped_review_issues WHERE ticket_key=?4
-               UNION SELECT review_id FROM retained_review_tickets WHERE ticket_key=?4)",
-            params![code, owner, origin.as_str(), key.as_str()],
-        )?,
-    };
-    Ok(if found.len() == 1 { found.pop() } else { None })
-}
-
-/// Reads at most two visible reviews in configured projects that match `filter`, enough to
-/// tell one from several. Parameters 1 and 2 are the read scope, 3 the origin, and 4 onward
-/// the filter's.
-fn candidates(
-    db: &Connection,
-    filter: &str,
-    values: &[&dyn rusqlite::ToSql],
-) -> Result<Vec<ReviewSource>, StoreError> {
-    let sql = format!(
-        "SELECT r.review_id FROM reviews r WHERE {SCOPE_PREDICATE} AND r.origin=?3 AND {filter}
+    let sync = read_sync(db, settings_revision(db)?)?;
+    if sync.last_success_at_ms.is_none() || sync.error.is_some() {
+        return Ok(None);
+    }
+    let mut statement = db.prepare_cached(
+        "SELECT r.review_id, r.state='open'
+           AND EXISTS(SELECT 1 FROM review_discoveries d WHERE d.review_id=r.review_id)
            AND EXISTS(SELECT 1 FROM configured_projects q WHERE (q.origin,q.project_id)=(r.origin,r.project_id))
-         LIMIT 2"
-    );
-    let mut statement = db.prepare_cached(&sql)?;
-    let mut rows = statement.query(values)?;
+         FROM reviews r WHERE r.origin=?1 AND r.project_path=?2 AND r.iid=?3 LIMIT 2",
+    )?;
+    let mut rows = statement.query(params![
+        address.origin.as_str(),
+        address.project_path,
+        address.iid.as_sqlite_integer()
+    ])?;
     let mut found = Vec::new();
     while let Some(row) = rows.next()? {
-        found.push(source_for_review(db, &parse(text(row, 0)?)?)?);
+        found.push((text(row, 0)?.to_owned(), row.get::<_, bool>(1)?));
     }
-    Ok(found)
+    match found.as_slice() {
+        [(id, true)] => source_for_review(db, &parse(id)?).map(Some),
+        _ => Ok(None),
+    }
 }
 
 #[cfg(test)]
@@ -233,19 +202,17 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::time::Duration;
 
-    use reviewq_app::access::Actor;
     use reviewq_app::queue::ReviewLookup;
-    use reviewq_app::sources::ReviewAddress;
+    use reviewq_app::sources::MergeRequestAddress;
     use reviewq_domain::identity::GitLabOrigin;
     use reviewq_domain::session::AbsolutePath;
 
     use crate::SqliteStore;
 
-    /// A link reads a stored review only in a configured project, and for a ticket only its
-    /// one open review. A tracked review whose project left the settings stays visible to the
-    /// operator, yet is left to the source, as is a ticket with only a merged review.
+    /// A link uses a stored review only when its path is the one the last successful refresh
+    /// read: open, discovered, in a configured project, and the only row at that path and IID.
     #[test]
-    fn known_review_needs_a_configured_project_and_an_open_ticket_review() {
+    fn known_review_needs_a_current_unique_row() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -260,39 +227,45 @@ mod tests {
                 .write(|tx| {
                     tx.sql.execute_batch(
                         "INSERT INTO configured_projects VALUES('https://git.example',1);
+                         INSERT INTO source_refresh(singleton,attempt,settings_revision,started_at_ms,last_success_at_ms,active)
+                           SELECT 1,1,settings_revision,0,0,0 FROM service_state;
                          INSERT INTO reviews(review_id,origin,project_id,iid,project_path,title,head_sha,state,updated_at_ms)
-                           VALUES('open','https://git.example',1,7,'billing/api','Retries',printf('%040d',0),'open',0),
-                                 ('merged','https://git.example',1,6,'billing/api','First',printf('%040d',0),'merged',0),
-                                 ('removed','https://git.example',2,7,'billing/old','Old',printf('%040d',0),'open',0);
-                         INSERT INTO review_discoveries VALUES('open'),('merged');
-                         INSERT INTO review_tracking VALUES('removed');
-                         INSERT INTO retained_review_tickets VALUES('open','RQ-1','Retries',0),
-                           ('merged','RQ-1','First',0),('merged','RQ-3','First',0),
-                           ('removed','RQ-2','Old',0);",
+                           VALUES('current','https://git.example',1,7,'billing/api','Retries',printf('%040d',0),'open',0),
+                                 ('foreign','https://git.example',2,7,'billing/old','Old',printf('%040d',0),'open',0),
+                                 ('merged','https://git.example',1,6,'billing/api','Merged',printf('%040d',0),'merged',0),
+                                 ('tracked','https://git.example',1,5,'billing/api','Tracked',printf('%040d',0),'open',0),
+                                 ('renamed','https://git.example',1,8,'billing/api','Renamed',printf('%040d',0),'open',0),
+                                 ('reused','https://git.example',3,8,'billing/api','Reused',printf('%040d',0),'open',0);
+                         INSERT INTO review_discoveries VALUES('current'),('foreign'),('merged'),('renamed');
+                         INSERT INTO review_tracking VALUES('tracked');",
                     )?;
                     Ok(())
                 })
                 .await
                 .unwrap();
-            let origin = || GitLabOrigin::from_canonical("https://git.example").unwrap();
-            let known = async |address| {
-                let found = store.known_review(Actor::local_operator(), address).await;
-                found.unwrap().map(|review| review.identity.iid().get())
+            let known = async |path: &str, iid: &str| {
+                let address = MergeRequestAddress {
+                    origin: GitLabOrigin::from_canonical("https://git.example").unwrap(),
+                    project_path: path.into(),
+                    iid: iid.parse().unwrap(),
+                };
+                let found = store.known_review(address).await.unwrap();
+                found.map(|review| review.identity.iid().get())
             };
-            let merge_request = |path: &str| ReviewAddress::MergeRequest {
-                origin: origin(),
-                project_path: path.into(),
-                iid: "7".parse().unwrap(),
-            };
-            let ticket = |key: &str| ReviewAddress::Ticket {
-                origin: origin(),
-                key: key.parse().unwrap(),
-            };
-            assert_eq!(known(merge_request("billing/api")).await, Some(7));
-            assert_eq!(known(ticket("RQ-1")).await, Some(7));
-            assert_eq!(known(ticket("RQ-3")).await, None);
-            assert_eq!(known(merge_request("billing/old")).await, None);
-            assert_eq!(known(ticket("RQ-2")).await, None);
+            assert_eq!(known("billing/api", "7").await, Some(7));
+            assert_eq!(known("billing/old", "7").await, None);
+            assert_eq!(known("billing/api", "6").await, None);
+            assert_eq!(known("billing/api", "5").await, None);
+            assert_eq!(known("billing/api", "8").await, None);
+            store
+                .write(|tx| {
+                    tx.sql
+                        .execute("UPDATE source_refresh SET error='unavailable'", [])?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            assert_eq!(known("billing/api", "7").await, None);
             store.close(Duration::from_secs(1)).await.unwrap();
         });
     }

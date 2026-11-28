@@ -41,9 +41,6 @@ pub(in crate::entry) async fn register(
         .find(|repository| repository.project == review.identity.project_id())
         .and_then(|repository| repository.checkout.as_ref())
         .map(|checkout| checkout.root.as_path().to_string_lossy().into_owned());
-    if source.reader.is_none() {
-        return Err(AppError::Unavailable.into());
-    }
     let (provider, proof) = match input.provider {
         HostProviderDto::Codex => (
             HostProvider::Codex,

@@ -9,7 +9,7 @@ use crate::access::{Actor, AppError, AppFuture};
 use crate::decisions::{Decision, Frontier};
 use crate::events::Snapshot;
 use crate::hosts::HostPhase;
-use crate::sources::{ReviewAddress, SourceSync};
+use crate::sources::{MergeRequestAddress, SourceSync};
 
 mod archive;
 mod filters;
@@ -100,14 +100,12 @@ impl SelectedLead {
 pub trait ReviewLookup: Send + Sync {
     fn review_by_mr(&self, actor: Actor, mr: MrIdentity) -> AppFuture<'_, ReviewId>;
 
-    /// The one stored review at `address` that `actor` may read in a configured project,
-    /// without asking the source. For a ticket, only its open reviews count. `None` when
-    /// the stored rows give no single review, so the caller asks the source.
-    fn known_review(
-        &self,
-        actor: Actor,
-        address: ReviewAddress,
-    ) -> AppFuture<'_, Option<ReviewSource>>;
+    /// The stored review at `address` when the store can vouch that its path is the one
+    /// GitLab gave at the last refresh: the last refresh under the current settings
+    /// succeeded, the review is the only stored row with that origin, path and IID, and it
+    /// is open and discovered in a configured project. `None` otherwise, so the caller asks
+    /// the source.
+    fn known_review(&self, address: MergeRequestAddress) -> AppFuture<'_, Option<ReviewSource>>;
 
     fn authorized_source(
         &self,

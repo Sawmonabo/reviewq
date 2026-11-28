@@ -4,7 +4,7 @@ use percent_encoding::percent_decode_str;
 use reviewq_app::access::AppError;
 use reviewq_app::queue::{MergeRequestState, ReviewSource};
 use reviewq_app::sources::{
-    AuthenticatedReviewHead, ReviewAddress, ReviewResolution, UnverifiedTrack,
+    AuthenticatedReviewHead, MergeRequestAddress, ReviewResolution, UnverifiedTrack,
 };
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{MergeRequestIid, MrIdentity, ProjectId};
@@ -93,29 +93,34 @@ impl GitLab {
         })
     }
 
-    pub(super) fn target_address(&self, target: &str) -> Result<ReviewAddress, AppError> {
+    pub(super) fn target_address(
+        &self,
+        target: &str,
+    ) -> Result<Option<MergeRequestAddress>, AppError> {
+        Ok(match self.named(target)? {
+            Named::MergeRequest(address) => Some(address),
+            Named::Ticket(_) => None,
+        })
+    }
+
+    /// Checks and reads a `resolve` target without a provider call.
+    fn named(&self, target: &str) -> Result<Named, AppError> {
         if target.len() > 2_048 || target.is_empty() || target.trim() != target {
             return Err(AppError::InvalidRequest);
         }
-        let origin = self.identity.clone();
         let (path, iid) = match Target::parse(target)? {
-            Target::Ticket(key) => {
-                return Ok(ReviewAddress::Ticket {
-                    origin,
-                    key: key.parse().map_err(|_| AppError::InvalidRequest)?,
-                });
-            }
+            Target::Ticket(key) => return Ok(Named::Ticket(key)),
             Target::Web(url) => {
                 let (path, iid) = self.web_address(&url)?;
                 (path.into_owned(), iid)
             }
             Target::Project { path, iid } => (path.to_owned(), iid),
         };
-        Ok(ReviewAddress::MergeRequest {
-            origin,
+        Ok(Named::MergeRequest(MergeRequestAddress {
+            origin: self.identity.clone(),
             project_path: path,
             iid,
-        })
+        }))
     }
 
     pub(super) async fn resolve_target(
@@ -123,33 +128,26 @@ impl GitLab {
         projects: Vec<ConfiguredProject>,
         target: String,
     ) -> Result<ReviewResolution, AppError> {
-        let address = self.target_address(&target)?;
+        let named = self.named(&target)?;
         let projects: Vec<_> = projects
             .into_iter()
             .filter(|project| project.origin == self.identity)
             .map(|project| project.project_id)
             .collect();
-        match address {
-            ReviewAddress::Ticket { key, .. } => {
+        match named {
+            Named::Ticket(key) => {
                 let mut found = Matches::default();
                 for project in projects {
                     let metadata = self.project(project).await?;
-                    self.match_ticket(
-                        project,
-                        &metadata.path_with_namespace,
-                        key.as_str(),
-                        &mut found,
-                    )
-                    .await?;
+                    self.match_ticket(project, &metadata.path_with_namespace, &key, &mut found)
+                        .await?;
                 }
                 found.resolve()
             }
-            ReviewAddress::MergeRequest {
-                project_path, iid, ..
-            } => {
-                let (id, row) = self.direct_row(projects, &project_path, iid).await?;
-                self.review(id, &project_path, row)
-                    .map(ReviewResolution::Found)
+            Named::MergeRequest(address) => {
+                let path = address.project_path;
+                let (id, row) = self.direct_row(projects, &path, address.iid).await?;
+                self.review(id, &path, row).map(ReviewResolution::Found)
             }
         }
     }
@@ -186,9 +184,22 @@ impl GitLab {
         if projects.is_empty() || !valid_path(path) {
             return Err(AppError::NotFound);
         }
-        let row = self.merge_request_at(path, iid).await?;
+        let row = match self.merge_request_at(path, iid).await {
+            Ok(row) => row,
+            Err(AppError::NotFound) => return Err(AppError::NotFound),
+            Err(error) => {
+                // A project that is unreadable, renamed or not configured stays not found, as
+                // when its project was read first; only then does the failure stand.
+                let project = self.project_by_path(path).await?;
+                let id = ProjectId::try_from(project.id).map_err(|_| AppError::Unavailable)?;
+                if project.path_with_namespace != path || !projects.contains(&id) {
+                    return Err(AppError::NotFound);
+                }
+                return Err(error);
+            }
+        };
         let id = ProjectId::try_from(row.project_id).map_err(|_| AppError::Unavailable)?;
-        if project_path(&row)? != path || !projects.contains(&id) {
+        if !projects.contains(&id) || project_path(&row)? != path {
             return Err(AppError::NotFound);
         }
         Ok((id, row))
@@ -295,6 +306,11 @@ impl Matches {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(ReviewResolution::Ambiguous(urls))
     }
+}
+
+enum Named {
+    MergeRequest(MergeRequestAddress),
+    Ticket(String),
 }
 
 /// The current full path of the row's project, from its `references.full`

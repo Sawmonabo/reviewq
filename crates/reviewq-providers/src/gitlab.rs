@@ -5,8 +5,8 @@ use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::queue::{MergeRequestState, ReviewAuthor, ReviewSource};
 use reviewq_app::settings::SourceLease;
 use reviewq_app::sources::{
-    AuthenticatedReviewHead, MatchedReview, ReviewAddress, ReviewResolution, ReviewSourceReader,
-    UnverifiedTrack, WorkflowSnapshot,
+    AuthenticatedReviewHead, MatchedReview, MergeRequestAddress, ReviewResolution,
+    ReviewSourceReader, UnverifiedTrack, WorkflowSnapshot,
 };
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{GitLabOrigin, GitSha, MrIdentity, ProjectId, TicketKey};
@@ -143,7 +143,7 @@ impl ReviewSourceReader for GitLab {
         Box::pin(self.resolve_target(projects, target))
     }
 
-    fn address(&self, target: &str) -> Result<ReviewAddress, AppError> {
+    fn address(&self, target: &str) -> Result<Option<MergeRequestAddress>, AppError> {
         self.target_address(target)
     }
 }

@@ -75,25 +75,17 @@ pub trait ReviewSourceReader: ChangeSource {
         target: String,
     ) -> AppFuture<'_, ReviewResolution>;
 
-    /// Reads what a `resolve` target names from its text alone, with no provider call. Fails
-    /// as `resolve` does on the same text: `InvalidRequest` when malformed, `NotFound` for a
-    /// URL at another origin.
-    fn address(&self, target: &str) -> Result<ReviewAddress, AppError>;
+    /// Reads the merge request a `resolve` target names from its text alone, with no provider
+    /// call, or `None` for a ticket key. Fails as `resolve` does on the same text:
+    /// `InvalidRequest` when malformed, `NotFound` for a URL at another origin.
+    fn address(&self, target: &str) -> Result<Option<MergeRequestAddress>, AppError>;
 }
 
-/// What a link target names at this source's origin.
-pub enum ReviewAddress {
-    /// The merge request with this IID in the project at exactly this path.
-    MergeRequest {
-        origin: GitLabOrigin,
-        project_path: String,
-        iid: MergeRequestIid,
-    },
-    /// The reviews tied to this ticket.
-    Ticket {
-        origin: GitLabOrigin,
-        key: TicketKey,
-    },
+/// The merge request with this IID in the project at exactly this path on this origin.
+pub struct MergeRequestAddress {
+    pub origin: GitLabOrigin,
+    pub project_path: String,
+    pub iid: MergeRequestIid,
 }
 
 pub enum ReviewResolution {
@@ -101,19 +93,21 @@ pub enum ReviewResolution {
     Ambiguous(Vec<String>),
 }
 
-/// Finds the review `target` names: the one the app already holds when its stored rows give
-/// exactly one, without a provider call, otherwise what `source` resolves in `projects`.
+/// Finds the review `target` names: for a URL or project/IID, the stored review whose path
+/// was current at the last successful refresh, when there is one, otherwise what `source`
+/// resolves in `projects`. A ticket always goes to `source`.
 pub async fn resolve_review(
     store: &(impl ReviewLookup + ?Sized),
     source: &dyn ReviewSourceReader,
     projects: Vec<ConfiguredProject>,
     target: String,
 ) -> Result<ReviewResolution, AppError> {
-    let address = source.address(&target)?;
-    match store.known_review(Actor::local_operator(), address).await? {
-        Some(review) => Ok(ReviewResolution::Found(review)),
-        None => source.resolve(projects, target).await,
+    if let Some(address) = source.address(&target)?
+        && let Some(review) = store.known_review(address).await?
+    {
+        return Ok(ReviewResolution::Found(review));
     }
+    source.resolve(projects, target).await
 }
 
 /// A board-filtered Jira issue with provider-verified fields.
