@@ -71,20 +71,19 @@ export function startBrowserAlerts(openNotification: (id: string) => void) {
     paused = true;
     stopChannel();
   }
-  // The app registers the worker at start. Accept messages only from that worker.
-  let workerUrl: string | undefined;
-  void navigator.serviceWorker.ready.then((registration) => {
-    workerUrl = registration.active?.scriptURL;
+  // The app registers the worker at start. Accept messages only from the registration's active
+  // worker, read at message time: the browser updates `active` when a new worker takes over.
+  let registration: ServiceWorkerRegistration | undefined;
+  void navigator.serviceWorker.ready.then((ready) => {
+    registration = ready;
   });
   navigator.serviceWorker.addEventListener(
     "message",
     (event: MessageEvent<unknown>) => {
       const data = event.data;
-      const source = event.source;
       if (
-        !source ||
-        !("scriptURL" in source) ||
-        source.scriptURL !== workerUrl ||
+        !registration?.active ||
+        event.source !== registration.active ||
         !data ||
         typeof data !== "object" ||
         !("type" in data)

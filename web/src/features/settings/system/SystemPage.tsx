@@ -12,7 +12,11 @@ import { useAppInstall } from "./useAppInstall";
 import type { InstallState } from "./install-offer";
 import "./system.css";
 
-type LoginChange = { readonly value: boolean; readonly pending: boolean; readonly error?: string };
+type LoginChange = {
+  readonly value?: boolean;
+  readonly pending?: boolean;
+  readonly error?: string;
+};
 
 const statuses: Record<SystemMode, ReactNode> = {
   installed: "Running · background service",
@@ -43,20 +47,22 @@ export function SystemPage({
   readonly onUninstall: (receipt: UninstallReceipt) => void;
 }) {
   const facts = useResource("system", readSystem);
-  const [login, setLogin] = useState<LoginChange>();
+  const [login, setLogin] = useState<LoginChange>({});
   const [dialog, setDialog] = useState<"quit" | "uninstall">();
   const system = facts.data;
   const dataSize = system?.dataBytes == null ? undefined : formatBytes(system.dataBytes);
-  const startAtLogin = login?.value ?? system?.startAtLogin === true;
+  const startAtLogin = login.value ?? system?.startAtLogin ?? null;
 
+  // Show only what the service manager reported: its read-back, or after a failure a fresh read.
   async function changeLogin(enabled: boolean) {
-    if (login?.pending) return;
+    if (login.pending) return;
     setLogin({ value: enabled, pending: true });
     try {
       const { data } = await setLoginStart({ enabled });
-      setLogin({ value: data.startAtLogin, pending: false });
+      setLogin({ value: data.startAtLogin });
     } catch (error) {
-      setLogin({ value: !enabled, pending: false, error: describeError(error) });
+      setLogin({ error: describeError(error) });
+      facts.retry();
     }
   }
 
@@ -82,13 +88,15 @@ export function SystemPage({
                 <Policy
                   title="Start ReviewQ when I log in"
                   description="Starts ReviewQ in the background each time you log in."
-                  notice={login?.error && <Notice>{login.error}</Notice>}
+                  notice={login.error && <Notice>{login.error}</Notice>}
                 >
-                  <Switch
-                    label="Start ReviewQ when I log in"
-                    checked={startAtLogin}
-                    onChange={(enabled) => void changeLogin(enabled)}
-                  />
+                  {startAtLogin !== null && (
+                    <Switch
+                      label="Start ReviewQ when I log in"
+                      checked={startAtLogin}
+                      onChange={(enabled) => void changeLogin(enabled)}
+                    />
+                  )}
                 </Policy>
                 <Policy
                   title="Quit ReviewQ"
@@ -129,7 +137,7 @@ export function SystemPage({
         </section>
       )}
       {dialog === "quit" && (
-        <QuitDialog startAtLogin={startAtLogin} onClose={() => setDialog(undefined)} />
+        <QuitDialog startAtLogin={startAtLogin === true} onClose={() => setDialog(undefined)} />
       )}
       {dialog === "uninstall" && system && (
         <UninstallDialog
@@ -155,7 +163,7 @@ function Facts({
     ["Status", statuses[system.mode]],
     ["Address", system.address],
     ["Data", dataSize ? `${dataSize} in ${system.dataFolder}` : system.dataFolder],
-    ["Last refresh", system.lastRefreshAt ? formatRefresh(system.lastRefreshAt) : "Not yet"],
+    ["Last refresh", system.lastRefreshAt ? formatRefresh(system.lastRefreshAt) : "Unknown time"],
   ] as const;
   return (
     <dl className="settings-agent-policies settings-facts">

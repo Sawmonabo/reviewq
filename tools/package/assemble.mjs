@@ -104,6 +104,13 @@ function checkWeb(web, inventory) {
       }
     }
   }
+  for (const entry of ["stopped.html", "worker.js", "manifest.webmanifest"]) {
+    if (!inventory.has(entry)) throw new Error(`Missing web file ${entry}`);
+  }
+  // The service swaps this one literal to show the stopped page's Start button.
+  if (readFileSync(join(web, "stopped.html"), "utf8").split('data-door="off"').length !== 2) {
+    throw new Error('stopped.html must contain data-door="off" exactly once');
+  }
   for (const path of inventory) {
     if (!path.endsWith(".js")) continue;
     const code = readFileSync(join(web, path), "utf8");
