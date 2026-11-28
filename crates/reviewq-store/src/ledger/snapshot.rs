@@ -189,7 +189,9 @@ fn cover(
         .optional()?;
     let tickets = db
         .prepare_cached(
-            "SELECT DISTINCT ticket_key FROM scoped_review_issues WHERE review_id=?1
+            // A review keeps its tickets after they leave the board, as the queue shows it.
+            "SELECT ticket_key FROM scoped_review_issues WHERE review_id=?1
+             UNION SELECT ticket_key FROM retained_review_tickets WHERE review_id=?1
              ORDER BY ticket_key LIMIT ?2",
         )?
         .query_map(params![review, MAX_TICKET_LINKS as i64], |row| {
