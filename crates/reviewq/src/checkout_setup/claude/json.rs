@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::json_edit::{Field, field, insert, locate, replace, source};
 
-use super::Failure;
+use super::{Changed, Failure};
 
 const ENTRY: &str = "The existing Claude MCP entry was preserved.";
 const ROLLBACK: &str =
@@ -66,10 +66,16 @@ pub(super) fn edit(
     bearer: &str,
     url: Option<&str>,
 ) -> Result<Option<Patch>, Failure> {
-    let source = source(before.unwrap_or(b"{}\n"))?;
+    let invalid = || {
+        changed(
+            "it is not valid JSON".into(),
+            "correct the JSON there".into(),
+        )
+    };
+    let source = source(before.unwrap_or(b"{}\n")).map_err(|_| invalid())?;
     let path = entry_path(checkout, name)?;
     let after = url.map(|url| Server::http(url, bearer));
-    let (bytes, before) = match locate(source, &path)? {
+    let (bytes, before) = match locate(source, &path).map_err(|_| invalid())? {
         Some((Field::Present { value, remove }, _)) => {
             let ours = read_server(source, &value).ok().filter(|existing| {
                 owned.contains(&existing.url) && *existing == Server::http(&existing.url, bearer)
@@ -78,7 +84,13 @@ pub(super) fn edit(
                 return if name == FORMER {
                     Ok(None)
                 } else {
-                    Err(ENTRY.into())
+                    Err(changed(
+                        format!(
+                            "its {name} MCP server of {} is not the one ReviewQ wrote",
+                            checkout.display()
+                        ),
+                        "remove that MCP server there".into(),
+                    ))
                 };
             };
             if after.as_ref() == Some(&existing) {
@@ -101,7 +113,15 @@ pub(super) fn edit(
             )
         }
         None if after.is_none() => return Ok(None),
-        None => return Err("Claude config contains an incompatible entry.".into()),
+        None => {
+            let checkout = checkout.display();
+            return Err(changed(
+                format!("its \"projects\" entry for {checkout} is not made of JSON objects"),
+                format!(
+                    "make \"projects\", its entry for {checkout} and that entry's \"mcpServers\" JSON objects"
+                ),
+            ));
+        }
     };
     Ok(Some(Patch {
         bytes,
@@ -159,4 +179,8 @@ fn read_server(source: &str, value: &Range<usize>) -> Result<Server, Failure> {
         return Err(ENTRY.into());
     }
     Ok(serde_json::from_str(&source[value.clone()]).map_err(|_| ENTRY)?)
+}
+
+fn changed(cause: String, step: String) -> Failure {
+    Failure::from(Changed { cause, step })
 }

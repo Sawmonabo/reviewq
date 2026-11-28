@@ -12,7 +12,10 @@ use reviewq_store::SqliteStore;
 use sha2::{Digest, Sha256};
 
 use super::observe::{Observers, Topology};
-use super::{Failure, clean_owned, files, git, prepare, projection};
+use super::unfinished::clip;
+use super::{Failure, Unfinished, clean_owned, files, git, prepare, projection};
+
+const ISSUE_LIMIT: usize = 1024;
 
 pub(crate) async fn run(
     store: Arc<SqliteStore>,
@@ -95,15 +98,19 @@ async fn reconcile(
                 Ok(topology) => observations.record(job.checkout.common_dir, topology),
                 Err(error) => {
                     pending = true;
-                    let issue = format!("{}: {error}", job.checkout.root.as_path().display());
-                    let issue = issue
-                        .chars()
-                        .filter(|ch| !ch.is_control())
-                        .scan(0, |size, ch| {
-                            *size += ch.len_utf8();
-                            (*size <= 1024).then_some(ch)
-                        })
-                        .collect::<String>();
+                    // The store keeps 1,024 bytes. What setup left keeps its closing step, and
+                    // the parts that do not fit are counted.
+                    let lead = format!("{}: ", job.checkout.root.as_path().display());
+                    let issue = match error.downcast_ref::<Unfinished>() {
+                        Some(left) => left.render(&lead, Some(ISSUE_LIMIT)),
+                        None => clip(
+                            format!("{lead}{error}")
+                                .chars()
+                                .filter(|ch| !ch.is_control())
+                                .collect(),
+                            ISSUE_LIMIT,
+                        ),
+                    };
                     let _ = store
                         .finish_checkout_projection(job, ProjectionOutcome::Deferred(issue))
                         .await;
@@ -147,7 +154,7 @@ async fn one(
         clean_owned(profile, common, super::SERVICE_AGAIN).await?;
     }
     let claude = projection::claude_config(claude_profile)?;
-    let mut changes = prepare(profile, checkout, url, claude, lock).await?;
+    let mut changes = prepare(profile, checkout, url, claude, lock, super::SERVICE_AGAIN).await?;
     store
         .issue_grant(
             Actor::local_operator(),

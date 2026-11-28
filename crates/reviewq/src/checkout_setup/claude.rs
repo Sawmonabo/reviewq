@@ -17,6 +17,27 @@ pub(super) struct Edit {
     applied: Option<Applied>,
 }
 
+/// The Claude config no longer reads as ReviewQ left it, such as an entry changed by hand,
+/// rather than a failure to read, lock or write it. `cause` is a clause about the file, such
+/// as "it is not valid JSON", and `step` what the user changes there.
+#[derive(Debug)]
+pub(super) struct Changed {
+    pub(super) cause: String,
+    pub(super) step: String,
+}
+
+impl std::fmt::Display for Changed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "ReviewQ left the Claude config unchanged because {}. To finish, {}.",
+            self.cause, self.step
+        )
+    }
+}
+
+impl std::error::Error for Changed {}
+
 struct Selection {
     checkout: PathBuf,
     url: String,
@@ -136,7 +157,8 @@ impl Edit {
         // One entry edit, applied on top of the ones before it.
         let mut edit = |checkout: &Path, name, urls, url| -> Result<(), Failure> {
             let bytes = after.as_deref().or(original);
-            if let Some(patch) = json::edit(bytes, checkout, name, urls, &self.bearer, url)? {
+            let patch = json::edit(bytes, checkout, name, urls, &self.bearer, url)?;
+            if let Some(patch) = patch {
                 after = Some(patch.bytes);
                 undo.push(patch.undo);
             }

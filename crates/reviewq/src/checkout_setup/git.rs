@@ -3,6 +3,7 @@ use std::io::ErrorKind;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
+use reviewq_app::access::AppError;
 use reviewq_providers::git_output;
 
 use super::Failure;
@@ -40,15 +41,18 @@ pub(super) async fn discover(directory: Option<&Path>) -> Result<Checkout, Failu
     if !worktrees.contains(&worktree) {
         return Err("The active checkout does not belong to the recorded Git worktrees.".into());
     }
-    for root in &worktrees {
-        if repo_path(root, "--git-common-dir").await? != common
-            || repo_path(root, "--show-toplevel").await? != *root
-        {
+    let mut members = Vec::with_capacity(worktrees.len());
+    for root in worktrees {
+        if belongs(&root, &common).await? {
+            members.push(root);
+        } else if root == primary || root == worktree {
             return Err("A linked worktree does not match this Git repository.".into());
         }
+        // Git keeps a linked worktree's record when its folder was deleted and something else,
+        // such as another repository, now stands there. That folder is not this checkout's.
     }
-    let mut materialized = Vec::with_capacity(worktrees.len());
-    for root in worktrees {
+    let mut materialized = Vec::with_capacity(members.len());
+    for root in members {
         let index = git_output(
             &root,
             &["rev-parse", "--path-format=absolute", "--git-path", "index"],
@@ -76,9 +80,7 @@ pub(super) async fn current_worktree() -> Result<PathBuf, Failure> {
 }
 
 pub(super) async fn require_untracked(root: &Path, paths: &[&str]) -> Result<(), Failure> {
-    let mut args = vec!["--literal-pathspecs", "ls-files", "-z", "--"];
-    args.extend(paths);
-    if !git_output(root, &args).await?.is_empty() {
+    if tracked(root, paths).await? {
         return Err(format!(
             "Checkout setup would touch a tracked destination under {}.",
             root.display()
@@ -86,6 +88,35 @@ pub(super) async fn require_untracked(root: &Path, paths: &[&str]) -> Result<(),
         .into());
     }
     Ok(())
+}
+
+async fn tracked(root: &Path, paths: &[&str]) -> Result<bool, Failure> {
+    let mut args = vec!["--literal-pathspecs", "ls-files", "-z", "--"];
+    args.extend(paths);
+    Ok(!git_output(root, &args).await?.is_empty())
+}
+
+/// Whether `root` is still a worktree of the repository at `common`, its top level. It is not
+/// when Git says the folder is no repository or names another; when Git cannot answer, such as
+/// for a timeout, that is an error.
+pub(super) async fn belongs(root: &Path, common: &Path) -> Result<bool, Failure> {
+    for (name, expected) in [("--git-common-dir", common), ("--show-toplevel", root)] {
+        match repo_path(root, name).await {
+            Ok(found) if found == expected => (),
+            Ok(_) => return Ok(false),
+            Err(error) if matches!(error.downcast_ref(), Some(AppError::NotFound)) => {
+                return Ok(false);
+            }
+            Err(_) => {
+                return Err(format!(
+                    "Git could not say whether {} is still a worktree of this repository",
+                    root.display()
+                )
+                .into());
+            }
+        }
+    }
+    Ok(true)
 }
 
 pub(super) async fn require_ignored(root: &Path, paths: &[&str]) -> Result<(), Failure> {
@@ -127,23 +158,41 @@ pub(super) async fn private_config(file: &Path, needs_ignore: bool) -> Result<()
     Ok(())
 }
 
-pub(super) async fn verify_removal(
+/// Where a file checkout setup wrote at `relative` in one of the checkout's worktrees stands.
+pub(super) enum Destination {
+    /// Its worktree is still the checkout's and Git does not track it.
+    Owned,
+    /// Its worktree is still the checkout's, but Git now tracks it.
+    Tracked,
+    /// Its folder is no longer a worktree of the checkout, such as a removed worktree whose
+    /// folder now holds another repository.
+    Elsewhere,
+}
+
+pub(super) async fn destination(
     file: &Path,
     common: &Path,
     relative: &str,
-) -> Result<(), Failure> {
+) -> Result<Destination, Failure> {
     let count = Path::new(relative).components().count();
-    let worktree = file
+    // A record naming no such file in a worktree is damaged, so nothing there is ReviewQ's.
+    let Some(worktree) = file
         .ancestors()
         .nth(count)
-        .ok_or("Invalid owned file address.")?;
-    if worktree.join(relative) != file
-        || repo_path(worktree, "--git-common-dir").await? != common
-        || repo_path(worktree, "--show-toplevel").await? != worktree
+        .filter(|worktree| worktree.join(relative) == file)
+    else {
+        return Ok(Destination::Elsewhere);
+    };
+    Ok(if !belongs(worktree, common).await? {
+        Destination::Elsewhere
+    } else if tracked(worktree, &[relative])
+        .await
+        .map_err(|_| format!("Git could not say whether it tracks {}", file.display()))?
     {
-        return Err("The owned destination no longer belongs to the configured checkout.".into());
-    }
-    require_untracked(worktree, &[relative]).await
+        Destination::Tracked
+    } else {
+        Destination::Owned
+    })
 }
 
 fn selected(directory: Option<&Path>) -> Result<PathBuf, Failure> {

@@ -140,6 +140,30 @@ pub(crate) fn read(path: &Path) -> Result<Option<Existing>, Failure> {
     read_limited(path, FILE_LIMIT)
 }
 
+/// The file at `path` while it is still one checkout setup could have written there: a regular
+/// file the user owns, with one link, reached without a symbolic link. `None` for anything
+/// else, such as no file, a link or a folder, since then what setup wrote is gone.
+pub(super) fn read_written(path: &Path) -> Result<Option<Existing>, Failure> {
+    let metadata = match path.symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {
+            return Ok(None);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let parent = path
+        .parent()
+        .ok_or("Missing checkout destination directory.")?;
+    if !metadata.is_file()
+        || metadata.uid() != rustix::process::getuid().as_raw()
+        || metadata.nlink() != 1
+        || parent.canonicalize()? != parent
+    {
+        return Ok(None);
+    }
+    read(path)
+}
+
 pub(super) fn read_limited(path: &Path, limit: u64) -> Result<Option<Existing>, Failure> {
     let flags = (OFlags::NOFOLLOW | OFlags::NONBLOCK).bits() as i32;
     let file = match OpenOptions::new().read(true).custom_flags(flags).open(path) {

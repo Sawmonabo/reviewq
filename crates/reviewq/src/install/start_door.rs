@@ -14,7 +14,8 @@ use super::{
 use crate::{runtime_settings, service};
 
 /// The first line of both door files, which marks them as ReviewQ's. Its text must never
-/// change: every earlier install's files would then look like someone else's.
+/// change: every earlier install's files would then look like someone else's. A rollback writes
+/// this template for the older release, so `start-door` must keep working the same in every one.
 const MARKER: &str = "# ReviewQ start door. ReviewQ rewrites this file; edits are lost.";
 
 /// Each door file's path with the bytes the current `runtime.json` and profile want there.

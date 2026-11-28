@@ -17,14 +17,17 @@ mod hooks;
 mod observe;
 mod projection;
 pub(crate) mod reconcile;
+mod unfinished;
+
+pub(crate) use unfinished::Unfinished;
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 const GRANT: &str = "/api/v1/checkout/grant";
-/// What finishes each command's cleanup once the user removed what they had edited.
-const SETUP_AGAIN: &str = "run the same `reviewq checkout setup` command again.";
-const REVOKE_AGAIN: &str = "run `reviewq checkout revoke` again.";
-const UNINSTALL_AGAIN: &str = "run `reviewq uninstall` again.";
-const SERVICE_AGAIN: &str = "ReviewQ tries again on its own.";
+/// What finishes each command's cleanup once the user did what it left for them. The
+/// uninstall's step comes from its caller, which also names it in the dashboard job's notice.
+const SETUP_AGAIN: &str = "run the same `reviewq checkout setup` command again";
+const REVOKE_AGAIN: &str = "run the same `reviewq checkout revoke` command again";
+const SERVICE_AGAIN: &str = "ReviewQ tries again on its own";
 
 pub(crate) async fn worktree(
     profile: &Path,
@@ -74,7 +77,7 @@ pub(crate) async fn install(
             clean_owned(profile, &checkout.common, SETUP_AGAIN).await?;
         }
     }
-    let mut changes = prepare(profile, checkout, &url, claude, lock).await?;
+    let mut changes = prepare(profile, checkout, &url, claude, lock, SETUP_AGAIN).await?;
     let address = json!({
         "settingsRevision":revision, "projectId":project.to_string(),
         "checkout":changes.checkout.root, "commonDir":changes.checkout.common,
@@ -135,6 +138,8 @@ struct Prepared {
     inventory: PathBuf,
     plan: projection::Plan,
     verifier: [u8; 32],
+    /// The step that finishes the command when setup leaves something for the user.
+    again: &'static str,
     _lock: File,
 }
 
@@ -143,7 +148,7 @@ impl Prepared {
         self.plan
             .apply(&self.inventory, &self.checkout, self.claude.as_deref())
             .await?;
-        match hooks::reconcile(&self.profile, &self.checkout).await {
+        match hooks::reconcile(&self.profile, &self.checkout, self.again).await {
             Ok(()) => Ok(()),
             Err(error) => {
                 self.plan.rollback()?;
@@ -163,6 +168,7 @@ async fn prepare(
     url: &str,
     claude: Option<PathBuf>,
     lock: File,
+    again: &'static str,
 ) -> Result<Prepared, Failure> {
     projection::require_untracked(&checkout, claude.as_deref()).await?;
     let key = files::credential(profile, &checkout.common)?;
@@ -174,7 +180,8 @@ async fn prepare(
         &URL_SAFE_NO_PAD.encode(key),
         claude.as_deref(),
         previous,
-        &projection::skill(profile)?,
+        &projection::skill(profile, again)?,
+        again,
     )
     .await?;
     Ok(Prepared {
@@ -184,6 +191,7 @@ async fn prepare(
         inventory,
         plan,
         verifier: Sha256::digest(key).into(),
+        again,
         _lock: lock,
     })
 }
@@ -271,34 +279,46 @@ fn refused(refusal: Option<Failure>, project: ProjectId) -> String {
     }
 }
 
+/// Removes what the key of `common` set up, its Git hook included, and forgets the key. What
+/// is left for the user comes back as one `Unfinished` that ends with `again`.
 async fn clean_owned(profile: &Path, common: &Path, again: &str) -> Result<(), Failure> {
-    let hooks = hooks::cleanup(profile, common);
+    let hooks = hooks::cleanup(profile, common, again);
     let inventory = files::inventory(profile, common)?;
     let previous = projection::Inventory::load(&inventory)?;
     let key = files::existing_credential(profile, common)?;
-    previous
+    let cleaned = previous
         .cleanup(
             &inventory,
             common,
             &key.map_or_else(String::new, |key| URL_SAFE_NO_PAD.encode(key)),
             again,
         )
-        .await?;
-    files::forget(profile, common)?;
-    hooks
+        .await;
+    if cleaned.is_ok() {
+        files::forget(profile, common)?;
+    }
+    let mut left = Unfinished::new(again);
+    for error in [cleaned, hooks].into_iter().filter_map(Result::err) {
+        left.absorb(error, common);
+    }
+    left.result()
 }
 
+/// Withdraws every checkout grant and removes what each set up. `again` finishes the command
+/// when a cleanup leaves something for the user, such as "run `reviewq uninstall`".
 pub(crate) async fn remove_installation(
     profile: &Path,
     store: &reviewq_store::SqliteStore,
+    again: &str,
 ) -> Result<(), Failure> {
     store.retire_installed_grants().await?;
     let mut after = None;
-    let mut conflict = None;
+    // Every checkout's steps go in one sentence, so one run of `again` finishes them all.
+    let mut left = Unfinished::new(again);
     loop {
         let directories = store.installed_checkout_paths(after).await?;
         let Some(last) = directories.last() else {
-            return conflict.map_or(Ok(()), Err);
+            return left.result();
         };
         after = Some(last.clone());
         for common in directories {
@@ -306,12 +326,12 @@ pub(crate) async fn remove_installation(
             let cleanup = async {
                 if files::owned_setup_exists(profile, common)? {
                     let _lock = files::hold(profile, common)?;
-                    clean_owned(profile, common, UNINSTALL_AGAIN).await?;
+                    clean_owned(profile, common, again).await?;
                 }
                 Ok::<_, Failure>(())
             };
             if let Err(error) = cleanup.await {
-                conflict.get_or_insert(error);
+                left.absorb(error, common);
             }
         }
     }

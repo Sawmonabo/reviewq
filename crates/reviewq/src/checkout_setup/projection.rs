@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use toml_edit::{DocumentMut, Item, Table, value};
 
-use super::files::{Changes, Edit, Existing, read, read_limited};
+use super::files::{self, Changes, Edit, Existing, read, read_limited};
 use super::git::{self, Checkout};
-use super::{Failure, claude};
+use super::{Failure, Unfinished, claude};
 
 const MARKER: &str = "# Managed by ReviewQ";
 const EXCLUSIONS: &str = "# ReviewQ checkout files\n/.codex/config.toml\n/.agents/skills/reviewq-manage\n/.claude/skills/reviewq-manage\n# End ReviewQ checkout files\n";
@@ -79,8 +79,9 @@ impl Inventory {
         Ok(ready)
     }
 
-    /// Removes what the records say ReviewQ wrote. What was changed by hand stays, and the
-    /// error tells the user what to remove from which file, then `again`, what finishes it.
+    /// Removes what the records say ReviewQ wrote, and forgets an entry once nothing of
+    /// ReviewQ's is left there. What stays is recorded, and the error says why, what the user
+    /// removes from which file, then `again`, the step that finishes the command.
     pub(super) async fn cleanup(
         &self,
         path: &Path,
@@ -92,7 +93,7 @@ impl Inventory {
             urls: self.urls.clone(),
             ..Self::default()
         };
-        let mut claude_error = None;
+        let mut left = Unfinished::new(again);
         for owned in &self.entries {
             if matches!(owned, Owned::Exclusion { .. }) {
                 let dependencies = unresolved
@@ -105,26 +106,16 @@ impl Inventory {
                     })
                     .cloned()
                     .collect::<Vec<_>>();
+                // An exclusion waits only for the files it hides, so it needs no step.
                 if !dependencies.is_empty() {
                     unresolved.entries.extend(dependencies);
                     unresolved.entries.insert(owned.clone());
                     continue;
                 }
             }
-            let result = if let Owned::Claude { file, checkout } = owned {
-                claude::Edit::prepare(file, &[checkout], None, &self.urls, bearer)
-                    .await
-                    .and_then(|mut edit| edit.apply())
-            } else {
-                self.local_removal(owned, common, bearer)
-                    .await
-                    .and_then(|edit| edit.map_or(Ok(()), |edit| edit.apply()))
-            };
-            if let Err(error) = result {
-                if matches!(owned, Owned::Claude { .. }) {
-                    claude_error.get_or_insert(error);
-                }
+            if let Err(kept) = self.remove_entry(owned, common, bearer).await {
                 unresolved.entries.insert(owned.clone());
+                kept.add_to(owned, &mut left);
             }
         }
         if unresolved.entries.is_empty() {
@@ -134,54 +125,80 @@ impl Inventory {
             return Ok(());
         }
         unresolved.save(path)?;
-        // An exclusion waits only for the files it hides, so it needs no step of its own
-        // unless nothing else is left.
-        let edited = unresolved
-            .entries
-            .iter()
-            .filter(|entry| !matches!(entry, Owned::Exclusion { .. }));
-        let steps = if edited.clone().next().is_some() {
-            edited.map(Owned::removal).collect::<Vec<_>>()
-        } else {
-            unresolved.entries.iter().map(Owned::removal).collect()
+        left.result()
+    }
+
+    /// Removes one entry's setup. `Ok` when nothing of ReviewQ's is left there.
+    async fn remove_entry(&self, owned: &Owned, common: &Path, bearer: &str) -> Result<(), Kept> {
+        let Owned::Claude { file, checkout } = owned else {
+            return match self.local_removal(owned, common, bearer).await? {
+                Some(edit) => edit.apply().map_err(Kept::Failed),
+                None => Ok(()),
+            };
         };
-        let deferred = format!(
-            "ReviewQ left its management setup in place where it was changed by hand. To finish, {}. Then {again}",
-            steps.join("; ")
-        );
-        match claude_error {
-            Some(error) => Err(format!("{error} {deferred}").into()),
-            None => Err(deferred.into()),
+        let removed = claude::Edit::prepare(file, &[checkout], None, &self.urls, bearer)
+            .await
+            .and_then(|mut edit| edit.apply());
+        match removed {
+            Ok(()) => Ok(()),
+            // The entry names the checkout's folder. Once that folder holds another repository,
+            // or none, an entry there that is not ReviewQ's belongs to someone else.
+            Err(error) if error.is::<claude::Changed>() => {
+                if git::belongs(checkout, common).await? {
+                    Err(Kept::Edited)
+                } else {
+                    Ok(())
+                }
+            }
+            Err(error) => Err(Kept::Failed(error)),
         }
     }
 
+    /// The edit that removes what ReviewQ wrote at a file in the checkout, or `None` when
+    /// nothing of ReviewQ's is left there: the file is gone or is no longer the one setup
+    /// wrote, its folder is no longer a worktree of the checkout, or it no longer holds
+    /// ReviewQ's part. Nothing is read from a folder that is no longer the checkout's.
     async fn local_removal(
         &self,
         owned: &Owned,
         common: &Path,
         bearer: &str,
-    ) -> Result<Option<Edit>, Failure> {
+    ) -> Result<Option<Edit>, Kept> {
         let file = owned.file();
-        let Some(before) = read(file)? else {
+        let relative = match owned {
+            Owned::Codex { .. } => Some(CODEX[0]),
+            Owned::Skill { .. }
+                if file
+                    .as_os_str()
+                    .as_encoded_bytes()
+                    .ends_with(CODEX[1].as_bytes()) =>
+            {
+                Some(CODEX[1])
+            }
+            Owned::Skill { .. } => Some(CLAUDE[0]),
+            Owned::Exclusion { .. } => None,
+            Owned::Claude { .. } => return Ok(None),
+        };
+        let tracked = match relative {
+            Some(relative) => match git::destination(file, common, relative).await? {
+                git::Destination::Elsewhere => return Ok(None),
+                // A skill Git tracks is a copy the repository keeps, with no key in it.
+                git::Destination::Tracked if matches!(owned, Owned::Skill { .. }) => {
+                    return Ok(None);
+                }
+                git::Destination::Tracked => true,
+                git::Destination::Owned => false,
+            },
+            None => false,
+        };
+        let Some(before) = files::read_written(file)? else {
             return Ok(None);
         };
         let updated = match owned {
-            Owned::Codex { .. } => {
-                git::verify_removal(file, common, CODEX[0]).await?;
-                codex(Some(&before), &self.urls, bearer, None)?
-                    .unwrap_or_else(|| before.bytes.clone())
-            }
+            Owned::Codex { .. } => codex(Some(&before), &self.urls, bearer, None)
+                .map_err(|_| Kept::Edited)?
+                .unwrap_or_else(|| before.bytes.clone()),
             Owned::Skill { digest, .. } => {
-                let relative = if file
-                    .as_os_str()
-                    .as_encoded_bytes()
-                    .ends_with(CODEX[1].as_bytes())
-                {
-                    CODEX[1]
-                } else {
-                    CLAUDE[0]
-                };
-                git::verify_removal(file, common, relative).await?;
                 let actual: [u8; 32] = Sha256::digest(&before.bytes).into();
                 if actual != *digest
                     && !self.entries.contains(&Owned::Skill {
@@ -189,7 +206,7 @@ impl Inventory {
                         digest: actual,
                     })
                 {
-                    return Err(conflict(file));
+                    return Err(Kept::Edited);
                 }
                 return Ok(Some(Edit::remove(file.to_owned(), before)));
             }
@@ -198,7 +215,7 @@ impl Inventory {
                     if find(&before.bytes, MARKER.as_bytes()).is_some()
                         || find(&before.bytes, b"# ReviewQ checkout files").is_some()
                     {
-                        return Err(conflict(file));
+                        return Err(Kept::Edited);
                     }
                     return Ok(None);
                 };
@@ -211,11 +228,15 @@ impl Inventory {
                 updated.drain(start..position + EXCLUSIONS.len());
                 updated
             }
-            Owned::Exclusion { .. } => return Err(conflict(file)),
+            // A damaged record: setup writes only the common folder's exclude file.
+            Owned::Exclusion { .. } => return Ok(None),
             Owned::Claude { .. } => return Ok(None),
         };
         if updated == before.bytes {
             return Ok(None);
+        }
+        if tracked {
+            return Err(Kept::Tracked);
         }
         if matches!(owned, Owned::Codex { .. }) && updated.iter().all(u8::is_ascii_whitespace) {
             return Ok(Some(Edit::remove(file.to_owned(), before)));
@@ -239,7 +260,7 @@ impl Owned {
         }
     }
 
-    /// What the user removes by hand when cleanup left this entry because it was edited.
+    /// What the user removes by hand when cleanup left this entry for them.
     fn removal(&self) -> String {
         match self {
             Self::Codex { file } => format!(
@@ -259,6 +280,39 @@ impl Owned {
                 "remove the lines from \"# ReviewQ checkout files\" to \"# End ReviewQ checkout files\" in {}",
                 file.display()
             ),
+        }
+    }
+}
+
+/// Why cleanup left an entry in place.
+enum Kept {
+    /// What ReviewQ wrote there was changed by hand.
+    Edited,
+    /// Git now tracks the file, which still holds what ReviewQ wrote, so ReviewQ leaves it.
+    Tracked,
+    /// Anything else, such as a file that could not be read or written, or Git not answering.
+    Failed(Failure),
+}
+
+impl From<Failure> for Kept {
+    fn from(error: Failure) -> Self {
+        Self::Failed(error)
+    }
+}
+
+impl Kept {
+    /// Says in `left` why `owned` stays and what the user does about it.
+    fn add_to(self, owned: &Owned, left: &mut Unfinished) {
+        match self {
+            Self::Edited => left.edited(owned.removal()),
+            Self::Tracked => left.step(format!(
+                "Git tracks {}, so ReviewQ left its management setup there. To finish, {}.",
+                owned.file().display(),
+                owned.removal()
+            )),
+            Self::Failed(error) => {
+                left.failed("remove its management setup from", owned.file(), &error);
+            }
         }
     }
 }
@@ -309,51 +363,52 @@ impl Plan {
         claude_file: Option<&Path>,
         previous: Inventory,
         skill: &[u8],
+        again: &str,
     ) -> Result<Self, Failure> {
         let mut current = Inventory {
             urls: BTreeSet::from([url.to_string()]),
             ..Inventory::default()
         };
+        // Everything setup cannot change is said at once, so one more run is enough.
+        let mut left = Unfinished::new(again);
         let file = checkout.common.join("info/exclude");
-        let exclusion = exclusion(file, &previous, &mut current.entries)?;
+        let exclusion = exclusion(file, &previous, &mut current.entries, &mut left)?;
         let mut edits = Vec::new();
+        let mut setup = Setup {
+            previous: &previous,
+            current: &mut current,
+            edits: &mut edits,
+            left: &mut left,
+        };
         for root in &checkout.worktrees {
             let file = root.join(CODEX[0]);
             let owned = Owned::Codex { file: file.clone() };
-            let before = read(&file)?;
-            let empty = BTreeSet::new();
-            let urls = if previous.entries.contains(&owned) {
-                &previous.urls
-            } else {
-                &empty
-            };
-            let bytes = codex(before.as_ref(), urls, bearer, Some(url))
-                .map_err(|_| conflict(&file))?
-                .ok_or_else(|| conflict(&file))?;
-            current.entries.insert(owned);
-            edits.push(Edit::new(file, before, bytes, true));
-            add_skill(
-                root.join(CODEX[1]),
-                &previous,
-                &mut current,
-                &mut edits,
-                skill,
-            )?;
+            if let Some(before) = setup.read(&file) {
+                let ours = previous.entries.contains(&owned);
+                let empty = BTreeSet::new();
+                let urls = if ours { &previous.urls } else { &empty };
+                match codex(before.as_ref(), urls, bearer, Some(url)) {
+                    Ok(bytes) => {
+                        let bytes = bytes.ok_or("Codex setup produced no entry.")?;
+                        setup.current.entries.insert(owned);
+                        setup.edits.push(Edit::new(file, before, bytes, true));
+                    }
+                    Err(refusal) => {
+                        let (cause, step) = refusal.words(ours);
+                        setup.left.unchanged(&file, &cause, step);
+                    }
+                }
+            }
+            setup.skill(root.join(CODEX[1]), skill);
         }
         let mut claude_changes = BTreeMap::<&Path, Vec<&Path>>::new();
         if let Some(file) = claude_file {
             claude_changes.entry(file).or_default();
-            current.entries.insert(Owned::Claude {
+            setup.current.entries.insert(Owned::Claude {
                 file: file.to_owned(),
                 checkout: checkout.primary.clone(),
             });
-            add_skill(
-                checkout.primary.join(CLAUDE[0]),
-                &previous,
-                &mut current,
-                &mut edits,
-                skill,
-            )?;
+            setup.skill(checkout.primary.join(CLAUDE[0]), skill);
         }
         for owned in previous
             .entries
@@ -369,12 +424,12 @@ impl Plan {
                 claude_changes.entry(file).or_default().push(checkout);
                 continue;
             }
-            if let Some(edit) = previous
+            match previous
                 .local_removal(owned, &checkout.common, bearer)
                 .await
-                .map_err(|_| conflict(owned.file()))?
             {
-                edits.push(edit);
+                Ok(edit) => edits.extend(edit),
+                Err(kept) => kept.add_to(owned, &mut left),
             }
         }
         let mut claude_edits = Vec::new();
@@ -386,12 +441,15 @@ impl Plan {
                 });
                 (checkout.primary.as_path(), url, owned)
             });
-            claude_edits.push(
-                claude::Edit::prepare(file, &retired, selected, &previous.urls, bearer)
-                    .await
-                    .map_err(|_| conflict(file))?,
-            );
+            match claude::Edit::prepare(file, &retired, selected, &previous.urls, bearer).await {
+                Ok(edit) => claude_edits.push(edit),
+                Err(error) => match error.downcast::<claude::Changed>() {
+                    Ok(changed) => left.unchanged(file, &changed.cause, &changed.step),
+                    Err(error) => left.failed("update", file, &error),
+                },
+            }
         }
+        left.result()?;
         let provisional = Inventory {
             urls: previous.urls.union(&current.urls).cloned().collect(),
             entries: previous.entries.union(&current.entries).cloned().collect(),
@@ -462,8 +520,15 @@ fn exclusion(
     file: PathBuf,
     previous: &Inventory,
     next: &mut BTreeSet<Owned>,
+    left: &mut Unfinished,
 ) -> Result<Option<Edit>, Failure> {
-    let before = read(&file)?;
+    let before = match read(&file) {
+        Ok(before) => before,
+        Err(error) => {
+            left.failed("read", &file, &error);
+            return Ok(None);
+        }
+    };
     let mut bytes = before
         .as_ref()
         .map_or_else(Vec::new, |file| file.bytes.clone());
@@ -476,7 +541,17 @@ fn exclusion(
         return Ok(None);
     }
     if find(&bytes, b"# ReviewQ checkout files").is_some() {
-        return Err(conflict(&file));
+        let cause = if ours.is_some() {
+            "the lines ReviewQ wrote there were changed by hand"
+        } else {
+            "it already has a line \"# ReviewQ checkout files\" that ReviewQ did not write"
+        };
+        left.unchanged(
+            &file,
+            cause,
+            "remove the lines from \"# ReviewQ checkout files\" to \"# End ReviewQ checkout files\" there",
+        );
+        return Ok(None);
     }
     let separator = !bytes.is_empty() && bytes.last() != Some(&b'\n');
     if separator {
@@ -490,50 +565,79 @@ fn exclusion(
     Ok(Some(Edit::new(file, before, bytes, false)))
 }
 
-pub(super) fn skill(profile: &Path) -> Result<Cow<'static, [u8]>, Failure> {
+/// The installed release's checkout skill, which must be the one this program carries. Setup
+/// with another release's program says how to make them the same, then `again`.
+pub(super) fn skill(profile: &Path, again: &str) -> Result<Cow<'static, [u8]>, Failure> {
     let Some(path) = crate::install::checkout_skill(profile)? else {
         return Ok(Cow::Borrowed(SKILL));
     };
-    let owned = read_limited(&path, 32 * 1024)?.ok_or_else(|| conflict(&path))?;
-    if owned.bytes != SKILL {
-        return Err(conflict(&path));
+    let mut left = Unfinished::new(again);
+    match read_limited(&path, 32 * 1024) {
+        Ok(Some(owned)) if owned.bytes == SKILL => return Ok(Cow::Owned(owned.bytes)),
+        Ok(_) => left.step(format!(
+            "The installed ReviewQ's checkout skill at {} is not the one this `reviewq` program carries. To finish, run setup with the installed `reviewq`, or install this one with `reviewq install`.",
+            path.display()
+        )),
+        Err(error) => left.failed("read its installed checkout skill", &path, &error),
     }
-    Ok(Cow::Owned(owned.bytes))
+    Err(Box::new(left))
 }
 
-fn add_skill(
-    file: PathBuf,
-    previous: &Inventory,
-    current: &mut Inventory,
-    edits: &mut Vec<Edit>,
-    skill: &[u8],
-) -> Result<(), Failure> {
-    let before = read(&file)?;
-    let owned = previous
-        .entries
-        .iter()
-        .find(|entry| matches!(entry, Owned::Skill { file: path, .. } if *path == file));
-    let digest: [u8; 32] = Sha256::digest(skill).into();
-    if let Some(existing) = &before {
-        if existing.bytes == skill {
-            if owned.is_some() {
-                current.entries.insert(Owned::Skill { file, digest });
-            }
-            return Ok(());
-        }
-        if !previous.entries.contains(&Owned::Skill {
-            file: file.clone(),
-            digest: Sha256::digest(&existing.bytes).into(),
-        }) {
-            return Err(conflict(&file));
-        }
+/// What `Plan::new` gathers: the entries and edits it plans, and what it must leave as it is.
+struct Setup<'a> {
+    previous: &'a Inventory,
+    current: &'a mut Inventory,
+    edits: &'a mut Vec<Edit>,
+    left: &'a mut Unfinished,
+}
+
+impl Setup<'_> {
+    /// The file at `file`, or `None` after saying in `left` why it could not be read.
+    fn read(&mut self, file: &Path) -> Option<Option<Existing>> {
+        read(file)
+            .map_err(|error| self.left.failed("read", file, &error))
+            .ok()
     }
-    current.entries.insert(Owned::Skill {
-        file: file.clone(),
-        digest,
-    });
-    edits.push(Edit::new(file, before, skill.to_vec(), false));
-    Ok(())
+
+    /// Plans the skill at `file`, unless something other than ReviewQ's skill is there.
+    fn skill(&mut self, file: PathBuf, skill: &[u8]) {
+        let Some(before) = self.read(&file) else {
+            return;
+        };
+        let owned = self
+            .previous
+            .entries
+            .iter()
+            .find(|entry| matches!(entry, Owned::Skill { file: path, .. } if *path == file));
+        let digest: [u8; 32] = Sha256::digest(skill).into();
+        if let Some(existing) = &before {
+            if existing.bytes == skill {
+                if owned.is_some() {
+                    self.current.entries.insert(Owned::Skill { file, digest });
+                }
+                return;
+            }
+            if !self.previous.entries.contains(&Owned::Skill {
+                file: file.clone(),
+                digest: Sha256::digest(&existing.bytes).into(),
+            }) {
+                let cause = if owned.is_some() {
+                    "the skill ReviewQ wrote there was changed by hand"
+                } else {
+                    "it is a file ReviewQ did not write"
+                };
+                self.left
+                    .unchanged(&file, cause, "move or delete that file");
+                return;
+            }
+        }
+        self.current.entries.insert(Owned::Skill {
+            file: file.clone(),
+            digest,
+        });
+        self.edits
+            .push(Edit::new(file, before, skill.to_vec(), false));
+    }
 }
 
 fn find(haystack: &[u8], piece: &[u8]) -> Option<usize> {
@@ -542,24 +646,19 @@ fn find(haystack: &[u8], piece: &[u8]) -> Option<usize> {
         .position(|section| section == piece)
 }
 
-fn conflict(file: &Path) -> Failure {
-    format!(
-        "ReviewQ setup could not modify {}. Its existing contents were preserved.",
-        file.display()
-    )
-    .into()
-}
-
 fn codex(
     before: Option<&Existing>,
     owned: &BTreeSet<String>,
     bearer: &str,
     url: Option<&str>,
-) -> Result<Option<Vec<u8>>, Failure> {
-    let mut document: DocumentMut = before
-        .map_or(Ok(""), |file| std::str::from_utf8(&file.bytes))?
-        .parse()
-        .map_err(|_| "Could not parse the Codex checkout config.")?;
+) -> Result<Option<Vec<u8>>, Refusal> {
+    let text = before
+        .map_or(Ok(""), |file| std::str::from_utf8(&file.bytes))
+        .map_err(|_| Refusal::Text)?;
+    let mut document: DocumentMut = text.parse().map_err(|error: toml_edit::TomlError| {
+        let at = error.span().map_or(0, |span| span.start);
+        Refusal::Line(text[..at].matches('\n').count() + 1)
+    })?;
     let configuration = document.as_table_mut();
     if url.is_none() && configuration.get("mcp_servers").is_none() {
         return Ok(None);
@@ -568,12 +667,10 @@ fn codex(
         .entry("mcp_servers")
         .or_insert(Item::Table(Table::new()))
         .as_table_like_mut()
-        .ok_or("Codex mcp_servers is not a table.")?;
+        .ok_or(Refusal::Servers)?;
     let authorization = format!("Bearer {bearer}");
     if let Some(existing) = servers.get("reviewq") {
-        let table = existing
-            .as_table()
-            .ok_or("The existing Codex MCP entry was preserved.")?;
+        let table = existing.as_table().ok_or(Refusal::Entry)?;
         let marker = table
             .decor()
             .prefix()
@@ -589,7 +686,7 @@ fn codex(
                     || headers.get("Authorization").and_then(Item::as_str) != Some(&authorization)
             })
         {
-            return Err("The existing Codex MCP entry was preserved.".into());
+            return Err(Refusal::Entry);
         }
         if old_url == url {
             return Ok(before.map(|file| file.bytes.clone()));
@@ -616,4 +713,38 @@ fn codex(
         }
     }
     Ok(Some(document.to_string().into_bytes()))
+}
+
+/// Why setup leaves a Codex config as it is.
+enum Refusal {
+    Text,
+    Line(usize),
+    Servers,
+    Entry,
+}
+
+impl Refusal {
+    /// The cause, as a clause about the file, and the user's step. `ours` says whether
+    /// ReviewQ wrote the file's [mcp_servers.reviewq] table before.
+    fn words(&self, ours: bool) -> (String, &'static str) {
+        match self {
+            Self::Text => ("it is not UTF-8 text".into(), "save it as UTF-8 text"),
+            Self::Line(line) => (
+                format!("line {line} there is not valid TOML"),
+                "correct that line",
+            ),
+            Self::Servers => (
+                "its `mcp_servers` entry is not a table".into(),
+                "make `mcp_servers` there a table",
+            ),
+            Self::Entry if ours => (
+                "its [mcp_servers.reviewq] table was changed by hand".into(),
+                "remove that table there",
+            ),
+            Self::Entry => (
+                "it already has an [mcp_servers.reviewq] table that ReviewQ did not write".into(),
+                "rename or remove that table",
+            ),
+        }
+    }
 }

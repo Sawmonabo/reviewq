@@ -113,9 +113,10 @@ pub(crate) async fn start_job(paths: &Paths, delete_data: bool) -> Result<(), Fa
     if service::unit_state(&job).await?.1 {
         return Err(refused("An uninstall is already running."));
     }
-    Err(refused(
-        "ReviewQ couldn't start its uninstall. Run `reviewq uninstall` in a terminal.",
-    ))
+    Err(refused(format!(
+        "ReviewQ couldn't start its uninstall. Run {} in a terminal.",
+        finishing(delete_data)
+    )))
 }
 
 fn setenv(key: &str, value: &Path) -> OsString {
@@ -140,7 +141,8 @@ pub(crate) async fn uninstall(options: Options) -> Result<(), Failure> {
     let job = options.expect_store.is_some();
     // A data deletion that stopped part way is finished even when not asked again.
     let delete_data = options.delete_data || load(&paths).is_ok_and(|record| record.deleting_data);
-    let mut left = match remove(&mut paths, &options).await {
+    let again = format!("run {}", finishing(delete_data));
+    let mut left = match remove(&mut paths, &options, &again).await {
         Ok(left) => left,
         Err(error) => {
             let failure = failed(&paths, delete_data, error, job).await;
@@ -190,14 +192,20 @@ pub(super) async fn finish(paths: &Paths) -> Result<(), Failure> {
         delete_data: deleting_data,
         expect_store: None,
     };
-    remove(&mut paths, &options).await?;
+    remove(
+        &mut paths,
+        &options,
+        "run the same `reviewq install` command again",
+    )
+    .await?;
     Ok(())
 }
 
 /// Removes everything but the Windows identity, under the caller's installation lock, and
 /// returns what it left in place, each already reported with the reason. Resumes an
-/// interrupted removal or data deletion.
-async fn remove(paths: &mut Paths, options: &Options) -> Result<Vec<Left>, Failure> {
+/// interrupted removal or data deletion. `again` is the step that finishes the command the
+/// user ran, for a checkout cleanup that leaves something for them.
+async fn remove(paths: &mut Paths, options: &Options, again: &str) -> Result<Vec<Left>, Failure> {
     let mut inventory = preflight(paths).await?;
     if let Some(expected) = &options.expect_store
         && inventory.store_id.as_deref() != Some(expected)
@@ -251,7 +259,7 @@ async fn remove(paths: &mut Paths, options: &Options) -> Result<Vec<Left>, Failu
     if store.identity().store_id.to_string() != expected {
         return Err("ReviewQ opened a different store while uninstalling.".into());
     }
-    let removed = crate::checkout_setup::remove_installation(&paths.profile, &store).await;
+    let removed = crate::checkout_setup::remove_installation(&paths.profile, &store, again).await;
     store
         .close(reviewq_store::SqliteStore::CLOSE_DEADLINE)
         .await?;
@@ -455,7 +463,18 @@ fn report_identity_kept(error: &Failure) {
     );
 }
 
-/// Reports `error`, in a desktop notification for the dashboard's job, and returns it.
+/// The command that finishes an uninstall the CLI or the dashboard's job started, named both
+/// by a checkout cleanup that left something for the user and by the job's failure notice.
+fn finishing(delete_data: bool) -> &'static str {
+    if delete_data {
+        "`reviewq uninstall --delete-data`"
+    } else {
+        "`reviewq uninstall`"
+    }
+}
+
+/// Reports `error`, in a desktop notification for the dashboard's job, and returns it. An
+/// unfinished checkout cleanup already ends with the step that finishes the uninstall.
 async fn failed(
     paths: &Paths,
     delete_data: bool,
@@ -463,17 +482,20 @@ async fn failed(
     job: bool,
 ) -> Result<(), Failure> {
     if job {
-        let next = if !paths::exists(&paths.launcher).unwrap_or(false) {
-            "`journalctl --user -u reviewq-uninstall` has the details."
-        } else if delete_data {
-            "Run `reviewq uninstall --delete-data` to finish."
+        let reason = error.to_string();
+        let body = if error.is::<crate::checkout_setup::Unfinished>() {
+            format!("ReviewQ couldn't finish uninstalling: {reason}")
         } else {
-            "Run `reviewq uninstall` to finish."
+            let next = if !paths::exists(&paths.launcher).unwrap_or(false) {
+                "`journalctl --user -u reviewq-uninstall` has the details.".to_owned()
+            } else {
+                format!("Run {} to finish.", finishing(delete_data))
+            };
+            format!(
+                "ReviewQ couldn't finish uninstalling: {}. {next}",
+                reason.trim_end_matches('.')
+            )
         };
-        let body = format!(
-            "ReviewQ couldn't finish uninstalling: {}. {next}",
-            error.to_string().trim_end_matches('.')
-        );
         notify(paths, &body).await;
     }
     Err(error)

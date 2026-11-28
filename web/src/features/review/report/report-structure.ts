@@ -290,9 +290,10 @@ function isSettled(row: Element, outcomes: number[]) {
 }
 
 // A plain table of up to three columns takes the panel's width (report.css picks the same
-// tables), so a long name in its body, such as a file path, may wrap after "/" or "_" at a
-// `wbr` instead of inside a word. This runs on annotated nodes, so each source text keeps its
-// one marker, which then holds the pieces and the wrap points between them.
+// tables), so a long name in its body, such as a file path, may wrap at a `wbr` after a
+// separator (nameBreaks) instead of inside a word. This runs on annotated nodes, so each
+// source text keeps its one marker, which then holds the pieces and the wrap points between
+// them.
 export function breakLongNames(node: RootContent): RootContent {
   if (node.type !== "element" || node.tagName !== "table" || !fitsPanel(node)) return node;
   return {
@@ -332,12 +333,15 @@ function breakNames(node: ElementContent): ElementContent[] {
   ]);
 }
 
-// Where a long name may wrap: after each "/" or "_" in a run of 24 or more characters without
-// a space, so it never breaks inside a word. A shorter name moves to the next line whole.
+// Where a long name may wrap: in a run of 24 or more characters without a space, after each
+// run of the separators "/", "_", "." and ":", never at the name's end. So `https://host`
+// wraps once after "//", `__init__.py` never between its underscores, and `store::grants`
+// after "::". A hyphen wraps without help. A shorter name moves to the next line whole.
 function nameBreaks(text: string) {
   const breaks: number[] = [];
   for (const run of text.matchAll(/\S{24,}/gu))
-    for (const mark of run[0].matchAll(/[/_](?!$)/g)) breaks.push(run.index + mark.index + 1);
+    for (const mark of run[0].matchAll(/[/_.:]+(?![/_.:]|$)/g))
+      breaks.push(run.index + mark.index + mark[0].length);
   return breaks;
 }
 
