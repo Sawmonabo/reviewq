@@ -70,6 +70,7 @@ pub(crate) fn profile(override_path: Option<PathBuf>) -> Result<PathBuf, Failure
 }
 
 pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failure> {
+    http::raise_open_files();
     let settings = runtime_settings::Settings::load(&profile, options.validation)?;
     let (browser_port, native_port) = settings.ports(options.port, options.native_port)?;
     let web = match options.web.as_ref() {

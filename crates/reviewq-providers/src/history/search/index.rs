@@ -445,7 +445,7 @@ fn cover_document(
             reference,
             offset,
             work.cancel,
-            false,
+            document::Reader::Index,
         ) {
             Ok(projection) => projection,
             Err(AppError::NotFound | AppError::Busy | AppError::Unavailable) => {

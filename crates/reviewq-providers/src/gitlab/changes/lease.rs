@@ -9,6 +9,7 @@ use reviewq_app::changes::{
     PatchBytes, PatchContent, PatchFile, PatchFileSelection, PatchPagePreview, PatchSourceTarget,
     PatchSourceWindow, SourcePage,
 };
+use reviewq_app::wait::{Place, Turn};
 use reviewq_domain::identity::MrIdentity;
 use tokio::sync::{Mutex, OnceCell, OwnedSemaphorePermit, Semaphore};
 
@@ -30,7 +31,7 @@ pub(super) struct Key {
     pub file: String,
 }
 
-#[derive(Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct IndexKey {
     pub source: MrIdentity,
     pub revision: String,
@@ -103,6 +104,10 @@ type IndexSlot = OnceCell<IndexedPage>;
 struct IndexLease {
     key: IndexKey,
     slot: Arc<IndexSlot>,
+    /// Held by the callers building the page or waiting for it; an index page is in use
+    /// while its place is held. A built page needs no place: dropping it from the list never
+    /// affects a caller already reading it.
+    place: Weak<OwnedSemaphorePermit>,
     used_at: Instant,
 }
 
@@ -119,7 +124,8 @@ pub(in crate::gitlab) struct Leases {
     scans: Arc<Mutex<VecDeque<IndexLease>>>,
     pub(super) flights: super::flights::Flights,
     pub(super) source_reads: Arc<Semaphore>,
-    /// One per file-index page in use, so a caller holding one always finds a page to reuse.
+    /// One per file-index page being built, so a caller holding one always finds a page to
+    /// reuse.
     scan_uses: Arc<Semaphore>,
 }
 
@@ -176,7 +182,7 @@ impl Leases {
                     .retain(|entry| entry.used_at.elapsed() < INACTIVITY || entry.in_use());
                 if let Some(scans) = scan_expiry.upgrade() {
                     scans.lock().await.retain(|scan| {
-                        scan.used_at.elapsed() < INACTIVITY || Arc::strong_count(&scan.slot) > 1
+                        scan.used_at.elapsed() < INACTIVITY || scan.place.strong_count() > 0
                     });
                 }
             }
@@ -221,43 +227,72 @@ impl Leases {
         });
     }
 
-    /// The slot of one file-index page, with the place it holds among `MAX_LEASES`, waiting
-    /// for a place when every page is being built or read. Keep the place while using the slot.
+    /// The slot of one file-index page. A built page answers at once, and a caller of a page
+    /// being built joins its builders' place; only a caller that starts a page waits for one
+    /// of `MAX_LEASES` places when every place is building a page. Keep the place while using
+    /// the slot.
     pub(super) async fn index(
         &self,
         key: IndexKey,
-    ) -> Result<(OwnedSemaphorePermit, Arc<IndexSlot>), AppError> {
-        let place = reviewq_app::wait::owned(self.scan_uses.clone()).await?;
+    ) -> Result<(Option<Place>, Arc<IndexSlot>), AppError> {
+        let mut turn = Turn::new(&self.scan_uses);
+        loop {
+            if let Some(found) = self.index_slot(&key, &mut turn).await? {
+                return Ok(found);
+            }
+            turn.wait().await?;
+        }
+    }
+
+    /// The page's slot and place, or `None` when it needs a place `turn` does not have.
+    async fn index_slot(
+        &self,
+        key: &IndexKey,
+        turn: &mut Turn,
+    ) -> Result<Option<(Option<Place>, Arc<IndexSlot>)>, AppError> {
         let mut scans = self.scans.lock().await;
         // The caller checks the current GitLab refs before every lookup. Retain only
         // bounded, fully verified REST pages under their original request identity.
         scans.retain(|scan| {
-            Arc::strong_count(&scan.slot) > 1
+            scan.place.strong_count() > 0
                 || (scan.slot.initialized()
                     && scan.used_at.elapsed() < INACTIVITY
                     && (scan.key.source != key.source || scan.key.revision == key.revision))
         });
-        if let Some(position) = scans.iter().position(|scan| scan.key == key) {
+        if let Some(position) = scans.iter().position(|scan| scan.key == *key) {
             let mut scan = scans.remove(position).ok_or(AppError::Internal)?;
-            let slot = scan.slot.clone();
             scan.used_at = Instant::now();
+            let place = if scan.slot.initialized() {
+                Some(None)
+            } else if let Some(place) = scan.place.upgrade() {
+                Some(Some(place))
+            } else {
+                // Its builders left before it was built; this caller builds it again.
+                turn.take().map(|place| {
+                    scan.place = Arc::downgrade(&place);
+                    Some(place)
+                })
+            };
+            let slot = scan.slot.clone();
             scans.push_back(scan);
-            return Ok((place, slot));
+            return Ok(place.map(|place| (place, slot)));
         }
+        let Some(place) = turn.take() else {
+            return Ok(None);
+        };
         if scans.len() == MAX_LEASES {
-            // The caller's place leaves at most `MAX_LEASES - 1` pages in use by others.
-            let unused = scans
-                .iter()
-                .position(|scan| Arc::strong_count(&scan.slot) == 1);
+            // The caller's place leaves at most `MAX_LEASES - 1` pages being built by others.
+            let unused = scans.iter().position(|scan| scan.place.strong_count() == 0);
             scans.remove(unused.ok_or(AppError::Internal)?);
         }
         let slot = Arc::new(OnceCell::new());
         scans.push_back(IndexLease {
-            key,
+            key: key.clone(),
             slot: slot.clone(),
+            place: Arc::downgrade(&place),
             used_at: Instant::now(),
         });
-        Ok((place, slot))
+        Ok(Some((Some(place), slot)))
     }
 
     // An index page already verified the neighboring bytes against the same refs.
@@ -428,3 +463,6 @@ impl SourceRead for &Body {
         PatchContent::read(*self, offset, length)
     }
 }
+
+#[cfg(test)]
+mod tests;

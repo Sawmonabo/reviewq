@@ -203,8 +203,12 @@ impl SqliteStore {
     ) -> Result<CacheWindow, StoreError> {
         let build = match self.display_builds.claim(&key, Lane::Cold)? {
             Claim::Started(build) => build,
-            Claim::Pending => return Ok(CacheWindow::Building),
-            Claim::Busy => return Err(AppError::Busy.into()),
+            // While the one cold build is another report's, the reader gets "building" at
+            // once, as for its own build, and uses the whole-document reader meanwhile;
+            // the request that next finds the build free starts this one. Waiting here would
+            // hold a window read for another report's whole parse, only to answer
+            // "building" too.
+            Claim::Pending | Claim::Busy => return Ok(CacheWindow::Building),
             Claim::Cooling => return Ok(CacheWindow::Fallback(DisplayFallback::CacheUnavailable)),
         };
 

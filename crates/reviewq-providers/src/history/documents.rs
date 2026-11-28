@@ -3,13 +3,13 @@
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::document::{Index, MAX_INDEX_BYTES, Query, SourcePages, Window};
 use reviewq_app::history::{FileContentRef, search::SourceObservation};
-use reviewq_app::wait;
+use reviewq_app::wait::{Place, Turn};
 use reviewq_domain::identity::ReportHash;
 use reviewq_domain::session::SessionTarget;
 use sha2::{Digest, Sha256};
@@ -25,7 +25,7 @@ type Handle = Arc<AsyncMutex<Option<Prepared>>>;
 
 pub(super) struct Documents {
     active: Arc<Mutex<HashMap<Key, Slot>>>,
-    /// One per document in use. A caller holds one while it holds a handle, so a caller that
+    /// One per document in use, shared by every caller of that document, so a caller that
     /// holds one always finds a free place or a document no one else is using.
     uses: Arc<Semaphore>,
     collect: AtomicBool,
@@ -41,49 +41,69 @@ impl Default for Documents {
     }
 }
 
-/// A document's handle, held in one of the places of `Documents`.
+/// A document's handle, with the document's place among `MAX_DOCUMENTS`. The handle is
+/// declared first, so it is let go of before the place.
 pub(super) struct Claim {
     pub(super) handle: Handle,
-    _use: OwnedSemaphorePermit,
+    _place: Place,
 }
 
 struct Slot {
     touched: Instant,
     handle: Handle,
+    /// Held by every claim of the document; it is in use while its place is held.
+    place: Weak<OwnedSemaphorePermit>,
 }
 
 impl Documents {
-    /// The handle of a document, waiting for a place when every document is in use.
+    /// The handle of a document. A caller of a document in use joins its place; a caller
+    /// of any other document waits for a place when every document is in use.
     pub(super) async fn claim(
         &self,
         target: SessionTarget,
         reference: FileContentRef,
     ) -> Result<Claim, AppError> {
-        let place = wait::owned(self.uses.clone()).await?;
-        self.slot(place, target, reference)
+        let key = (target, reference);
+        let mut turn = Turn::new(&self.uses);
+        loop {
+            if let Some(claim) = self.slot(&key, &mut turn)? {
+                return Ok(claim);
+            }
+            turn.wait().await?;
+        }
     }
 
-    /// The handle of a document when a place is free now; `Busy` otherwise. The background
-    /// search index skips a document then.
+    /// The handle of a document like `claim`, for a search on a blocking thread: it waits its
+    /// turn the same way and leaves once `stop` is set.
+    pub(super) fn claim_blocking(
+        &self,
+        target: SessionTarget,
+        reference: FileContentRef,
+        stop: &AtomicBool,
+    ) -> Result<Claim, AppError> {
+        let key = (target, reference);
+        let mut turn = Turn::new(&self.uses);
+        loop {
+            if let Some(claim) = self.slot(&key, &mut turn)? {
+                return Ok(claim);
+            }
+            turn.wait_blocking(stop)?;
+        }
+    }
+
+    /// The handle of a document in use or with a place free now; `Busy` otherwise. The
+    /// background search index skips a document then, leaving the places to callers.
     pub(super) fn try_claim(
         &self,
         target: SessionTarget,
         reference: FileContentRef,
     ) -> Result<Claim, AppError> {
-        let place = self
-            .uses
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| AppError::Busy)?;
-        self.slot(place, target, reference)
+        self.slot(&(target, reference), &mut Turn::new(&self.uses))?
+            .ok_or(AppError::Busy)
     }
 
-    fn slot(
-        &self,
-        place: OwnedSemaphorePermit,
-        target: SessionTarget,
-        reference: FileContentRef,
-    ) -> Result<Claim, AppError> {
+    /// The document's claim, or `None` when it needs a place `turn` does not have.
+    fn slot(&self, key: &Key, turn: &mut Turn) -> Result<Option<Claim>, AppError> {
         if !self.collect.swap(true, Ordering::Relaxed) {
             let owner = Arc::downgrade(&self.active);
             tokio::spawn(async move {
@@ -100,30 +120,51 @@ impl Documents {
         }
         let mut active = self.active.lock().map_err(|_| AppError::Internal)?;
         active.retain(|_, slot| alive(slot));
-        let key = (target, reference);
-        if !active.contains_key(&key) && active.len() >= MAX_DOCUMENTS {
+        if let Some(slot) = active.get_mut(key) {
+            let Some(place) = slot.place.upgrade().or_else(|| {
+                let place = turn.take()?;
+                slot.place = Arc::downgrade(&place);
+                Some(place)
+            }) else {
+                return Ok(None);
+            };
+            slot.touched = Instant::now();
+            return Ok(Some(Claim {
+                handle: slot.handle.clone(),
+                _place: place,
+            }));
+        }
+        let Some(place) = turn.take() else {
+            return Ok(None);
+        };
+        if active.len() >= MAX_DOCUMENTS {
+            // The caller's place leaves at most `MAX_DOCUMENTS - 1` documents in use by others.
             let oldest = active
                 .iter()
-                .filter(|(_, slot)| Arc::strong_count(&slot.handle) == 1)
+                .filter(|(_, slot)| slot.place.strong_count() == 0)
                 .min_by_key(|(_, slot)| slot.touched)
                 .map(|(key, _)| key.clone())
                 .ok_or(AppError::Internal)?;
             active.remove(&oldest);
         }
-        let slot = active.entry(key).or_insert_with(|| Slot {
-            touched: Instant::now(),
-            handle: Arc::default(),
-        });
-        slot.touched = Instant::now();
-        Ok(Claim {
-            handle: slot.handle.clone(),
-            _use: place,
-        })
+        let handle = Handle::default();
+        active.insert(
+            key.clone(),
+            Slot {
+                touched: Instant::now(),
+                handle: handle.clone(),
+                place: Arc::downgrade(&place),
+            },
+        );
+        Ok(Some(Claim {
+            handle,
+            _place: place,
+        }))
     }
 }
 
 fn alive(slot: &Slot) -> bool {
-    slot.touched.elapsed() < RETENTION || Arc::strong_count(&slot.handle) > 1
+    slot.touched.elapsed() < RETENTION || slot.place.strong_count() > 0
 }
 
 pub(super) struct Prepared {
@@ -253,3 +294,6 @@ fn native_span(
     }
     Ok(start..end)
 }
+
+#[cfg(test)]
+mod tests;

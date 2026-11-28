@@ -344,9 +344,11 @@ impl NativeHistoryReader for FileHistory {
                 .documents
                 .claim(session.target.clone(), reference.clone())
                 .await?;
-            let mut slot = claim.handle.clone().lock_owned().await;
+            let mut slot = reviewq_app::wait::within(claim.handle.clone().lock_owned()).await?;
             // The read may outlive this call when it is cancelled, so it keeps the place
-            // with the handle and gives both up together.
+            // with the handle and gives both up together. Only a search waits for a place or
+            // a document's lock while it holds a read slot, and one search runs at a time, so
+            // waiting here for a read slot while holding both cannot close a cycle.
             self.inspect(session, move |source, cancel| {
                 let read = documents::read(&mut slot, &source, &reference, query, cancel);
                 drop(slot);

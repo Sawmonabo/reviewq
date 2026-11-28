@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
 use reviewq_app::changes::{Discussion, DiscussionDraft, DiscussionScope};
-use reviewq_app::wait;
+use reviewq_app::wait::{Place, Turn};
 use reviewq_domain::identity::{EventCursor, MrIdentity};
 use tokio::sync::{OnceCell, OwnedSemaphorePermit, Semaphore};
 
@@ -15,8 +15,8 @@ const LIFETIME: Duration = Duration::from_secs(45);
 
 pub(in crate::gitlab) struct DiscussionCache {
     entries: Mutex<VecDeque<Entry>>,
-    /// One per caller using an observation, so a caller holding one always finds an
-    /// observation to replace when it needs a new one.
+    /// One per observation in use, so a caller holding one always finds an observation to
+    /// replace when it needs a new one.
     uses: Arc<Semaphore>,
 }
 
@@ -36,6 +36,8 @@ struct Entry {
     epoch: EventCursor,
     journal_head: EventCursor,
     observation: Arc<Observation>,
+    /// Held by every caller using the observation; it is in use while its place is held.
+    place: Weak<OwnedSemaphorePermit>,
 }
 
 pub(super) struct Observation {
@@ -43,14 +45,20 @@ pub(super) struct Observation {
     opened: Instant,
     expires: Instant,
     pages: Mutex<VecDeque<PageSlot>>,
-    /// One per page being read, so a reader holding one always finds a page to replace.
+    /// One per page being read from GitLab, so a reader holding one always finds a page to
+    /// replace.
     page_uses: Arc<Semaphore>,
     pub(super) drafts: OnceCell<Drafts>,
 }
 
+type PageCell = Arc<OnceCell<Option<Page>>>;
+
 struct PageSlot {
     address: (u32, u16),
-    value: Arc<OnceCell<Option<Page>>>,
+    value: PageCell,
+    /// Held by the callers reading the page from GitLab or waiting for it. A page already
+    /// read needs no place: dropping it from the list never affects a caller holding it.
+    place: Weak<OwnedSemaphorePermit>,
 }
 
 pub(super) struct Page {
@@ -70,26 +78,33 @@ pub(super) struct Drafts {
 }
 
 impl DiscussionCache {
-    /// The observation of `source`'s discussions in `scope`, with the place its caller holds
-    /// among `OBSERVATIONS`, waiting for a place when every observation is in use. Keep the
+    /// The observation of `source`'s discussions in `scope`, with its place among
+    /// `OBSERVATIONS`. A caller of an observation in use joins its place; a caller that needs
+    /// an observation no one is using waits for a place when every place is in use. Keep the
     /// place while using the observation.
     pub(super) async fn observe(
         &self,
         source: &MrIdentity,
         mr_id: Option<u64>,
         scope: &DiscussionScope,
-    ) -> Result<(OwnedSemaphorePermit, Arc<Observation>), AppError> {
-        let place = wait::owned(self.uses.clone()).await?;
-        let observation = self.find_or_open(source, mr_id, scope)?;
-        Ok((place, observation))
+    ) -> Result<(Place, Arc<Observation>), AppError> {
+        let mut turn = Turn::new(&self.uses);
+        loop {
+            if let Some(found) = self.find_or_open(source, mr_id, scope, &mut turn)? {
+                return Ok(found);
+            }
+            turn.wait().await?;
+        }
     }
 
+    /// The observation and its place, or `None` when it needs a place `turn` does not have.
     fn find_or_open(
         &self,
         source: &MrIdentity,
         mr_id: Option<u64>,
         scope: &DiscussionScope,
-    ) -> Result<Arc<Observation>, AppError> {
+        turn: &mut Turn,
+    ) -> Result<Option<(Place, Arc<Observation>)>, AppError> {
         let mut entries = self.entries.lock().map_err(|_| AppError::Internal)?;
         let now = Instant::now();
         entries.retain(|entry| entry.observation.expires > now);
@@ -107,22 +122,34 @@ impl DiscussionCache {
             {
                 return Err(AppError::CursorExpired);
             }
-            let mut entry = entries.remove(index).ok_or(AppError::Internal)?;
             if same {
-                entry.journal_head = entry.journal_head.max(scope.journal_head);
+                let mut entry = entries.remove(index).ok_or(AppError::Internal)?;
+                let place = entry.place.upgrade().or_else(|| {
+                    let place = turn.take()?;
+                    entry.place = Arc::downgrade(&place);
+                    Some(place)
+                });
+                if place.is_some() {
+                    entry.journal_head = entry.journal_head.max(scope.journal_head);
+                }
                 let observation = entry.observation.clone();
                 entries.push_back(entry);
-                return Ok(observation);
+                return Ok(place.map(|place| (place, observation)));
             }
         }
         if scope.observation.is_some() {
             return Err(AppError::CursorExpired);
         }
+        let Some(place) = turn.take() else {
+            return Ok(None);
+        };
+        // A newer scope replaces the source's observation; its callers keep their own copy.
+        entries.retain(|entry| entry.source != *source);
         while entries.len() >= OBSERVATIONS {
             // The caller's place leaves at most `OBSERVATIONS - 1` observations in use.
             let index = entries
                 .iter()
-                .position(|entry| Arc::strong_count(&entry.observation) == 1)
+                .position(|entry| entry.place.strong_count() == 0)
                 .ok_or(AppError::Internal)?;
             entries.remove(index);
         }
@@ -141,8 +168,9 @@ impl DiscussionCache {
             epoch: scope.epoch,
             journal_head: scope.journal_head,
             observation: observation.clone(),
+            place: Arc::downgrade(&place),
         });
-        Ok(observation)
+        Ok(Some((place, observation)))
     }
 
     pub(super) fn check(
@@ -207,31 +235,56 @@ impl DiscussionCache {
 }
 
 impl Observation {
-    /// The slot of one page, with the place its reader holds among `RETAINED_PAGES`, waiting
-    /// for a place when every page is being read. Keep the place while using the slot.
+    /// The slot of one page. A page already read answers at once, and a reader of a page
+    /// being read joins its readers' place; only a reader that starts a page waits for one of
+    /// `RETAINED_PAGES` places when every place is reading a page. Keep the place while using
+    /// the slot.
     pub(super) async fn page(
         &self,
         page: u32,
         limit: u16,
-    ) -> Result<(OwnedSemaphorePermit, Arc<OnceCell<Option<Page>>>), AppError> {
-        let place = wait::owned(self.page_uses.clone()).await?;
-        Ok((place, self.page_slot(page, limit)?))
+    ) -> Result<(Option<Place>, PageCell), AppError> {
+        let mut turn = Turn::new(&self.page_uses);
+        loop {
+            if let Some(found) = self.page_slot((page, limit), &mut turn)? {
+                return Ok(found);
+            }
+            turn.wait().await?;
+        }
     }
 
-    fn page_slot(&self, page: u32, limit: u16) -> Result<Arc<OnceCell<Option<Page>>>, AppError> {
+    /// The page's slot and place, or `None` when it needs a place `turn` does not have.
+    fn page_slot(
+        &self,
+        address: (u32, u16),
+        turn: &mut Turn,
+    ) -> Result<Option<(Option<Place>, PageCell)>, AppError> {
         let mut pages = self.pages.lock().map_err(|_| AppError::Internal)?;
-        pages.retain(|item| item.value.initialized() || Arc::strong_count(&item.value) > 1);
-        let address = (page, limit);
+        pages.retain(|item| item.value.initialized() || item.place.strong_count() > 0);
         if let Some(index) = pages.iter().position(|item| item.address == address) {
-            let item = pages.remove(index).ok_or(AppError::Internal)?;
+            let mut item = pages.remove(index).ok_or(AppError::Internal)?;
+            let place = if item.value.initialized() {
+                Some(None)
+            } else if let Some(place) = item.place.upgrade() {
+                Some(Some(place))
+            } else {
+                turn.take().map(|place| {
+                    item.place = Arc::downgrade(&place);
+                    Some(place)
+                })
+            };
             let slot = item.value.clone();
             pages.push_back(item);
-            return Ok(slot);
+            return Ok(place.map(|place| (place, slot)));
         }
+        let Some(place) = turn.take() else {
+            return Ok(None);
+        };
         if pages.len() == RETAINED_PAGES {
+            // The caller's place leaves at most `RETAINED_PAGES - 1` pages being read.
             let index = pages
                 .iter()
-                .position(|item| Arc::strong_count(&item.value) == 1)
+                .position(|item| item.place.strong_count() == 0)
                 .ok_or(AppError::Internal)?;
             pages.remove(index);
         }
@@ -239,8 +292,9 @@ impl Observation {
         pages.push_back(PageSlot {
             address,
             value: slot.clone(),
+            place: Arc::downgrade(&place),
         });
-        Ok(slot)
+        Ok(Some((Some(place), slot)))
     }
 
     pub(super) fn trim(&self) -> Result<(), AppError> {
