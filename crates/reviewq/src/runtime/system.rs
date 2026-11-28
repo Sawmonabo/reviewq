@@ -9,6 +9,7 @@ use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::system::{
     SystemControl, SystemFacts, SystemMode, SystemRefusal, UninstallStarted,
 };
+use tokio::sync::watch;
 
 use crate::install::{self, data::Folders, paths::Paths};
 use crate::service;
@@ -19,12 +20,19 @@ pub(super) struct System {
     installed: Option<Paths>,
     folders: Folders,
     data_folder: String,
+    /// The service's own shutdown, which SIGTERM also trips.
+    shutdown: watch::Sender<bool>,
 }
 
 impl System {
     /// The controls for a server on `profile`. `installed` holds the installation's paths
-    /// when this is the installed service.
-    pub(super) fn new(profile: &Path, validation: bool, installed: Option<Paths>) -> Self {
+    /// when this is the installed service; `shutdown` stops the server.
+    pub(super) fn new(
+        profile: &Path,
+        validation: bool,
+        installed: Option<Paths>,
+        shutdown: watch::Sender<bool>,
+    ) -> Self {
         let mode = if installed.is_some() {
             SystemMode::Installed
         } else if validation {
@@ -45,6 +53,7 @@ impl System {
             installed,
             folders,
             data_folder: display(profile),
+            shutdown,
         }
     }
 
@@ -104,7 +113,9 @@ impl SystemControl for System {
                 Ok((_, lock)) => lock,
                 Err(refusal) => return Ok(Err(refusal)),
             };
-            service::stop_without_waiting().await.map_err(failed)?;
+            // The listeners finish their open replies, this one included, and the process
+            // exits with status 0, which `Restart=on-failure` leaves stopped.
+            self.shutdown.send_replace(true);
             Ok(Ok(()))
         })
     }

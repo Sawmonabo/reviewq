@@ -10,8 +10,11 @@ use crate::install::{self, Failure, paths::Paths};
 use crate::{cli::Open, native_client, runtime, runtime_settings};
 
 const UNIT: &str = "reviewq.service";
-/// The socket unit that starts `reviewq.service` when the stopped page's Start is clicked.
+/// The start door's socket unit. Each connection to it starts one `reviewq start-door`.
 pub(crate) const START_SOCKET: &str = "reviewq-start.socket";
+/// An instance of the start door's per-connection template, named only to ask the user
+/// manager which file the template loads from.
+const START_DOOR_INSTANCE: &str = "reviewq-start@check.service";
 /// The transient service the dashboard's uninstall runs in, outside `reviewq.service`.
 pub(crate) const UNINSTALL_JOB: &str = "reviewq-uninstall";
 const CLAUDE_DEFAULT: &str = "UnsetEnvironment=CLAUDE_CONFIG_DIR";
@@ -22,12 +25,8 @@ pub(crate) fn unit(
     claude_config_dir: Option<&Path>,
 ) -> Result<Vec<u8>, Failure> {
     let mut text = std::fs::read_to_string(template)?;
+    replace_once(&mut text, "@executable@", &executable(paths)?)?;
     for (placeholder, key, value) in [
-        (
-            "@executable@",
-            "",
-            paths.profile.join("current/bin/reviewq"),
-        ),
         ("@home@", "HOME=", paths.home.clone()),
         (
             "@data@",
@@ -59,6 +58,11 @@ pub(crate) fn unit_has_claude_override(unit: &[u8]) -> bool {
         .any(|line| line == CLAUDE_DEFAULT.as_bytes())
 }
 
+/// The installed launcher's executable as a quoted unit argument, for every `ExecStart`.
+pub(crate) fn executable(paths: &Paths) -> Result<String, Failure> {
+    unit_arg("", &paths.profile.join("current/bin/reviewq"))
+}
+
 fn unit_arg(key: &str, path: &Path) -> Result<String, Failure> {
     let value = path
         .to_str()
@@ -86,10 +90,14 @@ pub(crate) async fn manager() -> Result<(), Failure> {
     Ok(())
 }
 
-/// Fails when the user manager loads ReviewQ's service or start socket from a file other
-/// than the one ReviewQ installs.
+/// Fails when the user manager loads ReviewQ's service, start socket or start door template
+/// from a file other than the one ReviewQ installs. An instance reports its template's file.
 pub(crate) async fn unit_location(paths: &Paths) -> Result<(), Failure> {
-    for (unit, path) in [(UNIT, &paths.unit), (START_SOCKET, &paths.start_socket)] {
+    for (unit, path) in [
+        (UNIT, &paths.unit),
+        (START_SOCKET, &paths.start_socket),
+        (START_DOOR_INSTANCE, &paths.start_door),
+    ] {
         let (success, location) =
             systemctl(&["show", unit, "--property=FragmentPath", "--value"], true).await?;
         if success && !location.is_empty() && Path::new(&location) != path {
@@ -136,10 +144,10 @@ pub(crate) async fn control(verb: &str, unit: &str) -> Result<(), Failure> {
     Ok(())
 }
 
-/// Asks the user manager to stop `reviewq.service` and returns without waiting for it, so a
-/// reply from the service itself can still leave.
-pub(crate) async fn stop_without_waiting() -> Result<(), Failure> {
-    systemctl(&["--no-block", "stop", UNIT], false).await?;
+/// Asks the user manager to start `reviewq.service` and returns without waiting. A start
+/// asked for while a stop runs is queued after it.
+pub(crate) async fn start_without_waiting() -> Result<(), Failure> {
+    systemctl(&["--no-block", "start", UNIT], false).await?;
     Ok(())
 }
 
@@ -212,8 +220,7 @@ pub(crate) async fn operate(start: bool) -> Result<(), Failure> {
 
 async fn ensure_running(paths: &Paths, record: &install::Release) -> Result<(), Failure> {
     runtime_settings::Settings::load(&paths.profile, false)?;
-    // The start socket must listen before the service starts, or the service never gets it.
-    if let Err(error) = install::repair_start_socket(paths).await {
+    if let Err(error) = install::start_door::repair(paths).await {
         eprintln!("ReviewQ's Start button may not work: {error}");
     }
     if !state().await?.1 {

@@ -16,7 +16,7 @@ mod files;
 mod managed;
 pub(crate) mod paths;
 mod retention;
-mod start_socket;
+pub(crate) mod start_door;
 pub(crate) mod uninstall;
 mod windows;
 use crate::{native_client, runtime_settings, service};
@@ -25,7 +25,6 @@ pub(crate) use managed::{Managed, StartupPermission};
 use paths::Paths;
 pub(crate) use retention::PREVIOUS_ASSETS;
 use service::StartupCheck;
-pub(crate) use start_socket::repair as repair_start_socket;
 
 pub(crate) type Failure = Box<dyn std::error::Error + Send + Sync>;
 
@@ -255,7 +254,7 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         Some(pending) => pending,
         None => {
             files::preflight(&paths, old, None)?;
-            start_socket::check(&paths)?;
+            start_door::check(&paths)?;
             bridge::check(&paths, old.is_some())?;
             if let Some(windows) = &next.windows {
                 windows.preflight(previous_windows.as_ref()).await?;
@@ -434,6 +433,11 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
             }
         }
     }
+    if next.windows.is_none() && reviewq_providers::WindowsDesktop::unreachable() {
+        println!(
+            "Windows unreachable from WSL, so ReviewQ set up no Windows desktop notifications. Retry install once /mnt/c is available."
+        );
+    }
     if next.claude.is_none() {
         println!("Claude Code unavailable. Set claudeCommand in runtime.json and retry install.");
     } else {
@@ -498,7 +502,7 @@ async fn activate(
     unit: &[u8],
     store_id: Option<&str>,
 ) -> Result<reviewq_transport::ServiceIdentity, Failure> {
-    start_socket::stop(paths).await?;
+    start_door::stop(paths).await?;
     if service::state().await?.1 {
         service::switch("stop").await?;
     }
@@ -507,7 +511,7 @@ async fn activate(
         return Err("The retained data changed during activation.".into());
     }
     files::set(paths, old, next, unit)?;
-    start_socket::write(paths)?;
+    start_door::write(paths)?;
     claude::activate(paths, old, next).await?;
     if let Some(windows) = &next.windows {
         let release = paths.profile.join("releases").join(&next.id);
@@ -515,8 +519,7 @@ async fn activate(
     }
     service::reload().await?;
     service::unit_location(paths).await?;
-    // The socket listens before the service starts, so the service is handed it.
-    start_socket::open().await;
+    start_door::open().await;
     // Only a first install turns on starting at login; an update keeps the user's choice.
     if old.is_none() {
         service::switch("enable").await?;
@@ -546,7 +549,7 @@ async fn rollback(
         Some(unit) => unit,
         None => verified_unit(paths, previous, &bundle)?,
     };
-    start_socket::stop(paths).await?;
+    start_door::stop(paths).await?;
     if service::state().await?.1 {
         service::switch("stop").await?;
     }
@@ -558,7 +561,7 @@ async fn rollback(
         return Err("The previous installation's retained store is missing or changed.".into());
     }
     files::set(paths, Some(&pending.next), previous, &unit)?;
-    start_socket::write(paths)?;
+    start_door::write(paths)?;
     if previous.claude.is_some() {
         let previous_paths = Paths {
             claude_home_is_explicit: service::unit_has_claude_override(&unit),
@@ -576,7 +579,7 @@ async fn rollback(
         windows.remove().await?;
     }
     service::reload().await?;
-    start_socket::open().await;
+    start_door::open().await;
     service::switch(if pending.was_enabled {
         "enable"
     } else {

@@ -61,7 +61,7 @@ pub trait SystemControl: Send + Sync {
     /// the state read back from systemd.
     fn set_start_at_login(&self, enabled: bool) -> AppFuture<'_, Result<bool, SystemRefusal>>;
 
-    /// Asks systemd to stop the service without waiting, so the reply leaves first.
+    /// Stops the service: it finishes its open replies, this one included, then exits.
     fn quit(&self) -> AppFuture<'_, Result<(), SystemRefusal>>;
 
     /// Checks that an uninstall can run, then starts it as a job outside the service, which

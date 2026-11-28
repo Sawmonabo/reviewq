@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 use reviewq_domain::identity::{GitSha, NotificationId, ProjectId, SubmissionId};
 
-use crate::{checkout_setup, install, native_client, runtime, service};
+use crate::{checkout_setup, install, native_client, runtime, service, start_door};
 
 mod action;
 mod workflow;
@@ -85,6 +85,9 @@ enum Command {
     Checkout(Checkout),
     #[command(subcommand, hide = true)]
     Internal(Internal),
+    /// Answer one connection to the start door; run by `reviewq-start@.service`.
+    #[command(hide = true)]
+    StartDoor,
 }
 
 #[derive(Subcommand)]
@@ -185,11 +188,6 @@ pub(crate) struct Open {
 
 pub(crate) fn run() -> Result<(), Failure> {
     let options = CommandLine::parse();
-    // Taken before the runtime starts any thread, since taking it edits the environment.
-    let start_door = match &options.command {
-        Some(Command::Serve(serve)) if serve.managed => runtime::start_door::take(),
-        _ => None,
-    };
     let mut runtime = if matches!(options.command, Some(Command::Serve(_))) {
         let mut runtime = tokio::runtime::Builder::new_multi_thread();
         runtime.worker_threads(2);
@@ -197,16 +195,10 @@ pub(crate) fn run() -> Result<(), Failure> {
     } else {
         tokio::runtime::Builder::new_current_thread()
     };
-    runtime
-        .enable_all()
-        .build()?
-        .block_on(execute(options, start_door))
+    runtime.enable_all().build()?.block_on(execute(options))
 }
 
-async fn execute(
-    options: CommandLine,
-    start_door: Option<std::net::TcpListener>,
-) -> Result<(), Failure> {
+async fn execute(options: CommandLine) -> Result<(), Failure> {
     if options.profile.is_some()
         && matches!(
             options.command,
@@ -247,7 +239,7 @@ async fn execute(
                 (None, Some(root)) => root.clone(),
                 (profile, None) => runtime::profile(profile)?,
             };
-            runtime::serve(profile, serve, start_door).await
+            runtime::serve(profile, serve).await
         }
         Some(Command::Status) => native_client::status(&runtime::profile(options.profile)?).await,
         Some(Command::Refresh) => native_client::refresh(&runtime::profile(options.profile)?).await,
@@ -336,6 +328,7 @@ async fn execute(
             )
             .await
         }
+        Some(Command::StartDoor) => start_door::run().await,
         Some(Command::Open(open)) => service::open(options.profile, open).await,
         None => service::open(options.profile, Open::default()).await,
     }

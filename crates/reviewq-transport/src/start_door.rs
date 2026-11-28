@@ -1,8 +1,8 @@
-//! The start door's answer. While ReviewQ is stopped, systemd holds the start port and a
-//! connection to it starts the service; the service then answers on that port. Only the
-//! stopped page's Start button counts as a start: a `POST /start` addressed to the start port
-//! from the dashboard's own origin. It sends no CORS headers, since the page sends the request
-//! with `mode: "no-cors"` and never reads the answer.
+//! The start door's answer. systemd holds the start port and runs one small door process for
+//! each connection, which answers with this router and starts the service on a valid start.
+//! Only the stopped page's Start button counts as a start: a `POST /start` addressed to the
+//! start port from the dashboard's own origin. It sends no CORS headers, since the page sends
+//! the request with `mode: "no-cors"` and never reads the answer.
 
 use axum::Router;
 use axum::http::{HeaderMap, Method, StatusCode, Uri, header};

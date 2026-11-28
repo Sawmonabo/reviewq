@@ -163,6 +163,11 @@ pub(crate) fn start_port(browser: u16) -> Option<u16> {
     browser.checked_add(START_PORT_OFFSET)
 }
 
+/// The browser port whose start door is `start`, the inverse of [`start_port`].
+pub(crate) fn browser_port(start: u16) -> Option<u16> {
+    start.checked_sub(START_PORT_OFFSET)
+}
+
 fn valid_command(value: &str) -> bool {
     let path = Path::new(value);
     !value.is_empty()

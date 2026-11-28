@@ -290,18 +290,29 @@
           }
         }
 
-        async function start() {
-          show("starting");
-          const sent = fetch(startUrl, {
+        function request() {
+          return fetch(startUrl, {
             method: "POST",
             mode: "no-cors",
-            signal: AbortSignal.timeout(5000),
+            signal: AbortSignal.timeout(2500),
           }).then(
             () => true,
             () => false,
           );
+        }
+
+        async function start() {
+          show("starting");
+          // While ReviewQ is still shutting down after a Quit, systemd ignores a start. The
+          // request repeats every three seconds until the dashboard answers, so none is lost.
+          let reached = false;
+          let asked = 0;
           const deadline = Date.now() + 30000;
           while (Date.now() < deadline) {
+            if (Date.now() >= asked + 3000) {
+              asked = Date.now();
+              void request().then((sent) => (reached ||= sent));
+            }
             if (await running()) {
               if (location.pathname === "/stopped.html") location.replace("/");
               else location.reload();
@@ -309,7 +320,7 @@
             }
             await new Promise((resolve) => setTimeout(resolve, 500));
           }
-          show((await sent) ? "nostart" : "unreached");
+          show(reached ? "nostart" : "unreached");
         }
 
         show(document.documentElement.dataset.door === "on" ? "idle" : "off");

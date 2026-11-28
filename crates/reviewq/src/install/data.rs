@@ -155,11 +155,14 @@ impl Folders {
         Ok((found, passed))
     }
 
-    /// The total size of the owned data, counting files only and never following a link.
+    /// The total size of what a deletion would remove, counting files only and never
+    /// following a link. A folder removed only when empty adds nothing.
     pub(crate) fn size(&self) -> Option<u64> {
         let mut total = 0_u64;
-        for (path, _) in self.present().ok()?.0 {
-            total = total.checked_add(tree_size(&path).ok()?)?;
+        for (path, rule) in self.present().ok()?.0 {
+            if !matches!(rule, Name::EmptyFolder(_)) {
+                total = total.checked_add(tree_size(&path).ok()?)?;
+            }
         }
         Some(total)
     }

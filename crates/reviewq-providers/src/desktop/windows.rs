@@ -56,6 +56,11 @@ impl WindowsDesktop {
         windows_tool().is_some()
     }
 
+    /// Whether this is WSL but Windows cannot be reached from it, as without `/mnt/c`.
+    pub fn unreachable() -> bool {
+        wsl() && windows_tool().is_none()
+    }
+
     pub fn new(owner: String) -> Option<Self> {
         if owner.len() != 64 || !owner.bytes().all(|ch| ch.is_ascii_hexdigit()) {
             return None;
@@ -226,8 +231,11 @@ async fn send_to_powershell(mut child: Child, input: &str) -> io::Result<ExitSta
 
 fn windows_tool() -> Option<PathBuf> {
     let windows = PathBuf::from("/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe");
-    (windows.is_file()
-        && std::fs::read_to_string("/proc/sys/kernel/osrelease")
-            .is_ok_and(|release| release.to_ascii_lowercase().contains("wsl")))
-    .then_some(windows)
+    (windows.is_file() && wsl()).then_some(windows)
+}
+
+/// Whether this Linux runs on a WSL kernel.
+fn wsl() -> bool {
+    std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .is_ok_and(|release| release.to_ascii_lowercase().contains("wsl"))
 }

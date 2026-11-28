@@ -17,7 +17,7 @@ use tokio::process::Command;
 use super::{
     Failure, Inventory, bundle, claude, codex_hook, data, files, journal, load, native_command,
     paths::{self, Paths},
-    probe, refused, retention, start_socket,
+    probe, refused, retention, start_door,
 };
 use crate::{runtime_settings, service};
 
@@ -31,8 +31,8 @@ pub(crate) struct Options {
 }
 
 /// The checks an uninstall makes before it changes anything: no activation is pending, and
-/// while ReviewQ is installed its service unit and start socket on disk are the installed
-/// ones. Returns the install journal. Reads whether the unit overrides Claude's home into
+/// while ReviewQ is installed its service unit on disk is the installed one and its start
+/// door files are ReviewQ's. Returns the install journal. Reads whether the unit overrides Claude's home into
 /// `paths`.
 async fn preflight(paths: &mut Paths) -> Result<Inventory, Failure> {
     let inventory = load(paths)?;
@@ -50,7 +50,7 @@ async fn preflight(paths: &mut Paths) -> Result<Inventory, Failure> {
             }
             paths.claude_home_is_explicit = service::unit_has_claude_override(&unit);
         }
-        start_socket::check(paths)?;
+        start_door::check(paths)?;
     }
     Ok(inventory)
 }
@@ -197,7 +197,7 @@ async fn remove(paths: &mut Paths, options: &Options) -> Result<Vec<String>, Fai
         return Ok(kept);
     };
     // Nothing may start the service while it is being removed.
-    start_socket::retire(paths).await?;
+    start_door::retire(paths).await?;
     if inventory.removal_stage.is_none() {
         inventory.removal_stage = Some(files::reserve_removal(paths)?);
         inventory.removing = true;
@@ -236,7 +236,7 @@ async fn remove(paths: &mut Paths, options: &Options) -> Result<Vec<String>, Fai
         conflicts = files::remove(paths, &active, &inventory.known, removal)?;
     }
     if conflicts.is_empty() {
-        start_socket::remove(paths)?;
+        start_door::remove(paths)?;
     }
     service::reload().await?;
     if !conflicts.is_empty() {

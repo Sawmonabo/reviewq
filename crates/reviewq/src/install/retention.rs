@@ -566,6 +566,7 @@ mod tests {
             launcher: home.join("bin/reviewq"),
             unit: home.join("config/systemd/user/reviewq.service"),
             start_socket: home.join("config/systemd/user/reviewq-start.socket"),
+            start_door: home.join("config/systemd/user/reviewq-start@.service"),
             codex_home: home.join("codex"),
             claude_home: home.join("claude"),
             claude_home_is_explicit: false,

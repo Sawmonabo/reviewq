@@ -19,6 +19,8 @@ pub(crate) struct Paths {
     pub launcher: PathBuf,
     pub unit: PathBuf,
     pub start_socket: PathBuf,
+    /// `reviewq-start@.service`, the template each start door connection runs.
+    pub start_door: PathBuf,
     pub codex_home: PathBuf,
     pub claude_home: PathBuf,
     pub claude_home_is_explicit: bool,
@@ -58,6 +60,7 @@ impl Paths {
             config: config_home.join("reviewq"),
             unit: config_home.join("systemd/user/reviewq.service"),
             start_socket: config_home.join("systemd/user/reviewq-start.socket"),
+            start_door: config_home.join("systemd/user/reviewq-start@.service"),
             state: state_home.join("reviewq"),
             home,
             config_home,

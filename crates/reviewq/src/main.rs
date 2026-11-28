@@ -9,6 +9,7 @@ mod profile_config;
 mod runtime;
 mod runtime_settings;
 mod service;
+mod start_door;
 
 fn main() -> ExitCode {
     match cli::run() {
