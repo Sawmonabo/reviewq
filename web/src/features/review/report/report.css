@@ -311,6 +311,24 @@
   --thread-heading: var(--text);
   --thread-link: var(--link);
 }
+/* A plain table of up to three columns, such as the one in "What changes across the MR", takes
+   the panel's width and its columns share it, so it never scrolls sideways. A long name in its
+   body wraps after "/" or "_" (breakLongNames in report-structure.ts picks the same tables). A
+   table of four or more columns keeps its own width and scrolls, and the Before/After and
+   previous-threads tables keep their own layout below. */
+.report-authored
+  .prose
+  > .table-scroll
+  > table:not(.report-before-after, .report-previous-threads):not(:has(:is(th, td):nth-child(4))) {
+  width: 100%;
+}
+.report-authored
+  .prose
+  > .table-scroll
+  > table:not(.report-before-after, .report-previous-threads):not(:has(:is(th, td):nth-child(4)))
+  :is(th, td) {
+  max-width: none;
+}
 .report-authored .table-scroll:has(> .report-before-after) {
   margin-block: 0;
   overflow-x: clip;

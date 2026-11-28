@@ -1,6 +1,6 @@
 import type { DrawingHint } from "../../../api/generated/contracts/common";
 import type { Element, Root, RootContent } from "hast";
-import { reportStructure, reportText as text } from "./report-structure";
+import { breakLongNames, reportStructure, reportText as text } from "./report-structure";
 import type { AcceptedFindingChange } from "./report-structure";
 
 type Field = { readonly label: string; readonly nodes: readonly RootContent[] };
@@ -100,7 +100,7 @@ export function reportBlocks(
     return {
       offset: group.offset,
       end: groups[index + 1]?.offset ?? source.length,
-      nodes: finding ? [] : annotate(group.items),
+      nodes: finding ? [] : authored(group.items),
       ...(group.name && { name: group.name }),
       ...(finding && { finding, findingId: finding.id }),
     };
@@ -199,24 +199,45 @@ function sourcePoint(source: string, range: Range, boundary: "start" | "end") {
       ? container
       : boundaryLeaf(container.childNodes[boundary === "start" ? offset : offset - 1], boundary);
   if (!leaf || !range.intersectsNode(leaf)) return;
+  // A marker holds one source text, which a table may split at wrap points (breakLongNames).
   const marker = leaf.parentElement?.closest<HTMLElement>("[data-report-text-start]");
-  if (!marker || marker.firstChild !== leaf || marker.lastChild !== leaf) return;
+  if (
+    !marker ||
+    leaf.parentNode !== marker ||
+    ![...marker.childNodes].every((node) => node instanceof Text || isWrapPoint(node))
+  )
+    return;
   const sourceStart = Number(marker.dataset.reportTextStart);
   const sourceEnd = Number(marker.dataset.reportTextEnd);
   if (!Number.isSafeInteger(sourceStart) || !Number.isSafeInteger(sourceEnd)) return;
-  const rendered = leaf.data;
-  const length = container === leaf ? offset : boundary === "start" ? 0 : rendered.length;
+  const rendered = marker.textContent;
+  let length = container === leaf ? offset : boundary === "start" ? 0 : leaf.length;
+  for (let piece = leaf.previousSibling; piece; piece = piece.previousSibling)
+    length += piece.textContent?.length ?? 0;
   if (source.slice(sourceStart, sourceEnd) === rendered) return sourceStart + length;
   if (length === 0) return sourceStart;
   if (length === rendered.length) return sourceEnd;
 }
 
-function boundaryLeaf(branch: ChildNode | undefined, direction: "start" | "end") {
+function boundaryLeaf(
+  branch: ChildNode | null | undefined,
+  direction: "start" | "end",
+): Text | undefined {
+  // A boundary beside a wrap point is the edge of the text on its other side.
+  if (branch && isWrapPoint(branch))
+    return boundaryLeaf(
+      direction === "start" ? branch.nextSibling : branch.previousSibling,
+      direction,
+    );
   if (branch instanceof Text) return branch;
   if (!branch) return;
   const walker = document.createTreeWalker(branch, NodeFilter.SHOW_TEXT);
   const text = direction === "start" ? walker.nextNode() : walker.lastChild();
   return text instanceof Text ? text : undefined;
+}
+
+function isWrapPoint(node: Node) {
+  return node instanceof HTMLElement && node.localName === "wbr";
 }
 
 export function parentElement(node: Node) {
@@ -287,8 +308,8 @@ function authoredFinding(
     id,
     ...(change ? { change } : {}),
     ...card,
-    header: annotate(lead),
-    fields: fields.map(({ label, nodes }) => ({ label, nodes: annotate(nodes) })),
+    header: authored(lead),
+    fields: fields.map(({ label, nodes }) => ({ label, nodes: authored(nodes) })),
   };
 }
 
@@ -329,6 +350,11 @@ function stripPrefix(heading: Element, length: number, source: string): RootCont
         ]
       : [];
   return [{ ...heading, children: [...remainder, ...others] }];
+}
+
+// Report content with its source markers and its tables' wrap points.
+function authored(nodes: readonly RootContent[]) {
+  return annotate(nodes).map(breakLongNames);
 }
 
 export function annotate(nodes: readonly RootContent[]) {

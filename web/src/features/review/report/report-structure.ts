@@ -289,6 +289,58 @@ function isSettled(row: Element, outcomes: number[]) {
   });
 }
 
+// A plain table of up to three columns takes the panel's width (report.css picks the same
+// tables), so a long name in its body, such as a file path, may wrap after "/" or "_" at a
+// `wbr` instead of inside a word. This runs on annotated nodes, so each source text keeps its
+// one marker, which then holds the pieces and the wrap points between them.
+export function breakLongNames(node: RootContent): RootContent {
+  if (node.type !== "element" || node.tagName !== "table" || !fitsPanel(node)) return node;
+  return {
+    ...node,
+    children: node.children.flatMap((part) =>
+      part.type === "element" && part.tagName === "tbody" ? breakNames(part) : [part],
+    ),
+  };
+}
+
+function fitsPanel(table: Element) {
+  const name = table.properties.className;
+  if (
+    Array.isArray(name) &&
+    name.some((own) => own === "report-before-after" || own === "report-previous-threads")
+  )
+    return false;
+  return table.children.every(
+    (part) =>
+      part.type !== "element" ||
+      part.children.every(
+        (row) =>
+          row.type !== "element" ||
+          row.children.filter((cell) => cell.type === "element").length <= 3,
+      ),
+  );
+}
+
+function breakNames(node: ElementContent): ElementContent[] {
+  if (node.type === "element") return [{ ...node, children: node.children.flatMap(breakNames) }];
+  if (node.type !== "text") return [node];
+  const cuts = nameBreaks(node.value);
+  if (!cuts.length) return [node];
+  return [0, ...cuts].flatMap((cut, index, all) => [
+    ...(index ? [element("wbr", "", [])] : []),
+    literal(node.value.slice(cut, all[index + 1])),
+  ]);
+}
+
+// Where a long name may wrap: after each "/" or "_" in a run of 24 or more characters without
+// a space, so it never breaks inside a word. A shorter name moves to the next line whole.
+function nameBreaks(text: string) {
+  const breaks: number[] = [];
+  for (const run of text.matchAll(/\S{24,}/gu))
+    for (const mark of run[0].matchAll(/[/_](?!$)/g)) breaks.push(run.index + mark.index + 1);
+  return breaks;
+}
+
 function twoColumnBody(table: Element) {
   const body = table.children.find(
     (child) => child.type === "element" && child.tagName === "tbody",
