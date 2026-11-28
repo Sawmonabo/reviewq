@@ -75,8 +75,9 @@ export async function deliver($, state, offer) {
     turns: new Set(),
   };
   state.delivery = attempt;
-  if (!canSend(state) || await $.session.id() !== state.id) {
-    await defer($, state, attempt, `draft ${!!state.draft}, phase ${phaseOf(state)}`);
+  const sameSession = await $.session.id() === state.id;
+  if (!canSend(state) || !sameSession) {
+    await defer($, state, attempt, `linked ${state.linked}, draft ${!!state.draft}, phase ${phaseOf(state)}, same session ${sameSession}`);
     return;
   }
   const prior = await $.session.messages({ last: 1 });

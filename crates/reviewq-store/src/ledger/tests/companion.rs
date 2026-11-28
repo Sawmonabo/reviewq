@@ -4,10 +4,12 @@
 
 use std::time::Duration;
 
-use reviewq_app::access::AppError;
+use reviewq_app::access::{Actor, AppError};
+use reviewq_app::history::FilePosition;
 use reviewq_app::hosts::{
-    ClaudeClassicEvent, ClaudeHeartbeat, ClaudeHost, ClaudeStore, ClaudeTurnResult,
-    ClaudeWorkflowStore, HostActivity, HostPhase,
+    ClaudeAnchor, ClaudeClassicEvent, ClaudeHeartbeat, ClaudeHost, ClaudeStore, ClaudeTurnResult,
+    ClaudeWorkflowStore, HostActivity, HostPhase, LeadStore, MessageBody, MessagePurpose,
+    SubmitMessage,
 };
 
 use reviewq_domain::session::LeadTarget;
@@ -52,6 +54,36 @@ pub(super) async fn restarted_companion(store: &SqliteStore) {
         .await
         .unwrap();
     assert_eq!(shown(store).await, ("idle".into(), None));
+    // A message admitted for the idle lead is offered to its companion and authorized at the
+    // end of the conversation, under the offer's fence.
+    let message = SubmitMessage {
+        target: lead.clone(),
+        submission_id: "00000000-0000-4000-8000-000000000001".parse().unwrap(),
+        text: MessageBody::new("hello").unwrap(),
+        purpose: MessagePurpose::User,
+        report_ref: None,
+    };
+    let admitted = store.admit_message(Actor::local_operator(), message);
+    admitted.await.unwrap();
+    let offer = store.offer_claude_delivery(lead.clone(), zero.clone());
+    let offer = offer.await.unwrap().unwrap();
+    let file = FilePosition {
+        offset: 7,
+        high_water: 7,
+        witness: [0; 32],
+    };
+    let anchor = ClaudeAnchor {
+        source_generation: "a".repeat(64),
+        file,
+    };
+    let authorized =
+        store.authorize_claude_delivery(lead.clone(), offer.clone(), anchor.clone(), None);
+    authorized.await.unwrap();
+    let send = store.claude_delivery(lead.clone(), offer).await.unwrap();
+    assert_eq!(send.anchor, Some(anchor));
+    sql(store, "DELETE FROM claude_deliveries").await;
+    sql(store, "DELETE FROM outbox").await;
+    sql(store, "DELETE FROM messages").await;
     // A host on an earlier boot is proven dead, so a newer generation takes over at once, and
     // a prompt stored meanwhile binds to the running turn it reports, with one alert.
     sql(store, "UPDATE claude_companions SET seen_at_ms=1000").await;

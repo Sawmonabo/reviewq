@@ -117,11 +117,17 @@ pub(crate) async fn claude_bridge(
         let detail = match operation {
             ClaudeBridgeOperation::Action => action_refusal(true, &body),
             ClaudeBridgeOperation::ActionStatus => action_refusal(false, &body),
+            ClaudeBridgeOperation::DeliveryCheck => {
+                return Err(refused("ReviewQ did not authorize this delivery", &body).into());
+            }
             _ => match status.as_u16() {
                 404 => "This Claude session has no verified ReviewQ binding.",
                 409 => "Another ReviewQ companion owns this Claude session.",
                 412 => "Reload the ReviewQ plugin in this Claude session.",
-                _ => return Err(unrecorded(&body).into()),
+                _ => {
+                    let what = "ReviewQ could not record this Claude session observation";
+                    return Err(refused(what, &body).into());
+                }
             },
         };
         return Err(detail.into());
@@ -173,11 +179,8 @@ async fn post(
     Ok((status, bounded(response, 256 * 1024).await?))
 }
 
-/// What the model reads when ReviewQ refuses `review_action`, from the refusal's error code:
-/// a declaration when `declare`, else a reconcile. A refused declaration stores nothing.
-/// The refusal of an observation the service did not record, with the service's own reason so
-/// a debug log shows which check failed.
-fn unrecorded(reply: &[u8]) -> String {
+/// `what` the service refused, with the error class it answered, for a debug log.
+fn refused(what: &str, reply: &[u8]) -> String {
     #[derive(Deserialize)]
     struct Refusal {
         error: Reason,
@@ -188,11 +191,13 @@ fn unrecorded(reply: &[u8]) -> String {
     }
     let reason = serde_json::from_slice::<Refusal>(reply).map(|refusal| refusal.error.message);
     match reason {
-        Ok(reason) => format!("ReviewQ could not record this Claude session observation: {reason}"),
-        Err(_) => "ReviewQ could not record this Claude session observation.".to_owned(),
+        Ok(reason) => format!("{what}: {reason}"),
+        Err(_) => format!("{what}."),
     }
 }
 
+/// What the model reads when ReviewQ refuses `review_action`, from the refusal's error code:
+/// a declaration when `declare`, else a reconcile. A refused declaration stores nothing.
 fn action_refusal(declare: bool, reply: &[u8]) -> &'static str {
     #[derive(Deserialize)]
     struct Refusal {
