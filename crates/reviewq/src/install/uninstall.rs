@@ -142,7 +142,11 @@ pub(crate) async fn uninstall(options: Options) -> Result<(), Failure> {
     let delete_data = options.delete_data || load(&paths).is_ok_and(|record| record.deleting_data);
     let mut left = match remove(&mut paths, &options).await {
         Ok(left) => left,
-        Err(error) => return failed(&paths, delete_data, error, job).await,
+        Err(error) => {
+            let failure = failed(&paths, delete_data, error, job).await;
+            retire_windows_if_removed(&paths).await;
+            return failure;
+        }
     };
     // Sent while the Windows identity is still registered, so it shows on Windows.
     let noticed = job && !left.is_empty();
@@ -306,12 +310,19 @@ async fn remove(paths: &mut Paths, options: &Options) -> Result<Vec<Left>, Failu
 /// this record does not name. Holds the store's own lock first, which proves nothing still
 /// has the data open, and refuses a store other than `expected`. Only then marks the record
 /// as deleting, so an interrupted deletion resumes and a refused one keeps the data. Deletes
-/// the record last; while a Windows identity is left, the record keeps only that.
+/// the record last; while a Windows identity is left, the record keeps only that. A refusal
+/// of a deletion an earlier attempt began says that nothing more was deleted.
 fn delete_data(paths: &Paths, expected: Option<&str>) -> Result<Vec<Left>, Failure> {
+    let mut record = load(paths)?;
+    let nothing = if record.deleting_data {
+        "nothing more was deleted"
+    } else {
+        "nothing was deleted"
+    };
     for installed in [&paths.unit, &paths.launcher] {
         if paths::exists(installed)? {
             return Err(refused(format!(
-                "ReviewQ still looks installed, since {} exists, but {} records no installation, so nothing was deleted. Run `reviewq uninstall --delete-data` with the XDG_STATE_HOME ReviewQ was installed with.",
+                "ReviewQ still looks installed, since {} exists, but {} records no installation, so {nothing}. Run `reviewq uninstall --delete-data` with the XDG_STATE_HOME ReviewQ was installed with.",
                 installed.display(),
                 journal(paths).display()
             )));
@@ -322,7 +333,7 @@ fn delete_data(paths: &Paths, expected: Option<&str>) -> Result<Vec<Left>, Failu
         // ReviewQ is already removed here, so no `reviewq` command is left to run again.
         let held = SqliteStore::hold_stopped(&database)?.ok_or_else(|| {
             refused(format!(
-                "Another ReviewQ process, such as `reviewq serve`, still has the data open, so nothing was deleted. Stop it, then delete {} yourself.",
+                "Another ReviewQ process, such as `reviewq serve`, still has the data open, so {nothing}. Stop it, then delete {} yourself.",
                 folders(paths)
             ))
         })?;
@@ -330,7 +341,7 @@ fn delete_data(paths: &Paths, expected: Option<&str>) -> Result<Vec<Left>, Failu
             && identity.store_id.to_string() != expected
         {
             return Err(refused(format!(
-                "The data folder holds a different store than the one ReviewQ installed, so nothing was deleted. If you no longer need it, delete {} yourself.",
+                "The data folder holds a different store than the one ReviewQ installed, so {nothing}. If you no longer need it, delete {} yourself.",
                 folders(paths)
             )));
         }
@@ -338,7 +349,6 @@ fn delete_data(paths: &Paths, expected: Option<&str>) -> Result<Vec<Left>, Failu
     } else {
         None
     };
-    let mut record = load(paths)?;
     record.deleting_data = true;
     paths::write_json(&journal(paths), &record)?;
     let windows_left = record.windows_left;
@@ -386,7 +396,7 @@ fn report(deletion: data::Deletion) -> Vec<Left> {
 
 /// Removes the Windows notification identity an uninstall left registered, last of all, and
 /// returns what it left. When Windows cannot remove it, the record keeps it, so the next
-/// uninstall tries again and the next install adopts it. Otherwise a record left with
+/// install reuses it and an uninstall run again removes it. Otherwise a record left with
 /// nothing in it is deleted, which `--delete-data` reports with the folders it leaves empty.
 async fn retire_windows(paths: &Paths, delete_data: bool) -> Result<Vec<Left>, Failure> {
     let mut inventory = load(paths)?;
@@ -394,9 +404,7 @@ async fn retire_windows(paths: &Paths, delete_data: bool) -> Result<Vec<Left>, F
         return Ok(Vec::new());
     };
     if let Err(error) = windows.remove().await {
-        eprintln!(
-            "ReviewQ could not remove its Windows notification identity Personal.ReviewQ: {error} Run `reviewq uninstall` again to retry."
-        );
+        report_identity_kept(&error);
         return Ok(vec![Left {
             name: "the Windows notification identity Personal.ReviewQ".into(),
             failed: true,
@@ -412,6 +420,37 @@ async fn retire_windows(paths: &Paths, delete_data: bool) -> Result<Vec<Left>, F
     std::fs::remove_file(journal(paths))?;
     paths::sync(&paths.state)?;
     Ok(Vec::new())
+}
+
+/// After a failure, removes the Windows notification identity when ReviewQ itself is already
+/// gone, as a refused data deletion leaves it: no launcher is left to run `reviewq uninstall`
+/// again, and the refusal tells the user to delete the folders by hand. Runs after the failure
+/// notice, which needs the identity. Only the record's left identity is touched, as a
+/// keep-data uninstall does, and only while neither the unit nor the launcher exists and the
+/// record names no installation, activation or removal in progress: another installation's
+/// identity, and one an interrupted first install still owns, stay. A failure here is
+/// reported and the caller's failure is returned unchanged.
+async fn retire_windows_if_removed(paths: &Paths) {
+    let removed = !paths::exists(&paths.unit).unwrap_or(true)
+        && !paths::exists(&paths.launcher).unwrap_or(true)
+        && load(paths).is_ok_and(|record| {
+            record.active.is_none() && record.pending.is_none() && !record.removing
+        });
+    if !removed {
+        return;
+    }
+    if let Err(error) = retire_windows(paths, false).await {
+        report_identity_kept(&error);
+    }
+}
+
+/// Says that the Windows notification identity is still registered and recorded, and what
+/// takes it from there. By then ReviewQ's launcher is gone, so a retry runs the program in a
+/// release folder, which needs nothing but the install record.
+fn report_identity_kept(error: &Failure) {
+    eprintln!(
+        "ReviewQ could not finish removing its Windows notification identity Personal.ReviewQ: {error} The next ReviewQ install reuses it. To try the removal again, run `bin/reviewq uninstall` from a ReviewQ release folder."
+    );
 }
 
 /// Reports `error`, in a desktop notification for the dashboard's job, and returns it.

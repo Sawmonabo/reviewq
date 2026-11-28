@@ -269,8 +269,12 @@ impl Folders {
 
     /// Deletes the installation lock's file while `lock` still holds it, then the state
     /// folder when that leaves it empty, and releases the lock. Only the last act of an
-    /// uninstall that deleted everything else does this: a process that was waiting for the
-    /// lock then finds the file gone and locks a new one.
+    /// uninstall that deleted everything else does this; that deletion already removed the
+    /// other folders it left empty, so only the state folder's removal follows the unlink. A
+    /// process that was waiting for the lock then finds the file gone and locks a new one. In
+    /// between, a process that starts now can create and lock a new file before this one lets
+    /// go. That is safe: the new file keeps the state folder, which is removed only when
+    /// empty, and an open that finds the folder already gone makes it again and retries.
     pub(crate) fn delete_lock(&self, lock: fs::File) -> Deletion {
         let mut walk = Walk {
             remove: true,
@@ -282,7 +286,9 @@ impl Folders {
         {
             walk.deletion.deleted.push(path.clone());
         }
-        self.remove_empty_roots(&mut walk.deletion, false);
+        if let Some(state) = &self.state {
+            self.remove_empty(&[state.as_path()], &mut walk.deletion, false);
+        }
         drop(lock);
         walk.deletion
     }
@@ -290,7 +296,12 @@ impl Folders {
     /// Removes each ReviewQ folder left empty. With `report`, keeps each one that holds an
     /// entry ReviewQ does not own, with that reason.
     fn remove_empty_roots(&self, deletion: &mut Deletion, report: bool) {
-        for root in self.roots() {
+        self.remove_empty(&self.roots(), deletion, report);
+    }
+
+    /// [`Self::remove_empty_roots`] for the given ReviewQ folders only.
+    fn remove_empty(&self, roots: &[&Path], deletion: &mut Deletion, report: bool) {
+        for &root in roots {
             // A folder that is a link or another user's stays, as its entries would.
             if root
                 .symlink_metadata()

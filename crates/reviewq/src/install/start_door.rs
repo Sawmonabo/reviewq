@@ -108,8 +108,13 @@ pub(super) async fn open() {
         service::control("start", service::START_SOCKET).await
     };
     if let Err(error) = opened.await {
-        eprintln!("ReviewQ's Start button will not work until its next start: {error}");
+        report_shut(&error);
     }
+}
+
+/// Says that the door is shut until the next start, whose repair tries again.
+pub(super) fn report_shut(error: &Failure) {
+    eprintln!("ReviewQ's Start button will not work until its next start: {error}");
 }
 
 /// Stops and disables the start door before its files are removed.
@@ -119,6 +124,28 @@ pub(super) async fn retire() -> Result<(), Failure> {
         service::control("disable", service::START_SOCKET).await?;
     }
     Ok(())
+}
+
+/// How long a release's program may take to answer whether it has the door.
+const PROBE_WAIT: Duration = Duration::from_secs(5);
+
+/// Whether the release whose program is `binary` has the start door, asked of that program:
+/// `start-door --help` exits 0 only where the command exists, and help never runs it. A probe
+/// and not a record, because a release from before the door reads the install record during
+/// the rollback that needs the answer and refuses any field it does not know. Anything that
+/// stops the program from answering counts as no door, which leaves nothing behind.
+pub(super) async fn supported(binary: &Path) -> bool {
+    let mut command = tokio::process::Command::new(binary);
+    command
+        .args(["start-door", "--help"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    matches!(
+        tokio::time::timeout(PROBE_WAIT, command.status()).await,
+        Ok(Ok(status)) if status.success()
+    )
 }
 
 /// Removes ReviewQ's two door files. The caller reloads the user manager.
@@ -173,9 +200,9 @@ const LOCK_RETRY: Duration = Duration::from_secs(2);
 const LOCK_WAIT: Duration = Duration::from_secs(120);
 
 /// The installed service's repair after its dashboard is ready. Looks first, without the
-/// installation lock, so a sound door never holds the lock; then repairs under it. A rollback
-/// removes the door and starts this service while it still holds the lock, so the repair
-/// asks again for up to two minutes; after that the next start repairs.
+/// installation lock, so a sound door never holds the lock; then repairs under it. An install
+/// or rollback starts this service while it still holds the lock, so the repair asks again
+/// for up to two minutes; after that the next start repairs.
 pub(crate) async fn repair_after_start(paths: Paths) {
     let repaired = async {
         let (enabled, active) = service::unit_state(service::START_SOCKET).await?;

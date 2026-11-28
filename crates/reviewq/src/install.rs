@@ -589,11 +589,16 @@ async fn rollback(
         Some(unit) => unit,
         None => verified_unit(paths, previous, &bundle)?,
     };
-    // The door goes with the release that wrote it. The previous release may be from before
-    // the door, with no `start-door` command and nothing that would ever remove it, and no
-    // record could say so: an older release reads the install record with unknown fields
-    // refused. A release that has the door puts it back once its service is up.
-    start_door::retire().await?;
+    // The previous release's own program says whether it has the door. One that has it gets
+    // it back now, running or not, so Start works however the rollback ends; nothing may
+    // start the service through it meanwhile. One from before the door has no `start-door`
+    // command and would never remove it, so it goes.
+    let door = start_door::supported(&bundle.root.join("bin/reviewq")).await;
+    if door {
+        start_door::stop().await?;
+    } else {
+        start_door::retire().await?;
+    }
     if service::state().await?.1 {
         service::switch("stop").await?;
     }
@@ -605,7 +610,22 @@ async fn rollback(
         return Err("The previous installation's retained store is missing or changed.".into());
     }
     files::set(paths, Some(&pending.next), previous, &unit)?;
-    start_door::remove(paths)?;
+    // Getting the previous release back matters more than the door, so a door that cannot be
+    // written, such as for a foreign file at its path or an unreadable `runtime.json`, is
+    // reported and left shut instead of ending the rollback here; the previous release's
+    // repair at its next start tries again. Stopping it above stays fatal, since an open door
+    // could start the service in the middle of the swap.
+    let reopen = door
+        && match start_door::write(paths) {
+            Ok(_) => true,
+            Err(error) => {
+                start_door::report_shut(&error);
+                false
+            }
+        };
+    if !door {
+        start_door::remove(paths)?;
+    }
     if previous.claude.is_some() {
         let previous_paths = Paths {
             claude_home_is_explicit: service::unit_has_claude_override(&unit),
@@ -623,6 +643,9 @@ async fn rollback(
         windows.remove().await?;
     }
     service::reload().await?;
+    if reopen {
+        start_door::open().await;
+    }
     service::switch(if pending.was_enabled {
         "enable"
     } else {
