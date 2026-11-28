@@ -24,11 +24,13 @@ use super::hook_trust::{Hook, Listed, is_own};
 
 /// How long the reload after a trust change may take, discovery and handshake included.
 const RELOAD_DEADLINE: Duration = Duration::from_secs(2);
-/// How long the check of a conversation's hooks at link may take, its one reload included.
+/// How long the check of a conversation's hooks at link may take, its connection and one
+/// reload included.
 const CHECK_DEADLINE: Duration = Duration::from_secs(3);
 /// The pauses before each new list of a conversation's hooks after the reload, in case Codex
-/// applies it a moment after it replies: about 1.3 seconds in all, well inside
-/// `CHECK_DEADLINE`. The first list follows the reply at once.
+/// applies it a moment after it replies: about 1.3 seconds in all. The first list follows the
+/// reply at once. A slow connection can leave `CHECK_DEADLINE` too little for all of them;
+/// then the last list seen after the reload decides.
 const RELIST_PAUSES: [Duration; 7] = [
     Duration::ZERO,
     Duration::from_millis(20),
@@ -98,45 +100,62 @@ enum ThreadHooks {
 impl Codex {
     /// What the daemon shows of ReviewQ's hooks in the open conversation `thread`. When it
     /// holds the conversation without them, it is asked once to reload them and listed again
-    /// a few times. `Unconfirmed` whenever it cannot show either within the deadline, saying
-    /// whether the conversation was created before ReviewQ last wrote Codex's trust in them.
+    /// a few times. When the deadline ends the lists, the last one after the reload stands.
+    /// `Unconfirmed` whenever it cannot show either, saying whether the conversation was
+    /// created before ReviewQ last wrote Codex's trust in them.
     pub(super) async fn own_hooks_live(&self, thread: &NativeSessionId) -> LiveHooks {
-        let shown = match self.hook_command.as_deref() {
-            Some(command) => timeout(CHECK_DEADLINE, self.shown_hooks(thread, command))
-                .await
-                .ok()
-                .flatten(),
-            None => None,
-        };
+        let mut shown = None;
+        if let Some(command) = self.hook_command.as_deref() {
+            let _ = timeout(
+                CHECK_DEADLINE,
+                self.shown_hooks(thread, command, &mut shown),
+            )
+            .await;
+        }
         shown.unwrap_or_else(|| LiveHooks::Unconfirmed {
             predates_trust: self.predates_trust(thread),
         })
     }
 
-    /// `Running` or `NotRunning` when one daemon session shows the conversation, from its
-    /// first listing, its reload and its later listings alike; `None` otherwise.
-    async fn shown_hooks(&self, thread: &NativeSessionId, command: &str) -> Option<LiveHooks> {
-        let (first, session) = self.thread_hooks(thread, command).await?;
+    /// Sets `shown` to `Running` or `NotRunning` as one daemon session shows the conversation,
+    /// from its first listing, its reload and each later listing alike, so a deadline that
+    /// cuts the listings short keeps what the last one showed. Clears it whenever a listing
+    /// fails or comes from another session.
+    async fn shown_hooks(
+        &self,
+        thread: &NativeSessionId,
+        command: &str,
+        shown: &mut Option<LiveHooks>,
+    ) {
+        let Some((first, session)) = self.thread_hooks(thread, command).await else {
+            return;
+        };
         if first == ThreadHooks::Live {
-            return Some(LiveHooks::Running);
+            *shown = Some(LiveHooks::Running);
+            return;
         }
         let (method, params) = reload_request();
-        let (reply, reloaded) = self.connection.request(method, params).await.ok()?;
-        rpc_result(reply).ok()?;
-        if !Arc::ptr_eq(&reloaded, &session) {
-            return None;
+        let Ok((reply, reloaded)) = self.connection.request(method, params).await else {
+            return;
+        };
+        if rpc_result(reply).is_err() || !Arc::ptr_eq(&reloaded, &session) {
+            return;
         }
         for pause in RELIST_PAUSES {
             sleep(pause).await;
-            let (now, listed) = self.thread_hooks(thread, command).await?;
-            if !Arc::ptr_eq(&listed, &session) {
-                return None;
-            }
-            if now == ThreadHooks::Live {
-                return Some(LiveHooks::Running);
+            *shown = match self.thread_hooks(thread, command).await {
+                Some((ThreadHooks::Live, listed)) if Arc::ptr_eq(&listed, &session) => {
+                    Some(LiveHooks::Running)
+                }
+                Some((ThreadHooks::Stale, listed)) if Arc::ptr_eq(&listed, &session) => {
+                    Some(LiveHooks::NotRunning)
+                }
+                _ => None,
+            };
+            if *shown != Some(LiveHooks::NotRunning) {
+                return;
             }
         }
-        Some(LiveHooks::NotRunning)
     }
 
     /// Reads the hooks the daemon holds for `thread`, with the session that answered. The
@@ -179,7 +198,8 @@ impl Codex {
     }
 
     /// Whether the conversation `thread` was created before ReviewQ last wrote Codex's trust
-    /// in its hooks. False whenever either time is unknown.
+    /// in its hooks. False whenever either time is unknown. The creation time stands in for
+    /// when Codex opened the conversation, which Codex does not say.
     fn predates_trust(&self, thread: &NativeSessionId) -> bool {
         match (created_at(thread.as_str()), self.trusted_at()) {
             (Some(created), Some(trusted)) => created < trusted,

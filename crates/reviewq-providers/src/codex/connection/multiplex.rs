@@ -1,0 +1,290 @@
+//! The loop that owns one daemon session's socket. It writes the requests callers queue,
+//! hands each reply frame to its caller and every other frame to the question and live
+//! caches. A request with a guard is checked beside that work, never in its way: a check reads
+//! the store or a transcript and may wait its turn there, while the loop keeps reading frames,
+//! and the request is written the moment its check passes.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use futures_util::StreamExt;
+use futures_util::future::BoxFuture;
+use futures_util::stream::FuturesUnordered;
+use reviewq_app::access::AppError;
+use reviewq_app::hosts::{QuestionAnswer, QuestionForm};
+use serde_json::{Value, json};
+use tokio::sync::{mpsc, oneshot};
+use tokio::time::{Instant, sleep_until, timeout};
+
+use super::super::live::Live;
+use super::super::questions::Questions;
+use super::{
+    AnswerError, CallError, CommandRequest, DEADLINE, IDLE_TIME, Pending, REQUEST_LIMIT, Rpc,
+    Served, Socket, receive_frame, send,
+};
+
+/// A request the loop took and has not written, while its guard is checked. Kept apart from
+/// the check, so a loop that ends first still tells its caller that nothing was sent.
+enum Held {
+    Rpc(Box<Rpc>),
+    Answer(
+        QuestionForm,
+        oneshot::Sender<Result<QuestionForm, AnswerError>>,
+    ),
+}
+
+/// One guard check in flight. It ends with the key of its held request, the answer to send
+/// when there is one, and whether the guard passed within `DEADLINE`.
+type Check<'a> = BoxFuture<'a, (u64, Option<QuestionAnswer>, Result<(), AppError>)>;
+
+/// The loop's state for one daemon session.
+struct Work<'a> {
+    socket: &'a mut Socket,
+    questions: &'a Mutex<Questions>,
+    id: &'a mut u64,
+    /// Written requests waiting for their reply, by request ID, each until `DEADLINE` after
+    /// it was written.
+    pending: HashMap<u64, Pending>,
+    held: HashMap<u64, Held>,
+    checks: FuturesUnordered<Check<'a>>,
+    next_key: u64,
+}
+
+/// Serves one daemon session from its `first` request until the socket fails, every
+/// `Connection` is gone, or it has been idle for `IDLE_TIME` with nothing live. Every request
+/// it took is answered: one still waiting for its reply as `Uncertain`, and one never written
+/// as `BeforeSend`.
+pub(super) async fn run(
+    socket: &mut Socket,
+    first: Rpc,
+    commands: &mut mpsc::Receiver<CommandRequest>,
+    questions: &Mutex<Questions>,
+    live: &Live,
+    session: &Arc<Served>,
+    id: &mut u64,
+) {
+    let mut work = Work {
+        socket,
+        questions,
+        id,
+        pending: HashMap::new(),
+        held: HashMap::new(),
+        checks: FuturesUnordered::new(),
+        next_key: 0,
+    };
+    if work.take(CommandRequest::Rpc(first)).await.is_ok() {
+        work.serve(commands, live, session).await;
+    }
+    work.end();
+}
+
+impl<'a> Work<'a> {
+    async fn serve(
+        &mut self,
+        commands: &mut mpsc::Receiver<CommandRequest>,
+        live: &Live,
+        session: &Arc<Served>,
+    ) {
+        let mut last_activity = Instant::now();
+        loop {
+            let (question_active, question_deadline) = self
+                .questions
+                .lock()
+                .ok()
+                .map(|mut cache| cache.next())
+                .unwrap_or((false, None));
+            let next_deadline = self
+                .pending
+                .values()
+                .map(|item| item.deadline)
+                .min()
+                .or_else(|| (!question_active).then_some(last_activity + IDLE_TIME));
+            let wake = match (next_deadline, question_deadline) {
+                (Some(left), Some(right)) => left.min(right),
+                (Some(value), None) | (None, Some(value)) => value,
+                (None, None) => last_activity + IDLE_TIME,
+            };
+            // A request being checked holds its place as one waiting for a reply does.
+            let room = self.pending.len() + self.held.len() < REQUEST_LIMIT;
+            let checking = !self.checks.is_empty();
+            tokio::select! {
+                work = commands.recv(), if room => {
+                    last_activity = Instant::now();
+                    let Some(work) = work else { break };
+                    if self.take(work).await.is_err() { break; }
+                }
+                Some((key, answer, checked)) = self.checks.next(), if checking => {
+                    last_activity = Instant::now();
+                    if self.checked(key, answer, checked).await.is_err() { break; }
+                }
+                event = receive_frame(self.socket) => {
+                    last_activity = Instant::now();
+                    match event {
+                        Ok(Some(frame)) if frame.get("method").is_some() => {
+                            if let Ok(mut cache) = self.questions.lock() { cache.frames(&frame); }
+                            live.frame(&frame);
+                        }
+                        Ok(Some(frame)) => {
+                            if let Some(id) = frame.get("id").and_then(Value::as_u64)
+                                && let Some(active) = self.pending.remove(&id) {
+                                let _ = active.reply.send(Ok((frame, session.clone())));
+                            }
+                        }
+                        Ok(None) => (),
+                        Err(()) => break,
+                    }
+                }
+                () = sleep_until(wake) => {
+                    let now = Instant::now();
+                    self.pending.retain(|_, item| !item.reply.is_closed() && item.deadline > now);
+                    if self.pending.is_empty() && self.held.is_empty() && !question_active
+                        && now >= last_activity + IDLE_TIME
+                    {
+                        if !live.active() { break; }
+                        last_activity = now;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Starts on one queued request. One with a guard is held while the guard is checked,
+    /// as is every answer; any other is written at once. `Err` when a write failed, which
+    /// ends the session.
+    async fn take(&mut self, work: CommandRequest) -> Result<(), ()> {
+        let key = self.next_key;
+        let questions = self.questions;
+        let check: Check<'a> = match work {
+            CommandRequest::Rpc(mut request) => {
+                if request.reply.is_closed() {
+                    return Ok(());
+                }
+                let Some(guard) = request.guard.take() else {
+                    return self.write(request).await;
+                };
+                self.held.insert(key, Held::Rpc(Box::new(request)));
+                Box::pin(async move {
+                    let checked = timeout(DEADLINE, guard.check(questions)).await;
+                    (key, None, checked.unwrap_or(Err(AppError::Busy)))
+                })
+            }
+            CommandRequest::Answer(answer, form, reply) => {
+                if reply.is_closed() {
+                    return Ok(());
+                }
+                self.held.insert(key, Held::Answer(form, reply));
+                Box::pin(async move {
+                    let checked = timeout(DEADLINE, answer.check()).await;
+                    (key, Some(answer), checked.unwrap_or(Err(AppError::Busy)))
+                })
+            }
+        };
+        self.next_key = key.wrapping_add(1);
+        self.checks.push(check);
+        Ok(())
+    }
+
+    /// Finishes the held request `key` once its check ended: writes it when the check
+    /// passed, and otherwise tells its caller that nothing was sent.
+    async fn checked(
+        &mut self,
+        key: u64,
+        answer: Option<QuestionAnswer>,
+        checked: Result<(), AppError>,
+    ) -> Result<(), ()> {
+        match self.held.remove(&key) {
+            Some(Held::Rpc(request)) => match checked {
+                Ok(()) => self.write(*request).await,
+                Err(error) => {
+                    let _ = request.reply.send(Err(CallError::Denied(error)));
+                    Ok(())
+                }
+            },
+            Some(Held::Answer(form, reply)) => match (answer, checked) {
+                (Some(answer), Ok(())) => self.answer(answer, form, reply).await,
+                _ => {
+                    let _ = reply.send(Err(AnswerError::BeforeSend));
+                    Ok(())
+                }
+            },
+            None => Ok(()),
+        }
+    }
+
+    /// Writes `request` and waits for its reply until `DEADLINE` after the write. `Err` when
+    /// the write failed, which leaves the request `Uncertain` and ends the session.
+    async fn write(&mut self, request: Rpc) -> Result<(), ()> {
+        if request.reply.is_closed() {
+            return Ok(());
+        }
+        *self.id = self.id.wrapping_add(1).max(2);
+        let id = *self.id;
+        let wire = json!({"id": id, "method": request.method, "params": request.params});
+        if !matches!(timeout(DEADLINE, send(self.socket, wire)).await, Ok(Ok(()))) {
+            let _ = request.reply.send(Err(CallError::Uncertain));
+            return Err(());
+        }
+        self.pending.insert(
+            id,
+            Pending {
+                reply: request.reply,
+                deadline: Instant::now() + DEADLINE,
+            },
+        );
+        Ok(())
+    }
+
+    /// Sends an answer whose check passed, when the question cache still has the question
+    /// open for it. `Err` when the write failed, which ends the session.
+    async fn answer(
+        &mut self,
+        answer: QuestionAnswer,
+        form: QuestionForm,
+        reply: oneshot::Sender<Result<QuestionForm, AnswerError>>,
+    ) -> Result<(), ()> {
+        if reply.is_closed() {
+            return Ok(());
+        }
+        let prepared = self
+            .questions
+            .lock()
+            .map_err(|_| AppError::Internal)
+            .and_then(|mut cache| cache.prepare(answer, form));
+        let result = match prepared {
+            Ok((form, Some(outbound))) => {
+                if !matches!(
+                    timeout(DEADLINE, send(self.socket, outbound)).await,
+                    Ok(Ok(()))
+                ) {
+                    let _ = reply.send(Err(AnswerError::Uncertain));
+                    return Err(());
+                }
+                Ok(form)
+            }
+            Ok((form, None)) => Ok(form),
+            Err(_) => Err(AnswerError::BeforeSend),
+        };
+        let _ = reply.send(result);
+        Ok(())
+    }
+
+    /// Answers every request the session still has: `Uncertain` for one written, whose reply
+    /// did not come, and `BeforeSend` for one held for its check.
+    fn end(self) {
+        for (_, item) in self.pending {
+            let _ = item.reply.send(Err(CallError::Uncertain));
+        }
+        for (_, held) in self.held {
+            match held {
+                Held::Rpc(request) => {
+                    let _ = request
+                        .reply
+                        .send(Err(CallError::BeforeSend(AppError::Unavailable)));
+                }
+                Held::Answer(_, reply) => {
+                    let _ = reply.send(Err(AnswerError::BeforeSend));
+                }
+            }
+        }
+    }
+}

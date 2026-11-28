@@ -114,6 +114,27 @@ impl Paths {
         }
     }
 
+    /// Holds the installation lock, waiting while another holder has it, but only while its
+    /// file is there: `None` once it is gone, as after an uninstall that deleted the data.
+    /// Creates nothing.
+    pub(super) fn lock_existing(&self) -> Result<Option<File>, Failure> {
+        loop {
+            let file = match OpenOptions::new()
+                .read(true)
+                .write(true)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .open(self.lock_path())
+            {
+                Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+                opened => opened?,
+            };
+            file.lock()?;
+            if let Some(file) = self.still_named(file)? {
+                return Ok(Some(file));
+            }
+        }
+    }
+
     fn lock_file(&self) -> Result<File, Failure> {
         loop {
             ensure_dir(&self.state, true)?;

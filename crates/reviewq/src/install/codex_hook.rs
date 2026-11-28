@@ -211,15 +211,16 @@ pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<Reconciled, Fa
 }
 
 /// Records that ReviewQ wrote Codex's trust in its hooks no earlier than `at`, for every
-/// entry it owns. The caller holds the installation lock.
+/// entry it owns. An entry keeps a later time it already holds, so a note that arrives late
+/// never moves the time back. The caller holds the installation lock.
 pub(super) fn note_trusted(paths: &Paths, at: SystemTime) -> Result<(), Failure> {
     let sidecar = paths.state.join(OWNERSHIP);
     let Some(mut owned) = paths::read_json::<Vec<Registration>>(&sidecar)? else {
         return Ok(());
     };
-    let millis = at.duration_since(UNIX_EPOCH)?.as_millis();
+    let millis = u64::try_from(at.duration_since(UNIX_EPOCH)?.as_millis())?;
     for hook in &mut owned {
-        hook.trusted_at = Some(u64::try_from(millis)?);
+        hook.trusted_at = hook.trusted_at.max(Some(millis));
     }
     paths::write_json(&sidecar, &owned)
 }
@@ -232,9 +233,10 @@ fn trusted_at(paths: &Paths) -> Option<SystemTime> {
     UNIX_EPOCH.checked_add(Duration::from_millis(millis))
 }
 
-/// The service's reader and writer of the trust time. The service holds no installation
-/// lock, so it records only while no install, uninstall, start or stop holds it; one that
-/// does approves the hooks and records the time itself.
+/// The service's reader and writer of the trust time. The service records under the
+/// installation lock like the installer. When an install, uninstall, start or stop holds it,
+/// the note waits for the lock on a thread of its own, so the caller does not wait; that
+/// holder may have found the hooks already trusted by the service and recorded nothing.
 pub(crate) fn trust_record(
     paths: Paths,
 ) -> (
@@ -243,14 +245,28 @@ pub(crate) fn trust_record(
 ) {
     let reader = paths.clone();
     let read = move || trusted_at(&reader);
-    let note = move |at| {
-        if let Ok(Some(_lock)) = paths.try_lock() {
-            // A time that could not be written stays as it was, which can only keep a
-            // notice away.
+    // A time that could not be written stays as it was, which can only keep a notice away.
+    let note = move |at| match paths.try_lock() {
+        Ok(Some(_lock)) => {
             let _ = note_trusted(&paths, at);
         }
+        Ok(None) => {
+            let paths = paths.clone();
+            let _ = std::thread::Builder::new()
+                .name("reviewq-trust-note".into())
+                .spawn(move || note_when_unlocked(&paths, at));
+        }
+        Err(_) => {}
     };
     (read, note)
+}
+
+/// Records the trust time `at` once the installation lock is free. Creates nothing, so a note
+/// that outlasts an uninstall records nothing.
+fn note_when_unlocked(paths: &Paths, at: SystemTime) {
+    if let Ok(Some(_lock)) = paths.lock_existing() {
+        let _ = note_trusted(paths, at);
+    }
 }
 
 /// The installed launcher running `internal codex-hook` for the installed profile. `|| :`
@@ -431,6 +447,24 @@ mod tests {
         reconcile(&paths, true)?;
         assert_eq!(fs::read(&file)?, created);
         assert_eq!(trusted_at(&paths), Some(approved));
+        // A late note of an earlier write never moves the time back, and the service's note
+        // while an install holds the lock is recorded once the lock is free.
+        note_trusted(&paths, approved - Duration::from_secs(60))?;
+        assert_eq!(trusted_at(&paths), Some(approved));
+        fs::set_permissions(&paths.state, fs::Permissions::from_mode(0o700))?;
+        let later = approved + Duration::from_secs(60);
+        let (_, note) = trust_record(paths.clone());
+        let held = paths.lock()?;
+        note(later);
+        assert_eq!(trusted_at(&paths), Some(approved));
+        drop(held);
+        for _ in 0..500 {
+            if trusted_at(&paths) == Some(later) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(trusted_at(&paths), Some(later));
         reconcile(&paths, false)?;
         assert!(!file.try_exists()? && !sidecar.try_exists()?);
 

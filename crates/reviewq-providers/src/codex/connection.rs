@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -17,10 +16,11 @@ use tokio::io::AsyncReadExt;
 use tokio::net::UnixStream;
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{Instant, sleep_until, timeout, timeout_at};
+use tokio::time::{Instant, timeout};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 use tokio_tungstenite::{WebSocketStream, client_async_with_config};
 
+mod multiplex;
 mod reach;
 mod served;
 
@@ -35,6 +35,15 @@ const REQUEST_LIMIT: usize = 8;
 const DISCOVERY_LIMIT: u64 = 16 * 1024;
 pub(super) const FRAME_LIMIT: usize = 2 * 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(5);
+/// How long a call waits for a place in the command queue while a burst fills it. Nothing is
+/// sent while it waits, so a call that runs out of it is refused `Busy`, unsent.
+const ROOM_WAIT: Duration = Duration::from_secs(10);
+/// A bound on the wait for the loop's answer, against a fault only. The loop answers every
+/// request it takes, and each step it takes for one ends within `DEADLINE`: connecting,
+/// checking the guard and waiting for the reply. A request behind a full queue while every
+/// connection attempt times out is answered in about a minute, half of this. Past it the
+/// caller cannot tell whether the request was written, so it reads as `Uncertain`.
+const ANSWER_LIMIT: Duration = Duration::from_secs(120);
 const IDLE_TIME: Duration = Duration::from_secs(60);
 
 type Socket = WebSocketStream<UnixStream>;
@@ -72,6 +81,9 @@ enum Effect {
     Delivery(DispatchGuard, Option<PathBuf>),
     FollowupResume(FollowupResume),
     Launch(LaunchProgress),
+    /// A guard that passes once its sender fires or is dropped, for tests of the loop.
+    #[cfg(test)]
+    Wait(oneshot::Receiver<()>),
 }
 
 impl Effect {
@@ -99,6 +111,11 @@ impl Effect {
             }
             Self::FollowupResume(guard) => guard.check(pending_threads(questions)?).await,
             Self::Launch(guard) => guard.check().await,
+            #[cfg(test)]
+            Self::Wait(release) => {
+                let _ = release.await;
+                Ok(())
+            }
         }
     }
 }
@@ -199,13 +216,12 @@ impl Connection {
             .list(thread, request))
     }
 
-    /// Holds a place in the command queue for one answer, waiting while a burst fills it, up
-    /// to the answer's deadline. Taken before the answer is reserved, so a queue that stays
-    /// full refuses the answer as `Busy` with nothing reserved and nothing to settle.
+    /// Holds a place in the command queue for one answer, waiting up to `ROOM_WAIT` while a
+    /// burst fills it. Taken before the answer is reserved, so a queue that stays full
+    /// refuses the answer as `Busy` with nothing reserved and nothing to settle.
     pub(super) async fn answer_slot(&self) -> Result<AnswerSlot<'_>, AppError> {
-        let deadline = Instant::now() + DEADLINE + DEADLINE;
-        match timeout_at(deadline, self.sender.reserve()).await {
-            Ok(Ok(permit)) => Ok(AnswerSlot { permit, deadline }),
+        match timeout(ROOM_WAIT, self.sender.reserve()).await {
+            Ok(Ok(permit)) => Ok(AnswerSlot { permit }),
             Ok(Err(_)) => Err(AppError::Unavailable),
             Err(_) => Err(AppError::Busy),
         }
@@ -289,44 +305,45 @@ impl Connection {
         rpc_result(frame).map_err(CallError::Remote)
     }
 
-    /// Queues one request, waiting for room while a burst fills the queue, and returns its
-    /// reply. One deadline bounds both waits: one that ends before the request was queued
-    /// leaves nothing sent, `BeforeSend`, and one that ends after leaves it `Uncertain`.
+    /// Queues one request, waiting up to `ROOM_WAIT` for room while a burst fills the queue,
+    /// and returns its reply. A call that never got room was not sent: `BeforeSend`. The
+    /// loop owns the rest: it answers `Denied` for a guard that refused and `BeforeSend` for
+    /// a request it never wrote, and waits for the reply only from the moment it wrote the
+    /// request, so `Uncertain` means it may have been sent.
     async fn round_trip(
         &self,
         method: &'static str,
         params: Value,
         guard: Option<Effect>,
     ) -> Result<Reply, CallError> {
-        let deadline = Instant::now() + DEADLINE + DEADLINE;
+        let permit = match timeout(ROOM_WAIT, self.sender.reserve()).await {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) => return Err(CallError::BeforeSend(AppError::Unavailable)),
+            Err(_) => return Err(CallError::BeforeSend(AppError::Busy)),
+        };
         let (reply, receive) = oneshot::channel();
-        let request = CommandRequest::Rpc(Rpc {
+        permit.send(CommandRequest::Rpc(Rpc {
             method,
             params,
             guard,
             reply,
-        });
-        match timeout_at(deadline, self.sender.send(request)).await {
-            Ok(Ok(())) => {}
-            Ok(Err(_)) => return Err(CallError::BeforeSend(AppError::Unavailable)),
-            Err(_) => return Err(CallError::BeforeSend(AppError::Busy)),
-        }
-        timeout_at(deadline, receive)
+        }));
+        timeout(ANSWER_LIMIT, receive)
             .await
             .map_err(|_| CallError::Uncertain)?
             .map_err(|_| CallError::Uncertain)?
     }
 }
 
-/// A place held in a connection's command queue for one answer, until its deadline.
+/// A place held in a connection's command queue for one answer.
 pub(super) struct AnswerSlot<'a> {
     permit: mpsc::Permit<'a, CommandRequest>,
-    deadline: Instant,
 }
 
 impl AnswerSlot<'_> {
-    /// Sends `answer` in the place held and waits, until the slot's deadline, for whether
-    /// the daemon took it.
+    /// Sends `answer` in the place held and waits for whether the daemon took it. The loop
+    /// answers `BeforeSend` for an answer it never wrote, and `Uncertain` for one whose write
+    /// it began; so does a wait past `ANSWER_LIMIT`.
     pub(super) async fn answer(
         self,
         answer: QuestionAnswer,
@@ -335,7 +352,7 @@ impl AnswerSlot<'_> {
         let (reply, result) = oneshot::channel();
         self.permit
             .send(CommandRequest::Answer(answer, form, reply));
-        timeout_at(self.deadline, result)
+        timeout(ANSWER_LIMIT, result)
             .await
             .map_err(|_| AnswerError::Uncertain)?
             .map_err(|_| AnswerError::Uncertain)?
@@ -390,7 +407,7 @@ impl Daemon {
             if let Ok(mut current) = served.lock() {
                 *current = Some(session.clone());
             }
-            multiplex(
+            multiplex::run(
                 &mut socket,
                 request,
                 &mut commands,
@@ -564,138 +581,6 @@ pub(super) async fn request_once(
     reply
 }
 
-async fn multiplex(
-    socket: &mut Socket,
-    first: Rpc,
-    commands: &mut mpsc::Receiver<CommandRequest>,
-    questions: &Mutex<Questions>,
-    live: &Live,
-    session: &Arc<Served>,
-    id: &mut u64,
-) {
-    let mut pending = HashMap::new();
-    if dispatch(socket, first, id, &mut pending, questions)
-        .await
-        .is_err()
-    {
-        return;
-    }
-    let mut last_activity = Instant::now();
-    loop {
-        let (question_active, question_deadline) = questions
-            .lock()
-            .ok()
-            .map(|mut cache| cache.next())
-            .unwrap_or((false, None));
-        let next_deadline = pending
-            .values()
-            .map(|item| item.deadline)
-            .min()
-            .or_else(|| (!question_active).then_some(last_activity + IDLE_TIME));
-        let wake = match (next_deadline, question_deadline) {
-            (Some(left), Some(right)) => left.min(right),
-            (Some(value), None) | (None, Some(value)) => value,
-            (None, None) => last_activity + IDLE_TIME,
-        };
-        tokio::select! {
-            work = commands.recv(), if pending.len() < REQUEST_LIMIT => {
-                last_activity = Instant::now();
-                match work {
-                    Some(CommandRequest::Rpc(request)) => {
-                        if dispatch(socket, request, id, &mut pending, questions).await.is_err() { break; }
-                    }
-                    Some(CommandRequest::Answer(answer, form, reply)) => {
-                        if reply.is_closed() { continue; }
-                        if answer.check().await.is_err() {
-                            let _ = reply.send(Err(AnswerError::BeforeSend));
-                            continue;
-                        }
-                        if reply.is_closed() { continue; }
-                        let prepared = questions.lock().map_err(|_| AppError::Internal)
-                            .and_then(|mut cache| cache.prepare(answer, form));
-                        let result = match prepared {
-                            Ok((form, Some(outbound))) => {
-                                if !matches!(timeout(DEADLINE, send(socket,outbound)).await, Ok(Ok(()))) {
-                                    let _ = reply.send(Err(AnswerError::Uncertain));
-                                    break;
-                                }
-                                Ok(form)
-                            }
-                            Ok((form, None)) => Ok(form),
-                            Err(_) => Err(AnswerError::BeforeSend),
-                        };
-                        let _ = reply.send(result);
-                    }
-                    None => break,
-                }
-            }
-            event = receive_frame(socket) => {
-                last_activity = Instant::now();
-                match event {
-                    Ok(Some(frame)) if frame.get("method").is_some() => {
-                        if let Ok(mut cache) = questions.lock() { cache.frames(&frame); }
-                        live.frame(&frame);
-                    }
-                    Ok(Some(frame)) => {
-                        if let Some(id) = frame.get("id").and_then(Value::as_u64)
-                            && let Some(active) = pending.remove(&id) {
-                            let _ = active.reply.send(Ok((frame, session.clone())));
-                        }
-                    }
-                    Ok(None) => (),
-                    Err(()) => break,
-                }
-            }
-            () = sleep_until(wake) => {
-                let now = Instant::now();
-                pending.retain(|_, item| !item.reply.is_closed() && item.deadline > now);
-                if pending.is_empty() && !question_active && now >= last_activity + IDLE_TIME {
-                    if !live.active() { break; }
-                    last_activity = now;
-                }
-            }
-        }
-    }
-    for (_, item) in pending {
-        let _ = item.reply.send(Err(CallError::Uncertain));
-    }
-}
-
-async fn dispatch(
-    socket: &mut Socket,
-    request: Rpc,
-    id: &mut u64,
-    pending: &mut HashMap<u64, Pending>,
-    questions: &Mutex<Questions>,
-) -> Result<(), ()> {
-    if request.reply.is_closed() {
-        return Ok(());
-    }
-    if let Some(guard) = request.guard
-        && let Err(error) = guard.check(questions).await
-    {
-        let _ = request.reply.send(Err(CallError::Denied(error)));
-        return Ok(());
-    }
-    if request.reply.is_closed() {
-        return Ok(());
-    }
-    *id = id.wrapping_add(1).max(2);
-    let wire = json!({"id": *id, "method": request.method, "params": request.params});
-    if !matches!(timeout(DEADLINE, send(socket, wire)).await, Ok(Ok(()))) {
-        let _ = request.reply.send(Err(CallError::Uncertain));
-        return Err(());
-    }
-    pending.insert(
-        *id,
-        Pending {
-            reply: request.reply,
-            deadline: Instant::now() + DEADLINE,
-        },
-    );
-    Ok(())
-}
-
 async fn exchange(
     socket: &mut Socket,
     id: u64,
@@ -768,3 +653,6 @@ async fn receive_frame(socket: &mut Socket) -> Result<Option<Value>, ()> {
         _ => Ok(None),
     }
 }
+
+#[cfg(test)]
+mod tests;

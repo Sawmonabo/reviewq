@@ -257,9 +257,11 @@ fn link_response(
 /// What a Codex link tells the person about ReviewQ's hooks in the conversation `thread`,
 /// after asking `host` to trust them: `Pending` when Codex does not trust them. When it does,
 /// `Restart` only when ReviewQ has a reason to believe the conversation lacks them: its
-/// daemon holds it without them even after a reload and a few more looks, or the daemon
-/// cannot show it, no ReviewQ hook has reported from it, and Codex created it before ReviewQ
-/// last wrote that trust. Otherwise nothing, also whenever a time is unknown. Asks Codex
+/// daemon holds it without them even after a reload and another look, or the daemon cannot
+/// show it, no ReviewQ hook has reported from it, and Codex created it before ReviewQ last
+/// wrote that trust. Otherwise nothing, also whenever a time is unknown. Codex does not say
+/// when it opened a conversation, so one created before that write but opened again since in
+/// a Codex process of its own gets the notice until one of its hooks reports. Asks Codex
 /// nothing more when the hooks are not trusted, and in the common case one hook list.
 async fn codex_hooks_notice(
     entry: &Entry,
