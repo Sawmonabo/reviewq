@@ -5,13 +5,14 @@ mod window;
 
 pub(super) use window::Builds;
 
-use std::path::PathBuf;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
 use reviewq_app::reports::{DisplayFallback, DisplayIndex};
 use reviewq_domain::identity::{ReceiptId, RunId};
-use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use uuid::Uuid;
 
 use super::profile::Profile;
@@ -21,7 +22,10 @@ use crate::{SqliteStore, StoreError};
 
 const SUFFIX: &str = ".findings-display";
 const APPLICATION_ID: i64 = 0x5256_4644;
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
+/// What SQLite may leave beside the cache file.
+const LEFTOVERS: [&str; 3] = ["-journal", "-wal", "-shm"];
+const HEAL_INTERVAL: Duration = Duration::from_secs(10 * 60);
 const PAGE_BYTES: i64 = 4096;
 // Keep the database at or below 16 MiB. A pending DELETE journal is also bounded by that page count.
 const MAX_PAGES: i64 = 4096;
@@ -104,69 +108,141 @@ impl SqliteStore {
     }
 }
 
-fn open(profile: &Profile, store_id: Uuid, create: bool) -> Result<Option<Connection>, StoreError> {
-    let mut path = profile.path().as_os_str().to_os_string();
-    path.push(SUFFIX);
-    let path = PathBuf::from(path);
+/// The one owner of discarding the cache file. A file this build cannot use (one written
+/// for another schema or store, one SQLite cannot read, or WAL files ReviewQ never writes)
+/// is replaced by a fresh cache that has already passed the same check, so nothing is
+/// discarded unless a usable cache takes its place. The swap is serialized, and happens at
+/// most once per `HEAL_INTERVAL`, so a file that keeps failing costs one rebuild per
+/// interval and otherwise answers `cache_unavailable`. Only the four cache file names are
+/// ever touched, never the main database.
+#[derive(Default)]
+pub(super) struct Heal {
+    last_replaced: Mutex<Option<Instant>>,
+}
+
+enum Check {
+    Usable(Connection),
+    Unusable,
+}
+
+fn open(
+    profile: &Profile,
+    store_id: Uuid,
+    heal: &Heal,
+    create: bool,
+) -> Result<Option<Connection>, StoreError> {
+    match inspect(profile, store_id)? {
+        Some(Check::Usable(connection)) => Ok(Some(connection)),
+        None if !create => Ok(None),
+        _ => heal.replace(profile, store_id, false).map(Some),
+    }
+}
+
+impl Heal {
+    /// A read or write that finds the open cache damaged discards it like a foreign file.
+    pub(super) fn after_failure(&self, profile: &Profile, store_id: Uuid, error: &StoreError) {
+        if matches!(
+            error.sqlite_code(),
+            Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase)
+        ) {
+            let _ = self.replace(profile, store_id, true);
+        }
+    }
+
+    /// `damaged` replaces a file that passed `inspect` but failed a later read or write.
+    fn replace(
+        &self,
+        profile: &Profile,
+        store_id: Uuid,
+        damaged: bool,
+    ) -> Result<Connection, StoreError> {
+        let mut last = self.last_replaced.lock().map_err(|_| AppError::Internal)?;
+        // Another caller may have created or replaced the file while this one waited.
+        let found = match inspect(profile, store_id)? {
+            Some(Check::Usable(connection)) if !damaged => return Ok(connection),
+            found => found.is_some(),
+        };
+        if found && last.is_some_and(|at| at.elapsed() < HEAL_INTERVAL) {
+            return Err(AppError::Conflict.into());
+        }
+        let stage = Stage::new(profile)?;
+        create(&stage.database, store_id)?;
+        let Check::Usable(staged) = verify(&stage.database, store_id)? else {
+            return Err(AppError::Conflict.into());
+        };
+        drop(staged);
+        if found {
+            *last = Some(Instant::now());
+            // A stale journal beside the fresh file would be rolled back into it.
+            for leftover in LEFTOVERS {
+                profile.remove_sibling(&format!("{SUFFIX}{leftover}"))?;
+            }
+        }
+        profile.replace_sibling(&stage.database, SUFFIX)?;
+        match verify(&cache_path(profile), store_id)? {
+            Check::Usable(connection) => Ok(connection),
+            Check::Unusable => Err(AppError::Conflict.into()),
+        }
+    }
+}
+
+/// `None` when there is no cache and nothing left of one.
+fn inspect(profile: &Profile, store_id: Uuid) -> Result<Option<Check>, StoreError> {
     let exists = profile.file(SUFFIX)?.is_some();
-    let journal = profile.file(&format!("{SUFFIX}-journal"))?;
-    if (!exists && journal.is_some())
+    let journal = profile.file(&format!("{SUFFIX}-journal"))?.is_some();
+    // A journal beside an existing cache is SQLite's own crash recovery.
+    if (!exists && journal)
         || profile.file(&format!("{SUFFIX}-wal"))?.is_some()
         || profile.file(&format!("{SUFFIX}-shm"))?.is_some()
     {
-        return Err(AppError::Conflict.into());
+        return Ok(Some(Check::Unusable));
     }
-    if !exists && !create {
+    if !exists {
         return Ok(None);
     }
-    let connection = if exists {
-        Connection::open_with_flags(&path, WRITE_FLAGS)?
-    } else {
-        let stage = Stage::new(profile)?;
-        let file = staging::create_private(&stage.database)?;
-        let mut connection = Connection::open_with_flags(&stage.database, WRITE_FLAGS)?;
-        connection.pragma_update(None, "page_size", PAGE_BYTES)?;
-        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute_batch(SCHEMA)?;
-        tx.pragma_update(None, "application_id", APPLICATION_ID)?;
-        tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-        tx.execute(
-            "INSERT INTO cache_owner(singleton, store_id) VALUES(1, ?1)",
-            [store_id.to_string()],
-        )?;
-        tx.commit()?;
-        drop(connection);
-        file.sync_all()?;
-        if let Err(error) = profile.publish_sibling(&stage.database, SUFFIX)
-            && profile.file(SUFFIX)?.is_none()
-        {
-            return Err(error);
-        }
-        // The other build lane can win the first publication. Verify its cache below.
-        Connection::open_with_flags(&path, WRITE_FLAGS)?
-    };
-    configure(&connection, store_id)?;
-    Ok(Some(connection))
+    verify(&cache_path(profile), store_id).map(Some)
 }
 
-fn configure(connection: &Connection, store_id: Uuid) -> Result<(), StoreError> {
-    connection.busy_timeout(Duration::from_millis(150))?;
-    connection.execute_batch("PRAGMA trusted_schema=OFF; PRAGMA foreign_keys=ON;")?;
-    if connection.pragma_query_value(None, "application_id", |row| row.get::<_, i64>(0))?
-        != APPLICATION_ID
-        || connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?
-            != SCHEMA_VERSION
-        || connection.pragma_query_value(None, "page_size", |row| row.get::<_, i64>(0))?
-            != PAGE_BYTES
-        || connection.pragma_query_value(None, "journal_mode", |row| row.get::<_, String>(0))?
-            != "delete"
-        || connection.query_row(
-            "SELECT store_id FROM cache_owner WHERE singleton=1",
-            [],
-            |row| row.get::<_, String>(0),
-        )? != store_id.to_string()
-    {
-        return Err(AppError::Conflict.into());
+fn cache_path(profile: &Profile) -> PathBuf {
+    let mut path = profile.path().as_os_str().to_os_string();
+    path.push(SUFFIX);
+    PathBuf::from(path)
+}
+
+fn create(path: &Path, store_id: Uuid) -> Result<(), StoreError> {
+    let file = staging::create_private(path)?;
+    let mut connection = Connection::open_with_flags(path, WRITE_FLAGS)?;
+    connection.pragma_update(None, "page_size", PAGE_BYTES)?;
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute_batch(SCHEMA)?;
+    tx.pragma_update(None, "application_id", APPLICATION_ID)?;
+    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    tx.execute(
+        "INSERT INTO cache_owner(singleton, store_id) VALUES(1, ?1)",
+        [store_id.to_string()],
+    )?;
+    tx.commit()?;
+    drop(connection);
+    file.sync_all()?;
+    Ok(())
+}
+
+/// Whether the file is exactly the cache this build creates for this store. Busy, I/O and
+/// other failures are errors, so a passing moment never discards a good cache.
+fn verify(path: &Path, store_id: Uuid) -> Result<Check, StoreError> {
+    let connection = Connection::open_with_flags(path, WRITE_FLAGS)?;
+    match matches_build(&connection, store_id) {
+        Ok(true) => {}
+        Ok(false) => return Ok(Check::Unusable),
+        Err(error)
+            if matches!(
+                error.sqlite_error_code(),
+                Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase)
+            ) =>
+        {
+            return Ok(Check::Unusable);
+        }
+        Err(error) => return Err(error.into()),
     }
     connection.pragma_update(None, "max_page_count", MAX_PAGES)?;
     let page_limit =
@@ -174,7 +250,54 @@ fn configure(connection: &Connection, store_id: Uuid) -> Result<(), StoreError> 
     if page_limit != MAX_PAGES {
         return Err(AppError::Conflict.into());
     }
-    Ok(())
+    Ok(Check::Usable(connection))
+}
+
+fn matches_build(connection: &Connection, store_id: Uuid) -> rusqlite::Result<bool> {
+    connection.busy_timeout(Duration::from_millis(150))?;
+    connection.execute_batch("PRAGMA trusted_schema=OFF; PRAGMA foreign_keys=ON;")?;
+    let pragma = |name: &str| connection.pragma_query_value(None, name, |row| row.get::<_, i64>(0));
+    if pragma("application_id")? != APPLICATION_ID
+        || pragma("user_version")? != SCHEMA_VERSION
+        || pragma("page_size")? != PAGE_BYTES
+        || connection.pragma_query_value(None, "journal_mode", |row| row.get::<_, String>(0))?
+            != "delete"
+        || schema_rows(connection)? != *expected_schema()?
+    {
+        return Ok(false);
+    }
+    let owner = connection
+        .query_row(
+            "SELECT store_id FROM cache_owner WHERE singleton=1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(owner == Some(store_id.to_string()))
+}
+
+type SchemaRow = (String, String, String, Option<String>);
+
+fn schema_rows(connection: &Connection) -> rusqlite::Result<Vec<SchemaRow>> {
+    let mut statement = connection
+        .prepare("SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY type, name")?;
+    statement
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?
+        .collect()
+}
+
+/// The tables `SCHEMA` creates, read back once from a scratch database in memory.
+fn expected_schema() -> rusqlite::Result<&'static Vec<SchemaRow>> {
+    static EXPECTED: OnceLock<Vec<SchemaRow>> = OnceLock::new();
+    if let Some(rows) = EXPECTED.get() {
+        return Ok(rows);
+    }
+    let connection = Connection::open_in_memory()?;
+    connection.execute_batch(SCHEMA)?;
+    let rows = schema_rows(&connection)?;
+    Ok(EXPECTED.get_or_init(|| rows))
 }
 
 fn publish(
@@ -239,5 +362,72 @@ fn fallback_label(reason: DisplayFallback) -> &'static str {
         DisplayFallback::InvalidBoundary => "invalid_boundary",
         DisplayFallback::ParserFailed => "parser_failed",
         DisplayFallback::CacheUnavailable => "cache_unavailable",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    use reviewq_app::reports::build_report_display_index;
+    use reviewq_domain::session::AbsolutePath;
+    use rusqlite::Connection;
+    use uuid::Uuid;
+
+    use super::{Heal, Profile, WRITE_FLAGS, open, publish, staging};
+
+    /// A cache file with this build's version but another table layout, or one SQLite cannot
+    /// read, is replaced by a working cache once; a second unusable file inside the interval is left alone; and a
+    /// file this build made is kept as it is.
+    #[test]
+    fn an_unusable_cache_file_is_replaced_once_and_a_current_one_is_kept() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let database = temp.path().join("cache.sqlite3");
+        let profile =
+            Profile::resolve(&AbsolutePath::from_canonical(database.clone()).unwrap()).unwrap();
+        let cache = temp.path().join("cache.sqlite3.findings-display");
+        let store_id = Uuid::new_v4();
+        let current = super::SCHEMA.replace("lead_markdown", "heading_markdown");
+        staging::create_private(&cache).unwrap();
+        let old = Connection::open_with_flags(&cache, WRITE_FLAGS).unwrap();
+        old.execute_batch(&format!(
+            "PRAGMA page_size=4096; {current} PRAGMA application_id=1381385796;
+             PRAGMA user_version={};
+             INSERT INTO cache_owner(singleton, store_id) VALUES(1, '{store_id}');",
+            super::SCHEMA_VERSION
+        ))
+        .unwrap();
+        drop(old);
+
+        let heal = Heal::default();
+        let mut replaced = open(&profile, store_id, &heal, false).unwrap().unwrap();
+        let source = "# Report\n\n### F-01 · One\n\n**P1 · Bug · Blocking**\n\nText.\n";
+        let index = build_report_display_index(source);
+        publish(&mut replaced, "artifact", &"a".repeat(64), 3, index).unwrap();
+        let spans: i64 = replaced
+            .query_row(
+                "SELECT count(*) FROM display_spans WHERE lead_markdown IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(spans > 0);
+        drop(replaced);
+        let inode = std::fs::metadata(&cache).unwrap().ino();
+        drop(
+            open(&profile, store_id, &Heal::default(), false)
+                .unwrap()
+                .unwrap(),
+        );
+        assert_eq!(std::fs::metadata(&cache).unwrap().ino(), inode);
+
+        std::fs::write(&cache, b"not a database ".repeat(400)).unwrap();
+        assert!(open(&profile, store_id, &heal, true).is_err());
+        assert!(
+            open(&profile, store_id, &Heal::default(), true)
+                .unwrap()
+                .is_some()
+        );
     }
 }

@@ -8,8 +8,8 @@ pub(crate) use display::display_index;
 pub use display::{
     DISPLAY_INDEX_FORMAT, DisplayBlock, DisplayBlockKind, DisplayFallback, DisplayIndex,
     DisplayLayout, DisplayWindow, DisplayWindowBlock, DisplayWindowPosition, DisplayWindowState,
-    HtmlRendering, MAX_DISPLAY_BLOCKS, MAX_DISPLAY_HEADING_BYTES, MAX_DISPLAY_HEADINGS_BYTES,
-    build_display_index, build_report_display_index,
+    HtmlRendering, MAX_DISPLAY_BLOCKS, MAX_DISPLAY_CARD_LEADS_BYTES, MAX_DISPLAY_HEADING_BYTES,
+    MAX_DISPLAY_HEADINGS_BYTES, build_display_index, build_report_display_index, json_text_bytes,
 };
 pub use drawings::{
     DRAWING_RECIPE, DrawingOutput, DrawingRenderer, MAX_DRAWING_BYTES, drawing_digest,

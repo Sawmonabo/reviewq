@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 
 use reviewq_app::access::AppError;
 use reviewq_domain::session::AbsolutePath;
-use rustix::fs::{self, Mode, OFlags, RenameFlags};
+use rustix::fs::{self, AtFlags, Mode, OFlags, RenameFlags};
 use rustix::io::Errno;
 use rustix::process::geteuid;
 
@@ -124,6 +124,42 @@ impl Profile {
         )?;
         self.directory.sync_all()?;
         Ok(())
+    }
+
+    /// Puts a staged file at a sibling name, replacing whatever file is there. The suffix
+    /// must be non-empty, so the database itself can never be replaced this way.
+    pub(super) fn replace_sibling(&self, staged: &Path, suffix: &str) -> Result<(), StoreError> {
+        let destination = self.sibling(suffix)?;
+        fs::renameat_with(
+            fs::CWD,
+            staged,
+            &self.directory,
+            &destination,
+            RenameFlags::empty(),
+        )?;
+        self.directory.sync_all()?;
+        Ok(())
+    }
+
+    /// Removes a sibling file if present, without following a symbolic link. The suffix must
+    /// be non-empty, so the database itself can never be removed this way.
+    pub(super) fn remove_sibling(&self, suffix: &str) -> Result<(), StoreError> {
+        match fs::unlinkat(&self.directory, &self.sibling(suffix)?, AtFlags::empty()) {
+            Ok(()) | Err(Errno::NOENT) => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn sibling(&self, suffix: &str) -> Result<OsString, StoreError> {
+        if suffix.is_empty() {
+            return Err(StoreError::path(
+                &self.path,
+                "expected a sibling of the database",
+            ));
+        }
+        let mut name = self.name.clone();
+        name.push(suffix);
+        Ok(name)
     }
 }
 

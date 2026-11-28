@@ -8,7 +8,8 @@ use reviewq_app::events::Snapshot;
 use reviewq_app::reports::{
     DISPLAY_INDEX_FORMAT, DisplayBlock, DisplayFallback, DisplayIndex, DisplayLayout,
     DisplayWindow, DisplayWindowBlock, DisplayWindowPosition, DisplayWindowState,
-    MAX_DISPLAY_BLOCKS, MAX_DISPLAY_HEADINGS_BYTES, ReportReference, build_report_display_index,
+    MAX_DISPLAY_BLOCKS, MAX_DISPLAY_CARD_LEADS_BYTES, MAX_DISPLAY_HEADINGS_BYTES, ReportReference,
+    build_report_display_index, json_text_bytes,
 };
 use reviewq_app::wait::{self, Budget};
 use reviewq_domain::identity::{ReportHash, RunId};
@@ -19,7 +20,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 use uuid::Uuid;
 
 use super::layout::{self, SPAN_COLUMNS, WINDOW_BYTES};
-use super::{MAX_AGE_MS, open, publish};
+use super::{Heal, MAX_AGE_MS, open, publish};
 use crate::connection::profile::Profile;
 use crate::events::{now_ms, snapshot};
 use crate::reports::{Version, authorized_version, read_artifact_bytes, read_markdown};
@@ -39,6 +40,7 @@ pub(in crate::connection) struct Builds {
     state: Mutex<BuildState>,
     reads: Arc<Semaphore>,
     released: watch::Sender<()>,
+    heal: Heal,
 }
 
 impl Default for Builds {
@@ -47,6 +49,7 @@ impl Default for Builds {
             state: Mutex::default(),
             reads: Arc::new(Semaphore::new(MAX_WINDOW_READS)),
             released: watch::channel(()).0,
+            heal: Heal::default(),
         }
     }
 }
@@ -79,6 +82,7 @@ enum Claim {
 #[derive(Clone)]
 struct CacheRead {
     profile: Arc<Profile>,
+    builds: Arc<Builds>,
     slot: Arc<OwnedSemaphorePermit>,
 }
 
@@ -136,6 +140,7 @@ impl SqliteStore {
         let store_id = self.identity().store_id;
         let cache_read = CacheRead {
             profile,
+            builds: self.display_builds.clone(),
             slot: slot.clone(),
         };
         let window = if version.summary.stats.require_markdown_budget().is_err() {
@@ -192,8 +197,8 @@ impl SqliteStore {
         };
         let store_id = self.identity().store_id;
         tokio::task::spawn_blocking(move || {
-            let _build = build;
-            build_and_publish(&profile, store_id, &key, source)
+            let heal = &build.builds.heal;
+            build_and_publish(&profile, store_id, heal, &key, source)
         })
         .await
         .map_err(|_| AppError::Internal)?
@@ -240,13 +245,15 @@ impl SqliteStore {
             let CacheRead {
                 profile,
                 slot: _slot,
+                ..
             } = cache_read;
             let tx = db.transaction_with_behavior(TransactionBehavior::Deferred)?;
             let version = authorized_version(&tx, &actor, &run, &reference)?;
             let source = read_markdown(&tx, &version)?;
             tx.commit()?;
             runtime.spawn_blocking(move || {
-                if build_and_publish(&profile, store_id, &key, source).is_err() {
+                let heal = &build.builds.heal;
+                if build_and_publish(&profile, store_id, heal, &key, source).is_err() {
                     build.cool_down();
                 }
             });
@@ -311,10 +318,25 @@ impl Drop for Build {
 fn build_and_publish(
     profile: &Profile,
     store_id: Uuid,
+    heal: &Heal,
     key: &IndexKey,
     source: String,
 ) -> Result<(), StoreError> {
-    let mut cache = open(profile, store_id, true)?.ok_or(AppError::Internal)?;
+    let result = publish_index(profile, store_id, heal, key, source);
+    if let Err(error) = &result {
+        heal.after_failure(profile, store_id, error);
+    }
+    result
+}
+
+fn publish_index(
+    profile: &Profile,
+    store_id: Uuid,
+    heal: &Heal,
+    key: &IndexKey,
+    source: String,
+) -> Result<(), StoreError> {
+    let mut cache = open(profile, store_id, heal, true)?.ok_or(AppError::Internal)?;
     if cache_entry(&cache, key)?.is_some() {
         return Ok(());
     }
@@ -360,10 +382,11 @@ async fn lookup(
     tokio::task::spawn_blocking(move || {
         let CacheRead {
             profile,
+            builds,
             slot: _slot,
         } = cache_read;
         let result = (|| {
-            let Some(mut cache) = open(&profile, store_id, false)? else {
+            let Some(mut cache) = open(&profile, store_id, &builds.heal, false)? else {
                 return Ok(CacheWindow::Missing);
             };
             let tx = cache.transaction_with_behavior(TransactionBehavior::Deferred)?;
@@ -372,6 +395,9 @@ async fn lookup(
             Ok::<_, StoreError>(window)
         })();
         // The cache is optional, including corrupt and inaccessible sidecars.
+        if let Err(error) = &result {
+            builds.heal.after_failure(&profile, store_id, error);
+        }
         match result {
             Ok(window) => Ok(window),
             Err(error) => match error.app() {
@@ -572,7 +598,7 @@ fn read_layout(
     let mut statement = connection.prepare_cached(&sql)?;
     let mut rows = statement.query([entry.id])?;
     let mut blocks: Vec<DisplayBlock> = Vec::with_capacity(entry.span_count as usize);
-    let mut heading_bytes = 0;
+    let (mut heading_bytes, mut lead_bytes) = (0, 0);
     while let Some(row) = rows.next()? {
         let span = layout::read_span(row, report_hash)?;
         let agrees = blocks.last().map_or(
@@ -588,8 +614,10 @@ fn read_layout(
             },
         );
         heading_bytes += span.heading_markdown.as_ref().map_or(0, String::len);
+        lead_bytes += span.card_markdown.as_deref().map_or(0, json_text_bytes);
         if !agrees
             || heading_bytes > MAX_DISPLAY_HEADINGS_BYTES
+            || lead_bytes > MAX_DISPLAY_CARD_LEADS_BYTES
             || blocks.len() == entry.span_count as usize
         {
             return Err(AppError::Internal.into());

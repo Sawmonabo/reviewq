@@ -12,6 +12,23 @@ pub const DISPLAY_INDEX_FORMAT: u32 = 3;
 pub const MAX_DISPLAY_BLOCKS: usize = 512;
 pub const MAX_DISPLAY_HEADING_BYTES: usize = 1024;
 pub const MAX_DISPLAY_HEADINGS_BYTES: usize = 16 * 1024;
+/// Every card lead in a layout together, counted as escaped JSON text. A report over it
+/// carries no card leads, and the findings list reads the whole report instead. Sized by
+/// arithmetic, not measurement: with escaping growing other text at most sixfold, the
+/// largest opening window (64 KiB of blocks, 512 layout records, 16 KiB of headings and this
+/// budget) comes to about 590 KiB, under the route's 640 KiB answer.
+pub const MAX_DISPLAY_CARD_LEADS_BYTES: usize = 16 * 1024;
+
+/// The bytes `text` takes inside a JSON string.
+pub fn json_text_bytes(text: &str) -> usize {
+    text.bytes()
+        .map(|byte| match byte {
+            b'"' | b'\\' | b'\n' | b'\r' | b'\t' | 0x08 | 0x0c => 2,
+            0..0x20 => 6,
+            _ => 1,
+        })
+        .sum()
+}
 
 pub enum DisplayIndex {
     Indexed(DisplayLayout),

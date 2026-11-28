@@ -42,6 +42,13 @@ impl StoreError {
         }
     }
 
+    pub(crate) fn sqlite_code(&self) -> Option<rusqlite::ErrorCode> {
+        match &self.0 {
+            Problem::Sqlite(error) => error.sqlite_error_code(),
+            _ => None,
+        }
+    }
+
     pub(crate) fn is_sqlite(&self) -> bool {
         matches!(self.0, Problem::Sqlite(_))
     }

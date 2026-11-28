@@ -173,8 +173,8 @@
   font-size: 10px;
 }
 
-/* The card a jump lands on holds focus and outlines briefly. After a pointer pick its focus draws
-   no lasting outline; after a keyboard pick it keeps the focus ring. */
+/* The card a jump lands on holds focus and outlines briefly. After a keyboard pick it keeps the
+   focus ring; focus the browser does not count as keyboard focus draws no lasting outline. */
 .report-finding[tabindex="-1"]:focus:not(:focus-visible) {
   outline: none;
 }

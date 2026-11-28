@@ -4,7 +4,10 @@
 
 use satteri_pulldown_cmark::{Event, Parser, Tag, TagEnd};
 
-use super::{DisplayBlock, DisplayBlockKind, MAX_DISPLAY_HEADING_BYTES};
+use super::{
+    DisplayBlock, DisplayBlockKind, MAX_DISPLAY_CARD_LEADS_BYTES, MAX_DISPLAY_HEADING_BYTES,
+    json_text_bytes,
+};
 use crate::reports::REPORT_MARKDOWN;
 
 /// The composer writes each card as `### F-01 · {title}`, then the card line
@@ -15,8 +18,23 @@ const SEPARATOR: &str = " · ";
 const LOCATION: &str = "**Location:** ";
 
 /// Gives each card's card line its whole text, and its Location field the text through its
-/// first location. A card whose text does not fit `MAX_DISPLAY_HEADING_BYTES` keeps none.
+/// first location. A card whose text does not fit `MAX_DISPLAY_HEADING_BYTES` keeps none,
+/// and no card keeps any when together they pass `MAX_DISPLAY_CARD_LEADS_BYTES`.
 pub(super) fn mark(source: &str, blocks: &mut [DisplayBlock]) {
+    lead(source, blocks);
+    let total: usize = blocks
+        .iter()
+        .filter_map(|block| block.card_markdown.as_deref())
+        .map(json_text_bytes)
+        .sum();
+    if total > MAX_DISPLAY_CARD_LEADS_BYTES {
+        for block in blocks {
+            block.card_markdown = None;
+        }
+    }
+}
+
+fn lead(source: &str, blocks: &mut [DisplayBlock]) {
     for index in 0..blocks.len().saturating_sub(1) {
         if !blocks[index]
             .heading_markdown
