@@ -86,3 +86,61 @@ fn stand_alone_fields() {
         assert_eq!(shift_headings(text), expected, "{case}");
     }
 }
+
+#[test]
+fn flow_and_changes_hold_what_the_page_draws() {
+    let refused = |line, kind| Err(FieldProblem { line, kind });
+    let before_after =
+        "| Before | After |\n| --- | --- |\n| Reads input unchecked. | Checks it first. |\n";
+    let operations = "| Affected operation | What changes | Source |\n| --- | --- | --- |\n| `Parser::read` | Checks first. | `src/parser.rs` |\n";
+    let cases = [
+        (
+            "a diagram inside a list item",
+            MarkdownField::Flow,
+            "The request path:\n\n- Client side:\n\n  ```mermaid\n  flowchart LR\n    A --> B\n  ```\n".to_owned(),
+            Ok(()),
+        ),
+        (
+            "a fence indented as code",
+            MarkdownField::Flow,
+            "The request path:\n\n    ```mermaid\n    flowchart LR\n      A --> B\n    ```\n".to_owned(),
+            refused(3, ProblemKind::IndentedFence),
+        ),
+        (
+            "only diagrams the page shows as source",
+            MarkdownField::Flow,
+            "```mermaid\nflowchart LR\n  A --> B\n  click A \"https://example.com\"\n```\n\n```mermaid\n%%{init: {}}%%\nflowchart LR\n  A --> B\n```\n".to_owned(),
+            refused(1, ProblemKind::NotDrawn(Undrawable::Link)),
+        ),
+        (
+            "one drawable diagram after one the page shows as source",
+            MarkdownField::Flow,
+            format!(
+                "```mermaid\nflowchart LR\n{}```\n\n```mermaid\nflowchart LR\n  A --> B\n```\n",
+                "  A --> B\n".repeat(501)
+            ),
+            Ok(()),
+        ),
+        (
+            "Before and After, then the operations",
+            MarkdownField::Changes,
+            format!("{before_after}\n{operations}"),
+            Ok(()),
+        ),
+        (
+            "a lone table of another shape",
+            MarkdownField::Changes,
+            "| Area | Change |\n| --- | --- |\n| Parser | Checks first. |\n".to_owned(),
+            refused(1, ProblemKind::NoBeforeAfter),
+        ),
+        (
+            "Before and After without the operations",
+            MarkdownField::Changes,
+            before_after.to_owned(),
+            refused(1, ProblemKind::NoOperations),
+        ),
+    ];
+    for (case, field, text, expected) in cases {
+        assert_eq!(check_field(field, &text), expected, "{case}");
+    }
+}

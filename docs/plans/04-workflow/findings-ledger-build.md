@@ -234,7 +234,7 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 
 **Steps**
 
-- [ ] Write the composer as one pass that appends to a `String` reserved from the record sizes, recording spans as it writes. Escape `|` in table cells. Write locations as code spans with a fence longer than any backtick run in the path. Place the details after the evidence and `Proposed comment` last. Take every fixed word from `ledger/layout.rs`. Escape an extra note's title so it reads as written in a heading, including a trailing `#`. Write a gap under `Evidence`, beginning `Not confirmed.` Leave out the verdict line for `not_specified`. Parse a field only to shift its headings below the layout's own: fields were checked when filed.
+- [ ] Write the composer as one pass that appends to a `String` reserved from the record sizes, recording spans as it writes. Escape `|` in table cells. Write locations as code spans with a fence longer than any backtick run in the path. Place the details after the evidence and `Proposed comment` last. Take every fixed word from `ledger/layout.rs`. Escape an extra note's title so it reads as written in a heading, including a trailing `#`. Write a gap under `Evidence`, beginning `Not confirmed.` Leave out the verdict line for `not_specified`. Parse a field only to shift its headings below the layout's own: fields were checked when saved.
 - [ ] Write `submit_review` and `settle` over the port. They hold no SQLite transaction while composing.
 - [ ] In `reports/display/cutter.rs`, treat an HTML block and inline HTML as ordinary content instead of falling back to the whole document. The reader now shows report HTML as text, so it needs no document context, and a large report that mentions `Vec<u8>` outside code keeps the windowed reader.
 - [ ] Add test `composed_worked_set_matches`: build the worked snapshot in the test, compose it, compare with `worked.md` byte for byte, and check that each recorded span slices exactly its card or section. The snapshot includes a subagent's finding, a gap, a retired finding, a user disposition, an extra note, a title that starts with a code span, a `|` in a reason, an authored level-two heading, and a line with `Vec<u8>` and `<runner>` outside code.
@@ -284,13 +284,13 @@ One writer. Work top-down so each step compiles: callers first, then what they c
 **Produces**
 
 - `record::{save_finding, set_finding_outcome, save_section, read_draft}`: check the Markdown fields and the per-run limits, return every field error, then one port call. The transport caps the list. Field sizes were checked by the protocol and are not checked again.
-- `passes::wait_for_user(store, caller, question)` and `passes::gate(store, request) -> GateDecision`. The block reason names what is owed and how many findings are on file.
+- `passes::wait_for_user(store, caller, question)` and `passes::gate(store, request) -> GateDecision`. The block reason names what is owed and how many findings are saved.
 - `readback::RULE`: the rule text, written once. `readback::read_back(store, session) -> String` within 8,000 bytes of UTF-8: the rule, the open pass and what it owes, then whole lines, one per active finding, newest change first, and a last line that counts those left out and names `read_draft` for the rest.
 - The launch input and the selected-thread prompt append `RULE` after the user's own text.
 
 **Steps**
 
-- [ ] Write the rule as five short imperative sentences from the spec's Rule paragraph. Name the tools. Say that only what is filed is shown and that the lead closes. Do not mention the gate.
+- [ ] Write the rule as five short imperative sentences from the spec's Rule paragraph. Name the tools. Say that only what is saved is shown and that the lead closes. Do not mention the gate.
 - [ ] Write the four record operations and the two pass operations over the port. Check an extra note's title with `layout::repeats_fixed_heading`.
 - [ ] In `check_field`, refuse a footnote definition or reference the way a link reference definition is refused, and add one row to the `stand_alone_fields` table.
 - [ ] Write the read-back with a hard character cap and a deterministic order.

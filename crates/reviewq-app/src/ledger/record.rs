@@ -18,10 +18,10 @@ use super::{
 };
 use crate::access::{AppError, FieldError};
 
-/// `save_finding`'s input: a new finding, or a change to one on file.
+/// `save_finding`'s input: a new finding, or a change to one already saved.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FindingInput {
-    /// Filed without `id`. ReviewQ assigns the next unused ID.
+    /// Saved without `id`. ReviewQ assigns the next unused ID.
     New(FindingFields),
     /// Changes the fields `patch` gives on the finding `id`.
     Change {
@@ -107,7 +107,7 @@ pub async fn set_finding_outcome(
 /// `extra` note's title repeats a fixed section's heading, or the call removes a required
 /// note, which every version must hold, with nothing written; or with one
 /// field error for a store refusal: a missing or stale expected revision, removing a note that
-/// is not on file, a run already at `MAX_EXTRA_NOTES`, or a caller the store cannot bind.
+/// is not saved, a run already at `MAX_EXTRA_NOTES`, or a caller the store cannot bind.
 /// Other store errors pass through.
 pub async fn save_section(
     store: &(impl LedgerStore + ?Sized),

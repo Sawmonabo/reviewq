@@ -12,9 +12,9 @@ const ENTRY: &str = "The existing Claude MCP entry was preserved.";
 const ROLLBACK: &str =
     "Claude changed the ReviewQ MCP entry during setup. Its current value was preserved.";
 
-/// The entry's name. Claude Code names a plugin's tools `mcp__<plugin>__…`, so a server called
-/// `reviewq` shares the plugin's name and Claude refuses the plugin's tools beside it.
-pub(super) const NAME: &str = "reviewq-manage";
+/// The entry's name, owned by the protocol so the MCP server's sentence for an unknown tool
+/// names the same entry.
+pub(super) const NAME: &str = reviewq_protocol::mcp::CLAUDE_MANAGEMENT_SERVER;
 /// The name ReviewQ wrote before. Its own entry there is removed; another server's stays.
 pub(super) const FORMER: &str = "reviewq";
 

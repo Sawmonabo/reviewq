@@ -33,7 +33,9 @@ pub(crate) fn is_mermaid(kind: &CodeBlockKind<'_>) -> bool {
 }
 
 /// Read only actual Mermaid fences from authorized Markdown. The consumer also
-/// hashes the canonical browser fence before attaching a derivative.
+/// hashes the canonical browser fence before attaching a derivative. Each source is written as
+/// `diagram_source` writes it, and only a source the page draws (`undrawable` gives `None`) is
+/// returned, so nothing the page shows as plain source is drawn ahead.
 pub fn mermaid_sources(markdown: &str) -> Vec<String> {
     if !markdown.contains("mermaid") || markdown.len() > 1024 * 1024 {
         return Vec::new();
@@ -57,11 +59,8 @@ pub fn mermaid_sources(markdown: &str) -> Vec<String> {
             }
             Event::End(TagEnd::CodeBlock) => {
                 if let Some(source) = source.take().filter(|source| !source.is_empty()) {
-                    let mut source = source.replace("\r\n", "\n");
-                    if !source.ends_with('\n') {
-                        source.push('\n');
-                    }
-                    if eligible(&source) {
+                    let source = diagram_source(&source);
+                    if undrawable(&source).is_none() {
                         drawings.push(source);
                         if drawings.len() == DISCOVERED {
                             break;
@@ -75,16 +74,114 @@ pub fn mermaid_sources(markdown: &str) -> Vec<String> {
     drawings
 }
 
-fn eligible(source: &str) -> bool {
-    let prefix = source.trim_start();
-    if source.encode_utf16().count() > SOURCE_CHARACTERS
-        || prefix.starts_with("%%{")
-        || prefix.starts_with("---")
-    {
-        return false;
+/// A Mermaid block's text as the page hands it to Mermaid: Windows line endings as `\n`, and
+/// one line ending at the end.
+pub(crate) fn diagram_source(text: &str) -> String {
+    let mut source = text.replace("\r\n", "\n");
+    if !source.ends_with('\n') {
+        source.push('\n');
+    }
+    source
+}
+
+/// Why the page shows a Mermaid source as text instead of drawing it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Undrawable {
+    /// Longer than `SOURCE_CHARACTERS` UTF-16 code units.
+    TooLong,
+    /// More than `MAX_ARROWS` arrows.
+    TooManyArrows,
+    /// Starts, after white space, with a `%%{` directive or `---` front matter.
+    Header,
+    /// Holds a `click` action, an `http:` or `https:` link, `@import` or `url(`.
+    Link,
+}
+
+/// Arrows a drawable source may hold.
+const MAX_ARROWS: usize = 500;
+
+/// Why the page would not draw `source`, written as `diagram_source` writes it, or `None` when
+/// it would. Mirrors `eligibleDiagram` in `web/src/components/markdown/mermaid.ts`, test by test
+/// and in its order; change both together. Like that function it counts UTF-16 code units,
+/// treats white space as JavaScript's `\s` does and ignores ASCII case only.
+pub(crate) fn undrawable(source: &str) -> Option<Undrawable> {
+    let units: Vec<u16> = source.encode_utf16().collect();
+    if units.len() > SOURCE_CHARACTERS {
+        return Some(Undrawable::TooLong);
+    }
+    if arrows(&units) > MAX_ARROWS {
+        return Some(Undrawable::TooManyArrows);
+    }
+    let start = source.trim_start_matches(js_space);
+    if start.starts_with("%%{") || start.starts_with("---") {
+        return Some(Undrawable::Header);
     }
     let lower = source.to_ascii_lowercase();
-    !["http:", "https:", "@import", "click ", "url("]
-        .iter()
-        .any(|item| lower.contains(item))
+    let click = lower.match_indices("click").any(|(index, word)| {
+        !lower[..index]
+            .chars()
+            .next_back()
+            .is_some_and(|before| before.is_ascii_alphanumeric() || before == '_')
+            && lower[index + word.len()..]
+                .chars()
+                .next()
+                .is_some_and(js_space)
+    });
+    let url = lower.match_indices("url").any(|(index, word)| {
+        lower[index + word.len()..]
+            .trim_start_matches(js_space)
+            .starts_with('(')
+    });
+    (click
+        || url
+        || ["http:", "https:", "@import"]
+            .iter()
+            .any(|item| lower.contains(item)))
+    .then_some(Undrawable::Link)
+}
+
+/// Matches of `/-->|---|==>|-.->|->>/g` in `units`: at each position the first alternative that
+/// matches, then the search resumes after it. `.` is one code unit other than a line terminator.
+fn arrows(units: &[u16]) -> usize {
+    let unit = |text: &str| text.encode_utf16().collect::<Vec<u16>>();
+    let [long, rule, thick, open] = [unit("-->"), unit("---"), unit("==>"), unit("->>")];
+    let dash = u16::from(b'-');
+    let any = |value: u16| !matches!(value, 0x0a | 0x0d | 0x2028 | 0x2029);
+    let (mut count, mut index) = (0, 0);
+    while index < units.len() {
+        let rest = &units[index..];
+        let length =
+            if rest.starts_with(&long) || rest.starts_with(&rule) || rest.starts_with(&thick) {
+                3
+            } else if rest.len() >= 4 && rest[0] == dash && any(rest[1]) && rest[2..4] == long[1..]
+            {
+                4
+            } else if rest.starts_with(&open) {
+                3
+            } else {
+                0
+            };
+        if length == 0 {
+            index += 1;
+        } else {
+            count += 1;
+            index += length;
+        }
+    }
+    count
+}
+
+/// Whether `character` is white space to JavaScript's `\s`.
+fn js_space(character: char) -> bool {
+    matches!(
+        character,
+        '\t' | '\n' | '\u{0b}' | '\u{0c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202f}'
+                | '\u{205f}'
+                | '\u{3000}'
+                | '\u{feff}'
+    )
 }

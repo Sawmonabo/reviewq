@@ -614,7 +614,7 @@ fn put_note(
     Ok(())
 }
 
-/// Opens a full-review pass for a record filed on a run with no version and no open pass.
+/// Opens a full-review pass for a record saved on a run with no version and no open pass.
 fn open_pass(
     db: &Connection,
     caller: &Caller,

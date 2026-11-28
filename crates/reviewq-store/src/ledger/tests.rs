@@ -28,6 +28,7 @@ use sha2::{Digest, Sha256};
 use crate::SqliteStore;
 
 mod companion;
+mod managing;
 
 const SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -125,7 +126,9 @@ fn publish_is_conditional() {
                 run: run_id.clone(),
                 pass: Some(pass.id),
                 kind: FailureKind::UnfinishedReview,
-                reason: "The lead ended without finishing; 1 finding is on file.".into(),
+                reason:
+                    "The lead's last turn ended without closing the review. 1 finding is saved."
+                        .into(),
                 sequence: Revision::try_from(1_i64).unwrap(),
                 turn: None,
             })
@@ -133,7 +136,7 @@ fn publish_is_conditional() {
             .unwrap();
         assert_eq!(inbox(&store).await, [Kind::ReportFailed]);
 
-        // A record filed after the snapshot makes the commit stale.
+        // A record saved after the snapshot makes the commit stale.
         let early = closing(&store, "finish").await;
         file_notes(&store, &[NoteSection::Summary]).await;
         let outcome = store.commit_publish(full_review(early)).await;
@@ -169,6 +172,7 @@ fn publish_is_conditional() {
                 ContextRequest {
                     receipt: None,
                     collection: Collection::Findings,
+                    findings: Default::default(),
                     after: None,
                     limit: 10,
                 },
@@ -273,10 +277,21 @@ fn publish_is_conditional() {
         // published an update in between.
         assess(&store, "assess-1", 1).await;
         file(&store, "file-2", "Refund skips the ledger lock").await;
+        // Until a version publishes them, the new F-02 and F-01's outcome are the lead's
+        // draft: the managing reads see the published F-01 alone, and no search finds F-02.
+        assert_eq!(
+            managing::published_findings(&store).await,
+            [("F-01".into(), fields().title, false)]
+        );
+        assert_eq!(managing::found_by_title(&store, "ledger lock").await, None);
+        assert_eq!(
+            managing::found_by_title(&store, "same invoice").await,
+            Some("F-01".into())
+        );
         activity(&store, "idle").await;
         settle_due(&store).await.unwrap();
         assert_eq!(versions(&store).await, ["full_review", "update"]);
-        // A full review is refused, keeping every record, until the notes it needs are filed.
+        // A full review is refused, keeping every record, until the sections it needs are saved.
         let Err(AppError::InvalidFields(errors)) =
             finish_full_review(&store, "close-without-notes").await
         else {

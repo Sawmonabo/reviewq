@@ -1,6 +1,6 @@
 # ACTION · Declare requested review actions and verify GitLab outcomes
 
-**Start after HOST, HISTORY and SOURCES.** A registered lead can declare a user's request for comments, approval, both or cancellation. ReviewQ verifies the result, holds incomplete work safely and returns the same evidence to the browser and managing chat. Read the [workflow contract](../../specs/review-workflow.md#verified-actions-and-dispatch), [HOST delivery contract](../02-sessions/hosts.md) and [native evidence reader](../02-sessions/history.md). ACTION implements the two native command adapters when first used. The integration Sol adds their commands and HTTP routes to the existing SLICE service. ENTRY later verifies the full public CLI and seven MCP tools.
+**Start after HOST, HISTORY and SOURCES.** A registered lead can declare a user's request for comments, approval, both or cancellation. ReviewQ verifies the result, holds incomplete work safely and returns the same evidence to the browser and managing chat. Read the [workflow contract](../../specs/review-workflow.md#verified-actions-and-dispatch), [HOST delivery contract](../02-sessions/hosts.md) and [native evidence reader](../02-sessions/history.md). ACTION implements the two native command adapters when first used. The integration Sol adds their commands and HTTP routes to the existing SLICE service. ENTRY later verifies the full public CLI and eight MCP tools.
 
 ## Deliverables and boundaries
 

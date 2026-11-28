@@ -407,7 +407,7 @@ pub struct FindingAssessment {
 }
 
 /// `save_section`: replaces one note. An empty body removes it. A removed note keeps its
-/// revision count, so filing it again continues from there.
+/// revision count, so saving it again continues from there.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NoteWrite {
     pub key: NoteKey,
@@ -482,7 +482,7 @@ pub enum LedgerSelection {
     /// These findings in full, in ID order. The protocol allows at most 10.
     Findings(Vec<FindingId>),
     /// These sections' notes in full. `Extra` returns every extra note in the order first
-    /// filed.
+    /// saved.
     Notes(Vec<NoteSection>),
 }
 
@@ -609,9 +609,9 @@ pub struct SettleCandidate {
     /// The pass `facts.pass` describes: the pass an `unfinished_review` names. `None` with no
     /// pass, when an `update_failed` names only the run.
     pub pass: Option<PassId>,
-    /// Findings on file, for an `unfinished_review` reason.
+    /// Findings saved, for an `unfinished_review` reason.
     pub active_findings: u32,
-    /// The sections of the notes on file when the open pass is a full review, so an
+    /// The sections of the notes saved when the open pass is a full review, so an
     /// `unfinished_review` reason can name the notes its closing call still needs. `None`
     /// for a selected-thread pass or no pass.
     pub full_review_notes: Option<Vec<NoteSection>>,

@@ -1,7 +1,7 @@
 //! Verified review observations and scoped selection reads.
 
 use reviewq_domain::identity::{
-    GitSha, MrIdentity, ReviewId, Revision, RunId, SessionKey, TicketKey,
+    GitSha, MrIdentity, ReceiptId, ReviewId, Revision, RunId, SessionKey, TicketKey,
 };
 use reviewq_domain::session::{HostProvider, LeadTarget, SessionTarget};
 
@@ -126,10 +126,14 @@ pub trait ReviewLookup: Send + Sync {
         session: SessionKey,
     ) -> AppFuture<'_, RunId>;
 
+    /// A page of the reviews `filter` selects. A non-empty `search` also requires the text the
+    /// dashboard's queue search matches, or the title of a finding a published version of one
+    /// of the review's runs showed; it is at most 200 characters.
     fn management_reviews(
         &self,
         actor: Actor,
         filter: ManagementFilter,
+        search: String,
         offset: u32,
         limit: u16,
     ) -> AppFuture<'_, Snapshot<ManagementReviews>>;
@@ -165,9 +169,25 @@ pub enum ManagementFilter {
 #[derive(Debug)]
 pub struct ManagementReviews {
     pub items: Vec<QueueItem>,
+    /// For each listed review whose published finding title matched the search, that finding.
+    pub findings: Vec<FindingMatch>,
     pub total: u64,
     pub sync: SourceSync,
     pub settings: Revision,
+}
+
+/// The finding whose title a management search matched, on the newest published version of
+/// one of the review's runs that showed such a title, then the lowest finding ID.
+#[derive(Debug)]
+pub struct FindingMatch {
+    pub review_id: ReviewId,
+    pub run_id: RunId,
+    pub lead_session_key: SessionKey,
+    pub receipt_id: ReceiptId,
+    pub finding_id: String,
+    pub title: String,
+    /// Whether that version is the run's current one.
+    pub current: bool,
 }
 
 #[derive(Debug)]

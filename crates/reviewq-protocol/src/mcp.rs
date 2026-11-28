@@ -8,9 +8,34 @@ use crate::{
     RunIdDto, SessionKeyDto, SubmissionIdDto,
 };
 
-/// What the model reads when a Claude session calls a ReviewQ tool by a name ReviewQ does not
-/// serve, as one still running an older plugin or tool list does after an update.
+/// Writes the name of the MCP server entry that carries the management tools to a Claude
+/// session, as a literal, so the sentence below can quote it at compile time.
+macro_rules! claude_management_server {
+    () => {
+        "reviewq-manage"
+    };
+}
+
+/// The name of the MCP server entry ReviewQ writes into a checkout's Claude configuration. It
+/// differs from the plugin's name because Claude Code names a plugin's tools
+/// `mcp__<plugin>__…`, so a server called `reviewq` shares the plugin's name and Claude refuses
+/// the plugin's tools beside it.
+pub const CLAUDE_MANAGEMENT_SERVER: &str = claude_management_server!();
+
+/// What the model reads when a Claude session calls one of the plugin's ReviewQ tools by a
+/// name ReviewQ does not serve, as a session still running an older plugin does after an
+/// update.
 pub const UNKNOWN_TOOL_CLAUDE: &str = "This ReviewQ tool is not available; ask the user to run /reload-plugins to load the current ReviewQ tools.";
+
+/// What the model reads when a Claude session calls ReviewQ's MCP server by a tool name it
+/// does not serve. The management tools reach Claude through the checkout's MCP server entry,
+/// not the plugin, so `/reload-plugins` leaves them as they were; Claude Code reads a server's
+/// tools again when the user reconnects it from `/mcp`.
+pub const UNKNOWN_MANAGEMENT_TOOL_CLAUDE: &str = concat!(
+    "This ReviewQ tool is not available; ask the user to run /mcp, select the ",
+    claude_management_server!(),
+    " server and choose Reconnect to load the current ReviewQ tools."
+);
 
 /// What the model reads when a Codex session calls a ReviewQ tool by a name ReviewQ does not
 /// serve, as one still holding an older tool list does after an update.
@@ -21,6 +46,7 @@ pub const UNKNOWN_TOOL_CODEX: &str = "This ReviewQ tool is not available; ask th
 pub enum ManagementTool {
     SearchReviews,
     GetReview,
+    GetFindings,
     ReadAgentTranscript,
     SendAgentMessage,
     StartReview,
@@ -29,9 +55,10 @@ pub enum ManagementTool {
 }
 
 /// Every management tool, in the order the MCP server lists them.
-pub const MANAGEMENT_TOOLS: [ManagementTool; 7] = [
+pub const MANAGEMENT_TOOLS: [ManagementTool; 8] = [
     ManagementTool::SearchReviews,
     ManagementTool::GetReview,
+    ManagementTool::GetFindings,
     ManagementTool::ReadAgentTranscript,
     ManagementTool::SendAgentMessage,
     ManagementTool::StartReview,
@@ -45,6 +72,7 @@ impl ManagementTool {
         match self {
             Self::SearchReviews => "search_reviews",
             Self::GetReview => "get_review",
+            Self::GetFindings => "get_findings",
             Self::ReadAgentTranscript => "read_agent_transcript",
             Self::SendAgentMessage => "send_agent_message",
             Self::StartReview => "start_review",
@@ -57,13 +85,16 @@ impl ManagementTool {
     pub const fn description(self) -> &'static str {
         match self {
             Self::SearchReviews => {
-                "Lists the reviews of this checkout's configured projects, each with its summary and dashboard link, and when ReviewQ last synced them. filter picks all, unstarted, working, waiting, needs_input, agent_questions or archived, and defaults to needs_input; offset and limit page through the list."
+                "Finds reviews of this checkout's configured projects by text and status, a page at a time. query matches what the dashboard's search matches (merge request title, project path, author, ticket key and title) and the titles of the findings any published report version of the review showed; a review found by a finding title names that finding as matchedFinding, with its run's sessionKey and the receiptId of the newest version that showed it, ready for get_findings. filter picks all, unstarted, working, waiting, needs_input, agent_questions or archived, and both apply; it defaults to all with a query and to needs_input without one. offset and limit page through the list. Returns each review's summary and dashboard link, the total, nextOffset and when ReviewQ last synced the projects."
             }
             Self::GetReview => {
-                "Reads one review, named in target by its ticket, merge request or registration, with its reviewing agents' runs, its follow-ups and dashboard links. For the lead agent, or the session sessionKey names, it also returns the published report (its summary, or with report a section of it), the agent's pending questions, its posting action, sessions and recovery, and the delivery of the last message or of the one messageSubmissionId names. launchSubmissionId reads what became of a start_review call."
+                "Opens one review, named in target by its ticket, merge request or registration: its reviewing agents' runs, paged with offset and limit, its follow-ups and dashboard links. For the lead agent's run, or the run of the session sessionKey names, it also returns the agent's pending questions, its posting action, sessions and recovery, the delivery of the last message or of the one messageSubmissionId names, and one read of the run's published report chosen by report: summary, the default, gives a version's summary; versions lists the run's published versions newest first, each with its receiptId, publication time, verdict, reviewed commit and parent version, paged by cursor and limit; section gives a version's text from offset. summary and section read the current version unless receiptId names an older one. launchSubmissionId reads what became of a start_review call."
+            }
+            Self::GetFindings => {
+                "Reads the findings of one published report version of a review named in target: the lead agent's run, or the run of the session sessionKey names, at its current version or the older one receiptId names. state picks open findings, the ones the version shows, retired findings, the ones the version closed with an outcome such as fixed, or all, the default; kind picks functional or quality findings. Returns the version and its findings in ID order, each with its title, severity, blocking, kind, state, outcome, locations, issue, consequence, evidence and proposed comment. Follow nextCursor with the same arguments for the rest. Only published versions are read; a run with none has no findings to return."
             }
             Self::ReadAgentTranscript => {
-                "Reads a bounded page of a reviewing agent's transcript, the lead's or the one sessionKey names. read.kind page reads entries from a cursor, direction or aroundId; content reads one long entry by the ref a page returned. Follow the returned continuation for more."
+                "Reads a reviewing agent's transcript a bounded page at a time, the lead's or the one sessionKey names. read.kind page reads entries from a cursor, direction or aroundId; search finds the entries whose text contains query, oldest first or, with direction older, newest first, and returns each match's entryId with the text around it, which a page read with that entry as aroundId shows in place; content reads one long entry by the ref a page returned. Follow the returned continuation for more."
             }
             Self::SendAgentMessage => {
                 "Queues a message for the review's lead agent, or the one sessionKey names, only when the user asked you to send it. Give the user's text, and a new submissionId, which you reuse only to retry the same message; finding points the message at a finding or passage of a published report version. Returns the delivery receipt: queued is not yet delivered."
@@ -83,7 +114,10 @@ impl ManagementTool {
     /// Whether a call changes something, so a repeat must carry the same `submissionId`.
     pub const fn changes(self) -> bool {
         match self {
-            Self::SearchReviews | Self::GetReview | Self::ReadAgentTranscript => false,
+            Self::SearchReviews
+            | Self::GetReview
+            | Self::GetFindings
+            | Self::ReadAgentTranscript => false,
             Self::SendAgentMessage
             | Self::StartReview
             | Self::AnswerAgentQuestion
@@ -103,6 +137,9 @@ impl ManagementTool {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SearchReviews {
+    /// Text to look for; empty or absent searches nothing and lists by filter alone.
+    #[cfg_attr(feature = "schema", schemars(length(max = 200)))]
+    pub query: Option<String>,
     pub filter: Option<ReviewFilter>,
     pub offset: Option<u32>,
     pub limit: Option<u16>,
@@ -154,6 +191,35 @@ pub enum ReportRead {
         offset: Option<crate::SafeCountDto>,
         characters: Option<u32>,
     },
+    Versions {
+        cursor: Option<String>,
+        limit: Option<u16>,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct GetFindings {
+    pub target: String,
+    pub session_key: Option<SessionKeyDto>,
+    pub receipt_id: Option<ResourceIdDto>,
+    pub state: Option<FindingState>,
+    pub kind: Option<crate::reports::FindingKind>,
+    pub cursor: Option<String>,
+    pub limit: Option<u16>,
+}
+
+/// Which findings of a published version a read returns. A version shows its open findings
+/// and records the outcome that retired each finding it closed; it holds nothing about a
+/// finding retired by an earlier version.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum FindingState {
+    Open,
+    Retired,
+    All,
 }
 
 #[derive(Deserialize)]
@@ -185,6 +251,11 @@ pub enum TranscriptRead {
         #[serde(rename = "ref")]
         reference: String,
         cursor: Option<String>,
+    },
+    Search {
+        query: String,
+        cursor: Option<String>,
+        direction: Option<crate::history::Direction>,
     },
 }
 

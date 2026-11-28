@@ -59,8 +59,11 @@ impl RecoveryStore for SqliteStore {
     ) -> AppFuture<'_, Snapshot<Option<Episode>>> {
         Box::pin(async move {
             self.read(move |db| {
-                let lead = target(db, &actor, &run, &session)?;
-                snapshot(db, latest(db, &lead)?)
+                let lead = lead(db, &actor, &run, &session)?;
+                // Only a Codex lead is resumed, so another host's lead has no episode, and
+                // the managing `get_review`, which reads this for every lead, still answers.
+                let codex = lead.binding().identity().provider() == HostProvider::Codex;
+                snapshot(db, if codex { latest(db, &lead)? } else { None })
             })
             .await
             .map_err(StoreError::app)
@@ -228,15 +231,29 @@ fn operator(actor: &Actor) -> Result<(), AppError> {
     Ok(())
 }
 
+/// The Codex lead `session` of `run` whose recovery the actor may change.
 fn target(
     db: &Connection,
     actor: &Actor,
     run: &RunId,
     session: &SessionKey,
 ) -> Result<LeadTarget, StoreError> {
+    let lead = lead(db, actor, run, session)?;
+    if lead.binding().identity().provider() != HostProvider::Codex {
+        return Err(AppError::NotFound.into());
+    }
+    Ok(lead)
+}
+
+/// The lead `session` of `run`, when the actor may read it.
+fn lead(
+    db: &Connection,
+    actor: &Actor,
+    run: &RunId,
+    session: &SessionKey,
+) -> Result<LeadTarget, StoreError> {
     let lead = lead_for_run(db, run)?.ok_or(AppError::NotFound)?;
-    if lead.session_key() != session || lead.binding().identity().provider() != HostProvider::Codex
-    {
+    if lead.session_key() != session {
         return Err(AppError::NotFound.into());
     }
     super::allow_target(db, actor, &lead)?;

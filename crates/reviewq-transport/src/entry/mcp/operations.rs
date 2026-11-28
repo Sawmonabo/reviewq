@@ -26,7 +26,15 @@ pub(super) async fn list(
 ) -> Result<Value, AppError> {
     let limit = list_limit(args.limit)?;
     let offset = args.offset.unwrap_or(0);
-    let filter = match args.filter.unwrap_or(ReviewFilter::NeedsInput) {
+    let search = args.query.unwrap_or_default();
+    // A search looks at every stage unless the caller narrows it: only Awaiting input, the
+    // listing's default, would hide most matches.
+    let default = if search.is_empty() {
+        ReviewFilter::NeedsInput
+    } else {
+        ReviewFilter::All
+    };
+    let filter = match args.filter.unwrap_or(default) {
         ReviewFilter::All => ManagementFilter::All,
         ReviewFilter::NeedsInput => ManagementFilter::NeedsInput,
         ReviewFilter::AgentQuestions => ManagementFilter::AgentQuestions,
@@ -37,15 +45,30 @@ pub(super) async fn list(
     };
     let page = entry
         .store
-        .management_reviews(actor, filter, offset, limit)
+        .management_reviews(actor, filter, search, offset, limit)
         .await?
         .value;
     let mut values = Vec::with_capacity(page.items.len());
     for item in &page.items {
         let data = project_review(item)?;
+        let matched = page
+            .findings
+            .iter()
+            .find(|found| found.review_id == item.review_id)
+            .map(|found| {
+                json!({
+                    "findingId": found.finding_id,
+                    "title": found.title,
+                    "runId": found.run_id.as_str(),
+                    "sessionKey": found.lead_session_key.as_str(),
+                    "receiptId": found.receipt_id.as_str(),
+                    "currentVersion": found.current,
+                })
+            });
         values.push(json!({
             "summary": data,
             "dashboard": dashboard(entry, &item.review_id, None),
+            "matchedFinding": matched,
         }));
     }
     let active = entry.active_source().await?;
@@ -266,6 +289,9 @@ async fn read_report(
                 .await?;
             Ok(json!({"kind":"section","value":reports::project_section(stored.value)?}))
         }
+        ReportRead::Versions { cursor, limit } => {
+            super::lookups::versions(entry, actor, run, cursor, limit).await
+        }
     }
 }
 
@@ -379,6 +405,14 @@ pub(super) async fn transcript(
             .await?;
             serde_json::to_value(source.data).map_err(|_| AppError::Internal)
         }
+        TranscriptRead::Search {
+            query,
+            cursor,
+            direction,
+        } => {
+            let target = (run, session);
+            super::lookups::search(entry, actor, target, &query, cursor.as_deref(), direction).await
+        }
     }
 }
 
@@ -482,7 +516,7 @@ async fn send_result(
     }))
 }
 
-async fn select(
+pub(super) async fn select(
     entry: &Entry,
     actor: &Actor,
     id: ReviewId,

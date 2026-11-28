@@ -180,7 +180,7 @@ pub struct SubmitReceipt {
     pub retired: Vec<FindingIdDto>,
     /// How many findings of the parent version stayed at their revision.
     pub carried: u64,
-    /// The findings that subagents filed or changed in this version.
+    /// The findings that subagents saved or changed in this version.
     pub by_subagents: Vec<FindingIdDto>,
 }
 

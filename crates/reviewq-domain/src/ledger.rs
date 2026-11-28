@@ -85,7 +85,7 @@ bounded_integer!(
 );
 
 impl RecordRevision {
-    /// The revision of a newly filed record.
+    /// The revision of a newly saved record.
     pub const FIRST: Self = Self(1);
 
     /// The revision after this one, or `None` past SQLite's integer range.
@@ -311,7 +311,7 @@ pub struct SettleFacts {
     /// The run has a published version, which an update follows.
     pub has_version: bool,
     /// Some record changed after the run's current version, or, on a run with no version,
-    /// some record was filed.
+    /// some record was saved.
     pub unpublished: bool,
 }
 

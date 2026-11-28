@@ -11,10 +11,10 @@ pub use display::{
     HtmlRendering, MAX_DISPLAY_BLOCKS, MAX_DISPLAY_HEADING_BYTES, MAX_DISPLAY_HEADINGS_BYTES,
     build_display_index, build_report_display_index,
 };
-pub(crate) use drawings::is_mermaid;
 pub use drawings::{
     DRAWING_RECIPE, DrawingOutput, DrawingRenderer, MAX_DRAWING_BYTES, mermaid_sources,
 };
+pub(crate) use drawings::{Undrawable, diagram_source, is_mermaid, undrawable};
 
 pub use revision::{FindingEdit, ReportEdits};
 
@@ -239,8 +239,31 @@ pub struct ContextPosition {
 pub struct ContextRequest {
     pub receipt: Option<ReceiptId>,
     pub collection: Collection,
+    /// Which findings a `Findings` read returns; other collections ignore it.
+    pub findings: FindingSelection,
     pub after: Option<ContextPosition>,
     pub limit: u16,
+}
+
+/// Which findings of a version a `Findings` read returns, and how much of each.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FindingSelection {
+    pub state: FindingState,
+    pub kind: Option<FindingKind>,
+    /// Whether each finding carries its issue and proposed comment. The Findings panel leaves
+    /// them out, as it shows them from the report text.
+    pub full_text: bool,
+}
+
+/// A finding's place in one version, from what the version records. `Open`: the version shows
+/// it. `Retired`: the version records an outcome that retires a finding its parent showed. A
+/// finding retired by an earlier version is in neither set.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum FindingState {
+    #[default]
+    Open,
+    Retired,
+    All,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -275,13 +298,25 @@ pub struct FindingDetails {
     pub details: Option<String>,
 }
 
-/// What the Findings panel shows of a finding beside its title and badges. The rest is in
-/// the report text at the descriptor's `source`.
+/// A finding's fields at the record revision a version published. The Findings panel shows
+/// all but `issue` and `proposed_comment` beside its title and badges, and reads the rest in
+/// the report text at the descriptor's `source`; a full-text read fills those two as well.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FindingPreview {
+    pub kind: FindingKind,
     pub locations: Vec<FindingLocation>,
     pub consequence: String,
     pub evidence: FindingBasis,
+    pub issue: Option<String>,
+    pub proposed_comment: Option<String>,
+}
+
+/// The outcome a version records for one of its findings.
+#[derive(Clone)]
+pub struct FindingChange {
+    pub conclusion: FindingConclusion,
+    pub reason: String,
+    pub checked_sha: Option<GitSha>,
 }
 
 #[derive(Clone)]
@@ -298,9 +333,13 @@ pub enum Descriptor {
         title: String,
         severity: Severity,
         blocking: bool,
-        source: SourceRange,
+        /// The card's range in this version's text; `None` for a retired finding, whose card
+        /// is in the parent version.
+        source: Option<SourceRange>,
         details: Option<Box<FindingPreview>>,
         disposition: Option<Box<FindingDisposition>>,
+        retired: bool,
+        outcome: Option<Box<FindingChange>>,
     },
     Change {
         id: String,

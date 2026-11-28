@@ -2,7 +2,7 @@
 """Publish a fixture export's report versions through a development service's ledger routes.
 
 Builds the checkout's binary, starts the fixture providers and a `serve --validation` service
-in a new directory, links each Claude lead that has a ledger plan, files its records and closes
+in a new directory, links each Claude lead that has a ledger plan, saves its records and submits
 its review through the plugin's bridge, then measures every published version. The profile it
 leaves under `<root>/profile` opens with `pnpm --dir web run dev --profile <root>/profile
 --validation`.

@@ -283,6 +283,7 @@ pub(super) async fn context(
             ContextRequest {
                 receipt,
                 collection,
+                findings: app::FindingSelection::default(),
                 after,
                 limit,
             },
@@ -495,7 +496,7 @@ pub(in crate::entry) fn project_section(
     })
 }
 
-fn summary(value: app::ReportSummary) -> Result<dto::ReportSummary, AppError> {
+pub(in crate::entry) fn summary(value: app::ReportSummary) -> Result<dto::ReportSummary, AppError> {
     Ok(dto::ReportSummary {
         reference: reference(value.reference)?,
         parent_receipt_id: value
@@ -558,12 +559,14 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
             source,
             details,
             disposition,
+            ..
         } => dto::Descriptor::Finding {
             finding_id: id,
             title,
             severity: project_severity(severity),
             blocking,
-            source: range(source)?,
+            // The panel reads only the findings a version shows, each with its card.
+            source: range(source.ok_or(AppError::Internal)?)?,
             disposition: disposition.map(|value| {
                 Box::new(dto::FindingDisposition {
                     blocking: value.blocking,
@@ -617,7 +620,7 @@ fn descriptor(value: Descriptor) -> Result<dto::Descriptor, AppError> {
     })
 }
 
-pub(super) fn project_severity(value: app::Severity) -> dto::Severity {
+pub(in crate::entry) fn project_severity(value: app::Severity) -> dto::Severity {
     match value {
         app::Severity::P0 => dto::Severity::P0,
         app::Severity::P1 => dto::Severity::P1,
@@ -626,21 +629,21 @@ pub(super) fn project_severity(value: app::Severity) -> dto::Severity {
     }
 }
 
-pub(super) fn project_finding_kind(value: app::FindingKind) -> dto::FindingKind {
+pub(in crate::entry) fn project_finding_kind(value: app::FindingKind) -> dto::FindingKind {
     match value {
         app::FindingKind::Functional => dto::FindingKind::Functional,
         app::FindingKind::Quality => dto::FindingKind::Quality,
     }
 }
 
-pub(super) fn project_location(value: app::FindingLocation) -> dto::FindingLocation {
+pub(in crate::entry) fn project_location(value: app::FindingLocation) -> dto::FindingLocation {
     dto::FindingLocation {
         path: value.path,
         line: value.line,
     }
 }
 
-pub(super) fn project_basis(value: app::FindingBasis) -> dto::FindingBasis {
+pub(in crate::entry) fn project_basis(value: app::FindingBasis) -> dto::FindingBasis {
     dto::FindingBasis {
         kind: match value.kind {
             app::FindingBasisKind::Observed => dto::FindingBasisKind::Observed,
@@ -650,7 +653,9 @@ pub(super) fn project_basis(value: app::FindingBasis) -> dto::FindingBasis {
     }
 }
 
-pub(super) fn project_conclusion(value: app::FindingConclusion) -> dto::FindingConclusion {
+pub(in crate::entry) fn project_conclusion(
+    value: app::FindingConclusion,
+) -> dto::FindingConclusion {
     match value {
         app::FindingConclusion::Fixed => dto::FindingConclusion::Fixed,
         app::FindingConclusion::ClarifiedWithdrawn => dto::FindingConclusion::ClarifiedWithdrawn,

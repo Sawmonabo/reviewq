@@ -41,6 +41,7 @@ mod parts;
 mod result;
 mod search;
 pub(super) use live::Watchers;
+pub(super) use search::search;
 
 pub(super) fn routes() -> axum::Router<Arc<Entry>> {
     use axum::routing::get;

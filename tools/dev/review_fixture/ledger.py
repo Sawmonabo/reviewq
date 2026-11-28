@@ -32,7 +32,7 @@ def note(section, body, title=None):
     return value
 
 
-# What a plan files for each note a first version or full review needs before it can close.
+# What a plan saves for each section a first version or full review needs before it is submitted.
 CLOSING_NOTES = {
     "summary": "Checks each parser instruction before the review step reads it.",
     "rationale": "Request changes until every reported input is handled.",
@@ -46,8 +46,8 @@ CLOSING_NOTES = {
 
 
 def closing_notes(*own):
-    """The save_section calls for the notes a first version or full review needs, except the
-    sections in `own`, which the plan files itself."""
+    """The save_section calls for the sections a first version or full review needs, except the
+    sections in `own`, which the plan saves itself."""
     return [call("save_section", note(section, body)) for section, body in CLOSING_NOTES.items()
             if section not in own]
 
@@ -57,7 +57,7 @@ def finish(head, verdict="request_changes", **extra):
 
 
 def worked(head):
-    """The record set `crates/reviewq-app/src/ledger/compose/tests.rs` builds, filed as a full
+    """The record set `crates/reviewq-app/src/ledger/compose/tests.rs` builds, saved as a full
     review and then a second full review that changes F-01, assesses F-01, F-02 and F-03,
     settles F-03 and adds F-04. A full review must assess every finding it does not change."""
     first = [
@@ -165,8 +165,8 @@ def filler(index, size_lines, title_prefix="Filler"):
 
 
 def closing(head, tail, calls, own=()):
-    """One turn that files `calls`, the closing notes the plan does not file itself, and the
-    publication note that ends in `tail`, then closes the first version."""
+    """One turn that saves `calls`, the closing sections the plan does not save itself, and the
+    publication section that ends in `tail`, then submits the first version."""
     notes = closing_notes(*own)
     return [{"turn": [*calls, *notes, call("save_section", note("publication", tail)), finish(head)]}]
 
@@ -174,13 +174,17 @@ def closing(head, tail, calls, own=()):
 def specimens(head):
     """One plan per reader limit. Each crosses one limit and stays inside the others."""
     bytes_over = [call("save_finding", filler(i, 4)) for i in range(22)]
-    # The flow note needs its Mermaid diagram and the changes note its table. Each takes the
-    # place of four lines, so the note stays within its 32 KiB.
-    opening = {"flow": "```mermaid\nflowchart LR\n  Report --> Reader\n```\n\n",
-               "changes": "| Before | After |\n| --- | --- |\n| Short. | Long. |\n\n"}
-    lines_over = [call("save_section", note(section, opening[section] + "\n".join(["Report line."] * 2516)
-                                           if section in opening else "\n".join(["Report line."] * 2520)))
-                  for section in ("flow", "changes", "questions", "verification")]
+    # The flow section needs its Mermaid diagram, and the changes section a table with the two
+    # columns Before and After, then a table with the columns Affected operation, What changes
+    # and Source. Each opening takes the place of enough lines to keep the section within its
+    # 32 KiB.
+    opening = {"flow": ("```mermaid\nflowchart LR\n  Report --> Reader\n```\n\n", 2516),
+               "changes": ("| Before | After |\n| --- | --- |\n| Short. | Long. |\n\n"
+                           "| Affected operation | What changes | Source |\n| --- | --- | --- |\n"
+                           "| Report | Grows. | `report.md` |\n\n", 2508)}
+    lines_over = [call("save_section", note(section, head + "\n".join(["Report line."] * count)))
+                  for section in ("flow", "changes", "questions", "verification")
+                  for head, count in [opening.get(section, ("", 2520))]]
     line_over = [call("save_finding", finding(
         "Locations in long Unicode paths", "P3", False, "quality", "Every path is long.", "The line is long.",
         "The location line exceeds 16 KiB.",
@@ -284,8 +288,8 @@ LEDGER_VERSIONS = {
          "marker": {"text": "**one** &amp; two 🧪", "scalar": 1077164, "byte": 1077283}},
     ],
     "specimen-lines": [
-        {"bytes": 131843, "lines": 10128, "max_line_bytes": 111, "code_points": 131837, "findings": 0,
-         "marker": {"text": "REPORT-LINES-TAIL", "scalar": 131819, "byte": 131825}},
+        {"bytes": 131841, "lines": 10124, "max_line_bytes": 111, "code_points": 131835, "findings": 0,
+         "marker": {"text": "REPORT-LINES-TAIL", "scalar": 131817, "byte": 131823}},
     ],
     "specimen-line": [
         {"bytes": 27823, "lines": 72, "max_line_bytes": 26340, "code_points": 23014, "findings": 1,

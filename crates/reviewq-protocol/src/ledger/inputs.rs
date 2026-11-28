@@ -162,7 +162,7 @@ pub struct SetFindingOutcome {
         schemars(length(max = MAX_DISCUSSION_IDS), extend("uniqueItems" = true))
     )]
     pub discussion_ids: Vec<DiscussionIdDto>,
-    /// The commit you checked, when it differs from the reviewed revision of the closing call.
+    /// The commit you checked, when it differs from the revision you give to submit_review.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "schema", schemars(with = "GitShaDto"))]
     pub checked_sha: Option<GitShaDto>,
@@ -256,8 +256,11 @@ pub struct SubmitReview {
     pub assessments: Vec<Assessment>,
 }
 
-// A stored report can also read `not_specified`, as imported ones do, but a closing call always
-// states one of these three, so the schema offers no other.
+// A stored version can also read `not_specified`: a version that states no verdict, whose report
+// leaves the verdict line out. A first version or a full review always states one of these
+// three. An update or a selected-thread check that states none carries its parent's verdict,
+// `not_specified` included, so a call never states that value itself and the schema offers no
+// other.
 /// The verdict of the review.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]

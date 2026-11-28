@@ -20,7 +20,7 @@ use reviewq_app::ledger::{
 use reviewq_domain::identity::{ReceiptId, Revision, RunId};
 use rusqlite::{Connection, OptionalExtension};
 
-pub(crate) use rows::preview_at;
+pub(crate) use rows::locations;
 
 use crate::{SqliteStore, StoreError};
 

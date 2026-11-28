@@ -1,6 +1,6 @@
 //! Markdown rules for authored ledger fields, judged by the parser the reader uses.
 //!
-//! A field is checked when it is filed and stored as written. The composer later writes each
+//! A field is checked when it is saved and stored as written. The composer later writes each
 //! field as its own block and shifts its headings, so a field that passes here cannot open or
 //! swallow a section or card of the report.
 
@@ -12,8 +12,9 @@ use satteri_pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 
 use super::NoteSection;
 use super::layout::{COVER_LABELS, CardLabel, CountsLine};
-use crate::reports::{REPORT_MARKDOWN, is_mermaid};
+use crate::reports::{REPORT_MARKDOWN, Undrawable};
 
+mod content;
 #[cfg(test)]
 mod tests;
 
@@ -53,9 +54,10 @@ pub(crate) enum MarkdownField {
     /// The `publication` note, written after ReviewQ's list of disposition lines. Like
     /// `details`, it begins with no list or indented text.
     Publication,
-    /// The `flow` note, which holds a top-level fenced Mermaid diagram.
+    /// The `flow` note, which holds a Mermaid diagram the page draws.
     Flow,
-    /// The `changes` note, which holds a top-level table.
+    /// The `changes` note, which holds a Before and After table, then a table of the affected
+    /// operations.
     Changes,
     /// The body of any other Markdown note: `threads`, `questions`, `verification` or an
     /// `extra` note.
@@ -124,10 +126,19 @@ pub(crate) enum ProblemKind {
     CountsLine,
     /// A finding field's paragraph starts with one of the card's bold labels here.
     CardLabel(CardLabel),
-    /// The `flow` note holds no top-level fenced Mermaid block with a diagram in it.
+    /// The `flow` note holds no fenced Mermaid block with a diagram in it.
     NoDiagram,
-    /// The `changes` note holds no top-level table.
-    NoTable,
+    /// The `flow` note holds no diagram, and the line here reads as a ```` ```mermaid ```` line
+    /// but is indented as code, so the page shows it as text.
+    IndentedFence,
+    /// The `flow` note's Mermaid blocks are all ones the page shows as source instead of
+    /// drawing, the first of them for this reason.
+    NotDrawn(Undrawable),
+    /// The `changes` note holds no top-level table the page draws as Before and After.
+    NoBeforeAfter,
+    /// The `changes` note holds no top-level table of the affected operations after its Before
+    /// and After table.
+    NoOperations,
 }
 
 impl Display for FieldProblem {
@@ -199,8 +210,39 @@ impl Display for FieldProblem {
             ProblemKind::NoDiagram => output.write_str(
                 "The flow section needs a Mermaid diagram of the principal code and data flow: a line ```mermaid, the diagram, then a closing ```. Add the diagram and send the section again.",
             ),
-            ProblemKind::NoTable => output.write_str(
-                "The changes section needs a table with the two columns Before and After, then a table of the affected operations with the columns Affected operation, What changes and Source. Add the tables and send the section again.",
+            ProblemKind::IndentedFence => write!(
+                output,
+                "Line {line} reads as a ```mermaid line, but four or more spaces come before it, so the page shows it as plain code, not as a diagram. Put at most three spaces before ```mermaid (inside a list item, count from where the item's text starts), then send the section again."
+            ),
+            ProblemKind::NotDrawn(reason) => {
+                let (cause, remedy) = match reason {
+                    Undrawable::Link => (
+                        "it holds a link or a click action: an http: or https: address, a click line, @import or url(…)",
+                        "Take the links and click actions out of the diagram and name the target in the explanation instead",
+                    ),
+                    Undrawable::Header => (
+                        "it starts with a %%{…} directive or --- front matter",
+                        "Start the diagram with its type, such as flowchart LR",
+                    ),
+                    Undrawable::TooLong => (
+                        "it is longer than 30,000 characters",
+                        "Shorten the diagram to the principal flow",
+                    ),
+                    Undrawable::TooManyArrows => (
+                        "it has more than 500 arrows",
+                        "Draw fewer steps, at most 500 arrows",
+                    ),
+                };
+                write!(
+                    output,
+                    "The Mermaid diagram that starts on line {line} is not drawn, because {cause}, so the page shows only its source. {remedy}, then send the section again."
+                )
+            }
+            ProblemKind::NoBeforeAfter => output.write_str(
+                "The changes section needs a table with the two columns Before and After: a header row of exactly Before and After, with at least one row under it, not inside a list or quote. After it comes a table with the columns Affected operation, What changes and Source. Add the tables and send the section again.",
+            ),
+            ProblemKind::NoOperations => output.write_str(
+                "The changes section has its table with the two columns Before and After, but no table with the columns Affected operation, What changes and Source after it. Add that table after the Before and After table, with a header row of exactly those three columns, not inside a list or quote, then send the section again.",
             ),
         }
     }
@@ -213,7 +255,8 @@ impl Display for FieldProblem {
 /// the evidence text and `details` begin no paragraph with a card's bold label, the first
 /// three begin with a paragraph, and `details` and the `publication` note begin with no list
 /// or indented text. A proposed comment has no rule of its own, because it is quoted. The `flow`
-/// note holds a Mermaid diagram and the `changes` note a table. Returns the first problem found.
+/// note holds a Mermaid diagram and the `changes` note its two tables, as `content` checks.
+/// Returns the first problem found.
 ///
 /// A removal is never passed here: an empty note body removes the note, and a change that
 /// removes `proposedComment` or `details` carries no text.
@@ -239,7 +282,7 @@ pub(crate) fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldP
         // The last block started inside the field and ran over the heading after it.
         Some(Block { start, kind }) => {
             let kind = match kind {
-                BlockKind::Code { .. } => ProblemKind::OpenFence,
+                BlockKind::Code => ProblemKind::OpenFence,
                 BlockKind::Html => ProblemKind::OpenHtml,
                 BlockKind::Paragraph { .. }
                 | BlockKind::Heading
@@ -283,7 +326,7 @@ pub(crate) fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldP
                 BlockKind::Paragraph { .. } => card_labels(text, &blocks),
                 BlockKind::Heading
                 | BlockKind::List
-                | BlockKind::Code { .. }
+                | BlockKind::Code
                 | BlockKind::Html
                 | BlockKind::Table
                 | BlockKind::Other => Err(FieldProblem {
@@ -299,33 +342,9 @@ pub(crate) fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldP
         MarkdownField::Publication => joins_list(text, first),
         MarkdownField::Summary => plain_paragraphs(text, &blocks, MAX_SUMMARY_PARAGRAPHS),
         MarkdownField::Rationale => plain_paragraphs(text, &blocks, 1),
-        MarkdownField::Flow => requires(
-            &blocks,
-            |kind| matches!(kind, BlockKind::Code { diagram: true }),
-            ProblemKind::NoDiagram,
-        ),
-        MarkdownField::Changes => requires(
-            &blocks,
-            |kind| matches!(kind, BlockKind::Table),
-            ProblemKind::NoTable,
-        ),
+        MarkdownField::Flow => content::diagram(text),
+        MarkdownField::Changes => content::tables(text),
         MarkdownField::ProposedComment | MarkdownField::Note => Ok(()),
-    }
-}
-
-/// `Ok` when some top-level block is one `wanted` accepts, otherwise `missing`.
-fn requires(
-    blocks: &[Block],
-    wanted: impl Fn(&BlockKind) -> bool,
-    missing: ProblemKind,
-) -> Result<(), FieldProblem> {
-    if blocks.iter().any(|block| wanted(&block.kind)) {
-        Ok(())
-    } else {
-        Err(FieldProblem {
-            line: 1,
-            kind: missing,
-        })
     }
 }
 
@@ -436,10 +455,7 @@ enum BlockKind {
     },
     Heading,
     List,
-    Code {
-        /// A fenced Mermaid block with a diagram in it, not only blank lines.
-        diagram: bool,
-    },
+    Code,
     Html,
     Table,
     Other,
@@ -462,19 +478,7 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
     let mut bold: Option<String> = None;
     // Whether a top-level paragraph is being read.
     let mut in_paragraph = false;
-    // Whether a top-level fenced Mermaid block is being read.
-    let mut in_mermaid = false;
     for (event, range) in parse.events() {
-        if in_mermaid
-            && let Event::Text(value) = &event
-            && !value.trim().is_empty()
-            && let Some(Block {
-                kind: BlockKind::Code { diagram },
-                ..
-            }) = blocks.last_mut()
-        {
-            *diagram = true;
-        }
         if in_paragraph
             && let Some(Block {
                 kind: BlockKind::Paragraph { text, .. },
@@ -515,10 +519,7 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
                         }
                         Tag::Heading { .. } => BlockKind::Heading,
                         Tag::List(..) => BlockKind::List,
-                        Tag::CodeBlock(kind) => {
-                            in_mermaid = is_mermaid(&kind);
-                            BlockKind::Code { diagram: false }
-                        }
+                        Tag::CodeBlock(_) => BlockKind::Code,
                         Tag::HtmlBlock => BlockKind::Html,
                         Tag::Table(_) => BlockKind::Table,
                         _ => BlockKind::Other,
@@ -534,7 +535,6 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
                     in_paragraph = false;
-                    in_mermaid = false;
                 }
                 // The leading strong opened inside the paragraph, at depth 1, and ends here.
                 if depth == 1
@@ -590,7 +590,7 @@ fn plain_paragraphs(text: &str, blocks: &[Block], max: usize) -> Result<(), Fiel
         let kind = match &block.kind {
             BlockKind::Heading
             | BlockKind::List
-            | BlockKind::Code { .. }
+            | BlockKind::Code
             | BlockKind::Html
             | BlockKind::Table
             | BlockKind::Other => Some(ProblemKind::NotPlain),

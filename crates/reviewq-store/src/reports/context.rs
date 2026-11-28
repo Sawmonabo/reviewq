@@ -1,14 +1,14 @@
 use reviewq_app::access::AppError;
 use reviewq_app::reports::{
-    Collection, ContextKey, ContextPosition, ContextRequest, Descriptor, FindingDisposition,
-    ReportContext, SourceRange,
+    Collection, ContextKey, ContextPosition, ContextRequest, Descriptor, FindingBasis,
+    FindingChange, FindingDisposition, FindingPreview, FindingState, ReportContext, SourceRange,
 };
 use reviewq_domain::identity::{Revision, RunId};
 use rusqlite::{Connection, Row, params};
 
 use super::{current_receipt, optional, read_count, version};
 use crate::StoreError;
-use crate::ledger::preview_at;
+use crate::ledger::locations;
 use crate::queue::{parse, text};
 
 pub(super) fn read(
@@ -19,6 +19,7 @@ pub(super) fn read(
     let ContextRequest {
         receipt,
         collection,
+        findings,
         after,
         limit,
     } = request;
@@ -71,13 +72,23 @@ pub(super) fn read(
         (None, _) => String::new().into(),
         _ => return Err(AppError::CursorExpired.into()),
     };
-    let mut rows = statement.query(params![
+    let shared = params![
         run.as_str(),
         receipt.as_str(),
         key_value,
         disposition_version.as_sqlite_integer(),
         limit + 1,
-    ])?;
+    ];
+    let mut rows = if collection == Collection::Findings {
+        let kind = findings.kind.map(|kind| kind.to_string());
+        let open = findings.state != FindingState::Retired;
+        let retired = findings.state != FindingState::Open;
+        let mut values = shared.to_vec();
+        values.extend_from_slice(params![open, retired, kind, findings.full_text]);
+        statement.query(values.as_slice())?
+    } else {
+        statement.query(shared)?
+    };
     let mut next = None;
     while let Some(row) = rows.next()? {
         if items.len() == usize::from(limit) {
@@ -88,13 +99,7 @@ pub(super) fn read(
             });
             break;
         }
-        let mut item = decode(collection, row)?;
-        if let Descriptor::Finding { id, details, .. } = &mut item
-            && let Ok(finding) = id.parse()
-        {
-            *details = preview_at(connection, run.as_str(), finding, row.get(4)?)?.map(Box::new);
-        }
-        items.push(item);
+        items.push(decode(collection, row)?);
     }
     Ok(ReportContext {
         report: Some(report),
@@ -106,21 +111,52 @@ pub(super) fn read(
 
 /// The page query of each collection. Finding IDs are canonical (`F-01`, `F-99`, `F-100`), so
 /// ordering and paging by length, then text, follow the finding number.
+///
+/// A `Findings` read selects from what the version itself records: the findings it shows
+/// (`report_findings`, when `?6`), and the findings it retires (when `?7`), which are its
+/// outcomes (`report_changes`) on findings it no longer shows, each with the row its parent
+/// version showed. `?8` names a kind, `?9` asks for the issue and proposed comment. A finding's
+/// fields come from `ledger_changes` at the record revision the version published, so a later
+/// unsubmitted revision is never read.
 fn query(collection: Collection) -> &'static str {
     match collection {
         Collection::Findings => {
-            "SELECT f.finding_id, f.title, f.severity, f.blocking, f.record_revision,
-                    f.scalar_offset, f.scalar_length, f.evidence_sha256,
-                    d.blocking, d.publication, d.reason
-             FROM report_findings f
-             LEFT JOIN finding_dispositions d ON d.run_id=f.run_id AND d.finding_id=f.finding_id
+            "SELECT x.finding_id, x.title, x.severity, x.blocking, x.record_revision,
+                    x.scalar_offset, x.scalar_length, x.evidence_sha256,
+                    d.blocking, d.publication, d.reason,
+                    c.kind, c.locations, c.consequence, c.evidence_kind, c.evidence,
+                    CASE WHEN ?9 THEN c.issue END, CASE WHEN ?9 THEN c.proposed_comment END,
+                    x.retired, o.conclusion, o.reason, o.checked_sha
+             FROM (
+                 SELECT f.finding_id, f.title, f.severity, f.blocking, f.record_revision,
+                        f.scalar_offset, f.scalar_length, f.evidence_sha256, 0 AS retired
+                 FROM report_findings f
+                 WHERE ?6 AND f.run_id=?1 AND f.receipt_id=?2
+                   AND (length(f.finding_id), f.finding_id)>(length(?3), ?3)
+                 UNION ALL
+                 SELECT p.finding_id, p.title, p.severity, p.blocking, p.record_revision,
+                        NULL, NULL, NULL, 1
+                 FROM report_changes g
+                 JOIN report_versions v ON v.run_id=g.run_id AND v.receipt_id=g.receipt_id
+                 JOIN report_findings p ON p.run_id=g.run_id AND p.receipt_id=v.parent_receipt_id
+                   AND p.finding_id=g.finding_id
+                 WHERE ?7 AND g.run_id=?1 AND g.receipt_id=?2
+                   AND (length(g.finding_id), g.finding_id)>(length(?3), ?3)
+                   AND NOT EXISTS (SELECT 1 FROM report_findings s WHERE s.run_id=g.run_id
+                     AND s.receipt_id=g.receipt_id AND s.finding_id=g.finding_id)
+             ) x
+             LEFT JOIN ledger_changes c ON c.run_id=?1 AND c.finding IS NOT NULL
+               AND c.finding=CAST(substr(x.finding_id, 3) AS INTEGER)
+               AND c.revision=x.record_revision
+             LEFT JOIN report_changes o ON o.run_id=?1 AND o.receipt_id=?2
+               AND o.finding_id=x.finding_id
+             LEFT JOIN finding_dispositions d ON d.run_id=?1 AND d.finding_id=x.finding_id
                AND d.removed=0 AND d.disposition_version=(
                  SELECT MAX(a.disposition_version) FROM finding_dispositions a
-                 WHERE a.run_id=f.run_id AND a.finding_id=f.finding_id AND a.disposition_version<=?4
+                 WHERE a.run_id=?1 AND a.finding_id=x.finding_id AND a.disposition_version<=?4
                )
-             WHERE f.run_id=?1 AND f.receipt_id=?2
-               AND (length(f.finding_id), f.finding_id)>(length(?3), ?3)
-             ORDER BY length(f.finding_id), f.finding_id LIMIT ?5"
+             WHERE ?8 IS NULL OR c.kind=?8
+             ORDER BY length(x.finding_id), x.finding_id LIMIT ?5"
         }
         Collection::Changes => {
             "SELECT c.finding_id, c.conclusion, c.reason, c.checked_sha,
@@ -158,8 +194,7 @@ fn query(collection: Collection) -> &'static str {
     }
 }
 
-/// Decodes one row of `query(collection)`. A finding's details are read afterwards from its
-/// record revision, column 4, in `ledger_changes`.
+/// Decodes one row of `query(collection)`.
 fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreError> {
     let range = |column: usize| -> Result<SourceRange, StoreError> {
         Ok(SourceRange {
@@ -174,8 +209,21 @@ fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreErro
             title: row.get(1)?,
             severity: parse(text(row, 2)?)?,
             blocking: row.get(3)?,
-            source: range(5)?,
-            details: None,
+            source: match row.get_ref(5)? {
+                rusqlite::types::ValueRef::Null => None,
+                _ => Some(range(5)?),
+            },
+            details: finding_fields(row, 11)?.map(Box::new),
+            retired: row.get(18)?,
+            outcome: optional(row, 19)?
+                .map(|conclusion| {
+                    Ok::<_, StoreError>(Box::new(FindingChange {
+                        conclusion,
+                        reason: row.get(20)?,
+                        checked_sha: optional(row, 21)?,
+                    }))
+                })
+                .transpose()?,
             disposition: row
                 .get::<_, Option<String>>(10)?
                 .map(|reason| {
@@ -206,6 +254,25 @@ fn decode(collection: Collection, row: &Row<'_>) -> Result<Descriptor, StoreErro
             reason: row.get(3)?,
         },
     })
+}
+
+/// The published revision's fields from column `at`, or `None` when its `ledger_changes` row
+/// is missing.
+fn finding_fields(row: &Row<'_>, at: usize) -> Result<Option<FindingPreview>, StoreError> {
+    let Some(kind) = optional(row, at)? else {
+        return Ok(None);
+    };
+    Ok(Some(FindingPreview {
+        kind,
+        locations: locations(text(row, at + 1)?)?,
+        consequence: row.get(at + 2)?,
+        evidence: FindingBasis {
+            kind: parse(text(row, at + 3)?)?,
+            text: row.get(at + 4)?,
+        },
+        issue: row.get(at + 5)?,
+        proposed_comment: row.get(at + 6)?,
+    }))
 }
 
 fn revision(value: i64) -> Result<Revision, StoreError> {

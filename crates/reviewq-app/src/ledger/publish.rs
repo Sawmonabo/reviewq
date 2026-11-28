@@ -13,7 +13,7 @@ use reviewq_domain::ledger::{
 };
 
 use super::compose::{self, checked_revision, recorded_outcome, state};
-use super::passes::findings_on_file;
+use super::passes::findings_saved;
 use super::record::capitalized;
 use super::refusal::{for_agent, root};
 use super::required;
@@ -38,11 +38,11 @@ const NAMED_RECORDS: usize = 3;
 /// What the user reads when the lead's closing call is refused.
 fn closing_refused() -> String {
     format!(
-        "ReviewQ refused the lead's closing call because this run's workspace, repository grant, settings or follow-up batch changed. The filed findings are kept. Check the run, then ask the lead to call {} again.",
+        "ReviewQ refused the lead's closing call because this run's workspace, repository grant, settings or follow-up batch changed. Every saved finding and section is kept. Check the run, then ask the lead to call {} again.",
         Tool::SubmitReview.as_str()
     )
 }
-const UPDATE_REFUSED: &str = "ReviewQ could not publish an update because this run's workspace, repository grant or settings changed. The filed findings are kept, and ReviewQ tries again the next time the run settles.";
+const UPDATE_REFUSED: &str = "ReviewQ could not publish an update because this run's workspace, repository grant or settings changed. Every saved finding and section is kept, and ReviewQ tries again the next time the run settles.";
 const UPDATE_KEPT_CHANGING: &str = "ReviewQ could not publish an update because the findings kept changing while it was composed. They are kept, and ReviewQ tries again the next time the run settles.";
 /// What the lead reads when its closing call is refused; the user reads `closing_refused`.
 fn closing_refused_for_agent() -> String {
@@ -269,7 +269,7 @@ fn unfinished_reason(findings: u32, full_review_notes: Option<Vec<NoteSection>>)
         "The lead's last turn ended without closing the review: no {} or {} call in that turn was accepted. {}.",
         Tool::SubmitReview.as_str(),
         Tool::WaitForUser.as_str(),
-        capitalized(&findings_on_file(findings))
+        capitalized(&findings_saved(findings))
     );
     if let Some(notes) =
         full_review_notes.and_then(|notes| required::named(&required::missing(notes)))
@@ -279,7 +279,7 @@ fn unfinished_reason(findings: u32, full_review_notes: Option<Vec<NoteSection>>)
             " The review still needs {notes} before it can publish."
         );
     }
-    reason.push_str(" What is on file stays unpublished until the lead closes the review.");
+    reason.push_str(" What is saved stays unpublished until the lead submits the review.");
     reason
 }
 
@@ -495,7 +495,7 @@ fn closing_error(error: ClosingError) -> FieldError {
 }
 
 /// One error naming every required note a first version or a full review lacks. Only the
-/// lead's closing call checks this. A required note cannot be removed once filed, so every
+/// lead's closing call checks this. A required note cannot be removed once saved, so every
 /// later version, an update or a selected-thread result, holds them as well.
 fn missing_notes_error(snapshot: &LedgerSnapshot) -> Option<FieldError> {
     let missing = required::missing(snapshot.notes.iter().map(|note| note.key.section()));
@@ -694,7 +694,7 @@ fn new_version(snapshot: &LedgerSnapshot, facts: VersionFacts) -> Result<NewVers
 }
 
 /// The acknowledgement's lists: each finding by its state against the parent version and the
-/// findings subagents filed or changed.
+/// findings subagents saved or changed.
 fn closing_summary(snapshot: &LedgerSnapshot, result: ResultKind) -> ClosingSummary {
     let mut summary = ClosingSummary {
         result,

@@ -5,7 +5,7 @@
 use super::NoteSection;
 
 /// The notes a first version or a full review needs before it publishes, in report order.
-/// Once filed, none of them can be removed, so every later version of the run holds them too.
+/// Once saved, none of them can be removed, so every later version of the run holds them too.
 pub(super) const REQUIRED_NOTES: [NoteSection; 5] = [
     NoteSection::Summary,
     NoteSection::Rationale,
@@ -19,12 +19,12 @@ pub(super) fn is_required(section: NoteSection) -> bool {
     REQUIRED_NOTES.contains(&section)
 }
 
-/// The required notes missing from `on_file`, in report order.
-pub(super) fn missing(on_file: impl IntoIterator<Item = NoteSection>) -> Vec<NoteSection> {
-    let on_file: Vec<_> = on_file.into_iter().collect();
+/// The required notes missing from `saved`, in report order.
+pub(super) fn missing(saved: impl IntoIterator<Item = NoteSection>) -> Vec<NoteSection> {
+    let saved: Vec<_> = saved.into_iter().collect();
     REQUIRED_NOTES
         .into_iter()
-        .filter(|section| !on_file.contains(section))
+        .filter(|section| !saved.contains(section))
         .collect()
 }
 

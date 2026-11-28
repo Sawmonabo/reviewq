@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
-use reviewq_app::access::AppError;
+use reviewq_app::access::{Actor, AppError};
 use reviewq_app::history::search::rpc::{
     RpcSearchEntry, RpcSearchPage, RpcSearchPoint, RpcSearchQuery,
 };
@@ -16,7 +16,7 @@ use reviewq_app::history::{
     RpcContentRef,
 };
 use reviewq_app::reading::Literal;
-use reviewq_domain::identity::{RunId, SessionKey};
+use reviewq_domain::identity::{EventCursor, RunId, SessionKey};
 use reviewq_protocol::history::search::{
     HistorySearchDestination, HistorySearchDestinationResponse, HistorySearchDocument,
     HistorySearchDocumentMode, HistorySearchHit, HistorySearchPage, HistorySearchResponse,
@@ -379,31 +379,54 @@ pub(super) async fn read(
     Query(input): Query<SearchQuery>,
 ) -> Result<Json<HistorySearchResponse>, ApiError> {
     let actor = entry.auth.browser_actor(&headers, false)?;
-    let run: RunId = parse(&run)?;
-    let session: SessionKey = parse(&session)?;
-    let literal = Literal::new(&input.q).ok_or(AppError::InvalidRequest)?;
+    let (page, watermark) = search(
+        &entry,
+        actor,
+        parse(&run)?,
+        parse(&session)?,
+        &input.q,
+        input.cursor.as_deref(),
+        input.reverse,
+    )
+    .await?;
+    Ok(Json(success(page, watermark)?))
+}
+
+/// One page of matches for `query` in the session's transcript, after `cursor`, for the
+/// browser's search and the managing transcript tool alike, with the event watermark the read
+/// observed. The actor must be allowed the session's history before the read and still after
+/// it, with the same source, or the page is refused as expired.
+pub(in crate::entry) async fn search(
+    entry: &Entry,
+    actor: Actor,
+    run: RunId,
+    session: SessionKey,
+    query: &str,
+    cursor: Option<&str>,
+    reverse: bool,
+) -> Result<(HistorySearchPage, EventCursor), AppError> {
+    let literal = Literal::new(query).ok_or(AppError::InvalidRequest)?;
     let scope = SearchScope {
         endpoint: &entry.auth.endpoint,
         run: &run,
         session: &session,
         query: Sha256::digest(literal.folded()).into(),
-        reverse: input.reverse,
+        reverse,
     };
-    let from = input
-        .cursor
-        .as_deref()
-        .map(|token| scope.open(token))
-        .transpose()?;
+    let from = cursor.map(|token| scope.open(token)).transpose()?;
     let current = entry
         .store
         .history_session(actor.clone(), run.clone(), session.clone())
         .await?;
-    let page = read_authorized(&entry, &scope, current.value.clone(), literal, from).await?;
-    let confirmed = entry.store.history_session(actor, run, session).await?;
+    let page = read_authorized(entry, &scope, current.value.clone(), literal, from).await?;
+    let confirmed = entry
+        .store
+        .history_session(actor, run.clone(), session.clone())
+        .await?;
     if current.value != confirmed.value {
-        return Err(AppError::CursorExpired.into());
+        return Err(AppError::CursorExpired);
     }
-    Ok(Json(success(page, current.cursor)?))
+    Ok((page, current.cursor))
 }
 
 async fn read_authorized(

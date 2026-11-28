@@ -98,7 +98,7 @@ pub(crate) async fn link(profile: &Path, target: String) -> Result<(), Failure> 
 /// Shown by `reviewq link` when Codex does not trust ReviewQ's hooks and could not be made
 /// to, and by the installer when it could not make Codex trust them while no Codex `Stop`
 /// hook has reported on this installation.
-pub(crate) const CODEX_HOOKS_PENDING: &str = "The ReviewQ hooks have not run in Codex yet: open /hooks in Codex to review and trust them. Until then a review still files, closes and shows as unfinished when it is not closed; only the end-of-turn reminder and the reminder after compaction are missing.";
+pub(crate) const CODEX_HOOKS_PENDING: &str = "The ReviewQ hooks have not run in Codex yet: open /hooks in Codex to review and trust them. Until then ReviewQ still saves a review's findings and sections, the lead can still submit it, and a review that is not submitted still shows as unfinished; only the end-of-turn reminder and the reminder after compaction are missing.";
 
 /// Shown by `reviewq link` when Codex trusts ReviewQ's hooks but no Codex `Stop` hook has
 /// reported on this installation yet. A Codex conversation reads its hooks when Codex loads

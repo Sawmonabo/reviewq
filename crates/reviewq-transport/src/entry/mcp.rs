@@ -10,9 +10,9 @@ use reviewq_app::access::{Actor, AppError};
 use reviewq_protocol::deadlines::{GRANT_CHECK_LIMIT, tool_deadline};
 use reviewq_protocol::ledger::LedgerTool;
 use reviewq_protocol::mcp::{
-    AnswerAgentQuestion, GetReview, MANAGEMENT_TOOLS, ManagementTool, ReadAgentTranscript,
-    SearchReviews, SendAgentMessage, SetThreadFollowups, StartReview, UNKNOWN_TOOL_CLAUDE,
-    UNKNOWN_TOOL_CODEX,
+    AnswerAgentQuestion, GetFindings, GetReview, MANAGEMENT_TOOLS, ManagementTool,
+    ReadAgentTranscript, SearchReviews, SendAgentMessage, SetThreadFollowups, StartReview,
+    UNKNOWN_MANAGEMENT_TOOL_CLAUDE, UNKNOWN_TOOL_CODEX,
 };
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
@@ -32,6 +32,7 @@ use super::{ApiError, Entry};
 
 mod gates;
 mod ledger;
+mod lookups;
 mod operations;
 mod workflow;
 use gates::Gates;
@@ -89,6 +90,7 @@ fn management_tool(tool: ManagementTool) -> Tool {
     let schema = match tool {
         ManagementTool::SearchReviews => schemars::schema_for!(SearchReviews),
         ManagementTool::GetReview => schemars::schema_for!(GetReview),
+        ManagementTool::GetFindings => schemars::schema_for!(GetFindings),
         ManagementTool::ReadAgentTranscript => schemars::schema_for!(ReadAgentTranscript),
         ManagementTool::SendAgentMessage => schemars::schema_for!(SendAgentMessage),
         ManagementTool::StartReview => schemars::schema_for!(StartReview),
@@ -255,7 +257,9 @@ fn bounded_result(value: &Value) -> Result<CallToolResult, AppError> {
 impl Server {
     /// Runs one tool call. A reviewing tool binds its caller from the request's `_meta`. A name
     /// the server does not list gets the host's sentence asking for the current tools, which a
-    /// session still holding an older tool list needs after an update.
+    /// session still holding an older tool list needs after an update. A Claude client reaches
+    /// this server only for the management tools, through its checkout's MCP server entry, so
+    /// its sentence names that entry's reconnect rather than the plugin's reload.
     async fn call(
         &self,
         request: CallToolRequestParams,
@@ -270,7 +274,7 @@ impl Server {
         }
         let Some(tool) = ManagementTool::from_name(&request.name) else {
             let text = if claude {
-                UNKNOWN_TOOL_CLAUDE
+                UNKNOWN_MANAGEMENT_TOOL_CLAUDE
             } else {
                 UNKNOWN_TOOL_CODEX
             };
@@ -282,6 +286,7 @@ impl Server {
                 operations::list(entry, actor, arguments(input)?).await
             }
             ManagementTool::GetReview => operations::get(entry, actor, arguments(input)?).await,
+            ManagementTool::GetFindings => lookups::findings(entry, actor, arguments(input)?).await,
             ManagementTool::ReadAgentTranscript => {
                 operations::transcript(entry, actor, arguments(input)?).await
             }

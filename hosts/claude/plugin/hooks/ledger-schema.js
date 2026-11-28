@@ -208,7 +208,7 @@ export const ledgerTools = [
               "$ref": "#/definitions/GitShaDto"
             }
           ],
-          "description": "The commit you checked, when it differs from the reviewed revision of the closing call."
+          "description": "The commit you checked, when it differs from the revision you give to submit_review."
         },
         "discussionIds": {
           "description": "The GitLab discussions this outcome answers.",
@@ -257,7 +257,7 @@ export const ledgerTools = [
     "waitMs": 60000
   },
   {
-    "description": "Writes one section of the report, replacing its earlier text. Give section and body. title is the report's title; summary says what the MR does; rationale gives the reason for the verdict; flow is a Mermaid diagram of the principal code and data flow in a ```mermaid fenced block, then a short explanation, and is refused without that block; changes is a Before and After table, then a table of the affected operations, and is refused without a table; threads says what became of earlier review threads; questions holds open questions and decisions; verification says what you checked and what you could not; publication says which comments were posted or held back; extra is any other section, under its own title, that no other section covers. A first or full review cannot be submitted until the summary, rationale, flow, changes and verification sections are saved, and once saved they cannot be removed. Leave out expectedRevision when you first write a section, and give the revision you last read once it exists. An empty body removes any other section. Returns the section, its revision and how many findings and sections changed since the last published version. A refused call saves nothing and says what to correct.",
+    "description": "Writes one section of the report, replacing its earlier text. Give section and body. title is the report's title; summary says what the MR does; rationale gives the reason for the verdict; flow is a Mermaid diagram of the principal code and data flow in a fenced block that opens with a line ```mermaid, then a short explanation, and is refused without a diagram the page can draw; changes is a table with the two columns Before and After, then a table with the columns Affected operation, What changes and Source, and is refused without both tables; threads says what became of earlier review threads; questions holds open questions and decisions; verification says what you checked and what you could not; publication says which comments were posted or held back; extra is any other section, under its own title, that no other section covers. A first or full review cannot be submitted until the summary, rationale, flow, changes and verification sections are saved, and once saved they cannot be removed. Leave out expectedRevision when you first write a section, and give the revision you last read once it exists. An empty body removes any other section. Returns the section, its revision and how many findings and sections changed since the last published version. A refused call saves nothing and says what to correct.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,

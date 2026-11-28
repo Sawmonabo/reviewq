@@ -323,7 +323,7 @@
             "$ref": "#/definitions/GitShaDto"
           }
         ],
-        "description": "The commit you checked, when it differs from the reviewed revision of the closing call."
+        "description": "The commit you checked, when it differs from the revision you give to submit_review."
       },
       "discussionIds": {
         "description": "The GitLab discussions this outcome answers.",

@@ -1,6 +1,6 @@
 //! Composes a version's text from a snapshot's cover facts, findings and notes and the
 //! version's own facts, in one pass that records each card's and section's span as it
-//! writes. Fields were checked when filed, so composing cannot fail. The only parsing is
+//! writes. Fields were checked when saved, so composing cannot fail. The only parsing is
 //! `markdown::shift_headings`, which parses each Markdown field to find its headings, and
 //! `markdown::fenced_code`, which finds the fenced code a proposed comment's quote keeps as
 //! written. A span runs from its heading to the end of its last line, without the line
@@ -46,8 +46,8 @@ const LINK_BYTES: usize = 160;
 
 /// Composes the version `facts` describes from the snapshot's cover facts, findings (in ID
 /// order) and notes (fixed sections in layout order, then extra notes in the order first
-/// filed). Returns the text with one span per active finding's card and per section, its
-/// SHA-256 and its line statistics. Never fails: every field was checked when it was filed.
+/// saved). Returns the text with one span per active finding's card and per section, its
+/// SHA-256 and its line statistics. Never fails: every field was checked when it was saved.
 pub(super) fn compose(
     cover: &CoverFacts,
     facts: &VersionFacts,
@@ -530,7 +530,7 @@ impl Report<'_> {
         out.quoted(&shift_headings(comment))
     }
 
-    /// Each extra note as its own level-two section, in the order first filed.
+    /// Each extra note as its own level-two section, in the order first saved.
     fn extra_sections(&self, out: &mut Output) -> fmt::Result {
         for note in self.notes {
             let Some(title) = note.key.title() else {

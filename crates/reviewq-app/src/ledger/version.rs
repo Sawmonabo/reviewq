@@ -49,7 +49,7 @@ pub struct ClosingSummary {
     pub updated: Vec<FindingId>,
     pub retired: Vec<FindingId>,
     pub carried: u32,
-    /// Findings a subagent filed or changed since the parent version.
+    /// Findings a subagent saved or changed since the parent version.
     pub by_subagents: Vec<FindingId>,
 }
 
@@ -107,7 +107,7 @@ pub struct LedgerSnapshot {
     /// In ID order: every active finding, every finding on the parent version and every
     /// finding changed since it.
     pub findings: Vec<SnapshotFinding>,
-    /// Fixed sections in layout order, then extra notes in the order first filed.
+    /// Fixed sections in layout order, then extra notes in the order first saved.
     pub notes: Vec<NoteRecord>,
 }
 
@@ -176,7 +176,7 @@ pub struct SnapshotFinding {
     /// Changed or assessed after the open pass opened, or after the parent version when no
     /// pass is open.
     pub touched: bool,
-    /// A subagent filed or changed it after the parent version.
+    /// A subagent saved or changed it after the parent version.
     pub by_subagent: bool,
     /// The user's disposition at `guard.disposition_revision`. Its blocking value, when set,
     /// overrides the lead's.

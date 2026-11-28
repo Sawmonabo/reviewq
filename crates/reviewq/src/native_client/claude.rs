@@ -199,7 +199,9 @@ fn refused(what: &str, reply: &[u8]) -> String {
 }
 
 /// What the model reads when ReviewQ refuses `track_posting`, from the refusal's error code:
-/// a declaration when `declare`, else a reconcile. A refused declaration stores nothing.
+/// a declaration when `declare`, else a reconcile. A refused declaration stores nothing. A call
+/// the transcript records under another ReviewQ tool's name, from a plugin loaded before the
+/// current tools, reads `UNKNOWN_TOOL_CLAUDE`, as an unknown ledger tool does.
 fn action_refusal(declare: bool, reply: &[u8]) -> String {
     #[derive(Deserialize)]
     struct Refusal {
@@ -220,6 +222,9 @@ fn action_refusal(declare: bool, reply: &[u8]) -> String {
         (Ok(ErrorCode::Unauthorized), _) => {
             "ReviewQ did not accept the plugin's credential. Check the installed service and plugin."
         }
+        // The call came from a ReviewQ tool by a name other than the current one: this session
+        // still holds the tools of an earlier plugin.
+        (Ok(ErrorCode::PreconditionFailed), _) => UNKNOWN_TOOL_CLAUDE,
         (Ok(ErrorCode::Forbidden), _) => {
             "ReviewQ takes a publication action only in a turn that the user's latest instruction started, typed in this conversation or sent from ReviewQ. This turn did not start that way, so nothing was recorded. Ask the user for the instruction."
         }

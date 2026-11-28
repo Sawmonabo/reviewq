@@ -20,13 +20,15 @@ impl ReviewLookup for SqliteStore {
         &self,
         actor: Actor,
         filter: ManagementFilter,
+        search: String,
         offset: u32,
         limit: u16,
     ) -> AppFuture<'_, Snapshot<ManagementReviews>> {
         Box::pin(async move {
             check_limit(limit)?;
             self.read(move |tx| {
-                snapshot(tx, management::reviews(tx, actor, filter, offset, limit)?)
+                let page = management::reviews(tx, actor, filter, search, offset, limit)?;
+                snapshot(tx, page)
             })
             .await
             .map_err(StoreError::app)

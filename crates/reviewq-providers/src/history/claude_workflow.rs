@@ -15,6 +15,26 @@ const SCAN_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_ROW: u64 = 8 * 1024 * 1024;
 /// The name Claude records for a call of ReviewQ's publication action tool.
 const ACTION_TOOL: &str = "mcp__reviewq__track_posting";
+/// What every ReviewQ plugin tool's recorded name starts with.
+const REVIEWQ_TOOL: &str = "mcp__reviewq__";
+
+/// Why a row naming the call refuses it, when it does.
+enum Refusal {
+    /// Something newer than the call, or a call of another tool, stands in its way.
+    Conflict,
+    /// The call came from a ReviewQ tool by another name: a plugin loaded before the
+    /// current tools, which must be reloaded.
+    OutdatedTool,
+}
+
+/// The refusal for a call recorded under `name`, or `None` for the action tool itself.
+fn named(name: &Value) -> Option<Refusal> {
+    match name.as_str() {
+        Some(ACTION_TOOL) => None,
+        Some(name) if name.starts_with(REVIEWQ_TOOL) => Some(Refusal::OutdatedTool),
+        _ => Some(Refusal::Conflict),
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,7 +81,9 @@ pub(crate) struct ClaudeOpening {
 /// `queued_command` attachment). Claude Code's own task notifications travel the same queue
 /// and are no input: a queued one carries the `task-notification` mode with no origin or a
 /// `task-notification` one, and its text is one `<task-notification>` element. A queued slash
-/// command is no input either: its queue entry holds no text.
+/// command is no input either: its queue entry holds no text. A call recorded under another
+/// ReviewQ tool's name came from a plugin loaded before the current tools and fails with
+/// `PreconditionFailed`, which the plugin's client answers by asking for a reload.
 pub(crate) fn claude_workflow_opening(
     session: &HistorySession,
     call_id: &str,
@@ -89,27 +111,28 @@ fn scan(source: &Source, call_id: &str, cancelled: &AtomicBool) -> Result<Claude
                 block["tool_use_id"] == call_id
                     || (block["type"] == "tool_use" && block["id"] == call_id)
             };
+            let conflict = |refused: bool| refused.then_some(Refusal::Conflict);
             let refused = match row.kind.as_str() {
-                "user" => row
-                    .blocks()
-                    .any(|block| block["type"] == "tool_result" && block["tool_use_id"] == call_id),
+                "user" => conflict(row.blocks().any(|block| {
+                    block["type"] == "tool_result" && block["tool_use_id"] == call_id
+                })),
                 "assistant" => row
                     .blocks()
                     .filter(names_call)
-                    .any(|block| block["name"] != ACTION_TOOL),
+                    .find_map(|block| named(&block["name"])),
                 "data-flow-records" => row
                     .records
                     .iter()
                     .flatten()
                     .filter(names_call)
-                    .any(|record| record["tool_name"] != ACTION_TOOL),
-                "attachment" => row.attachment.as_ref().is_some_and(|a| {
+                    .find_map(|record| named(&record["tool_name"])),
+                "attachment" => conflict(row.attachment.as_ref().is_some_and(|a| {
                     a["type"] == "queued_command"
                         && !(a["commandMode"] == "task-notification"
                             && (a["origin"].is_null()
                                 || a["origin"]["kind"] == "task-notification"))
-                }),
-                "queue-operation" if row.operation.as_deref() == Some("enqueue") => {
+                })),
+                "queue-operation" if row.operation.as_deref() == Some("enqueue") => conflict(
                     match dequeued.iter().position(|text| *text == row.content) {
                         _ if host_notice(&row.content) || row.content.is_null() => false,
                         Some(index) => {
@@ -117,16 +140,18 @@ fn scan(source: &Source, call_id: &str, cancelled: &AtomicBool) -> Result<Claude
                             false
                         }
                         None => true,
-                    }
-                }
+                    },
+                ),
                 "queue-operation" => {
                     dequeued.push(row.content.clone());
-                    false
+                    None
                 }
-                _ => false,
+                _ => None,
             };
-            if refused {
-                return Err(AppError::Conflict);
+            match refused {
+                Some(Refusal::Conflict) => return Err(AppError::Conflict),
+                Some(Refusal::OutdatedTool) => return Err(AppError::PreconditionFailed),
+                None => {}
             }
             if row.kind != "assistant"
                 && let Some(request) = user_entry(source, start, end, cancelled)
@@ -215,8 +240,9 @@ mod tests {
 
     /// The rows Claude Code 2.1.332 writes in a typed turn while `track_posting` runs: the
     /// prompt, a finished ToolSearch call, and the running calls named only in
-    /// `data-flow-records`; then a background task's notice and a queued slash command, which
-    /// change nothing, and a message the user types while the turn still runs.
+    /// `data-flow-records`, one of them under an earlier ReviewQ tool name; then a background
+    /// task's notice and a queued slash command, which change nothing, and a message the user
+    /// types while the turn still runs.
     #[test]
     fn the_scan_admits_only_a_running_action_call_under_the_latest_input() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -234,6 +260,7 @@ mod tests {
                    {"tool_name":"mcp__reviewq__track_posting","tool_use_id":"toolu_action",
                     "server":{"type":"unknown"},"mcp_tool_name":"track_posting"},
                    {"tool_name":"Bash","tool_use_id":"toolu_shell"},
+                   {"tool_name":"mcp__reviewq__review_action","tool_use_id":"toolu_old"},
                    {"response_id":"msg_1","listed":["msg_0"]}]}),
         ];
         for row in &rows {
@@ -258,6 +285,11 @@ mod tests {
                 Err(AppError::Conflict)
             ));
         }
+        // A plugin loaded before the current tools calls the action tool by its old name.
+        assert!(matches!(
+            scan(&source, "toolu_old", &cancelled),
+            Err(AppError::PreconditionFailed)
+        ));
         // A background task's notice handed to the running turn, and a slash command the user
         // queued, are no input.
         let notice = "<task-notification>\n<task-id>b39f5cubq</task-id>\n<status>completed</status>\n</task-notification>";

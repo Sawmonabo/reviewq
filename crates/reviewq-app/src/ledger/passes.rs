@@ -1,5 +1,5 @@
 //! `wait_for_user`, which holds the open pass, and the stop gate, whose block reason names what
-//! the pass owes and how many findings are on file.
+//! the pass owes and how many findings are saved.
 
 use std::fmt::Write as _;
 
@@ -45,7 +45,7 @@ pub async fn gate(
 }
 
 /// The reason for a block, in under 600 characters plus a question the lead asked before the
-/// pass reopened: how many findings are on file, what each of the two calls does, and that one
+/// pass reopened: how many findings are saved, what each of the two calls does, and that one
 /// of them is owed before the turn ends. `None` for a release.
 fn block_reason(answer: &GateAnswer) -> Option<String> {
     let GateDecision::Block { .. } = answer.decision else {
@@ -63,16 +63,16 @@ fn block_reason(answer: &GateAnswer) -> Option<String> {
     );
     Some(format!(
         "This review is not submitted yet, and {}. {owed} Make one of these calls before you stop.",
-        findings_on_file(answer.active_findings)
+        findings_saved(answer.active_findings)
     ))
 }
 
-/// `no finding is on file yet`, `1 finding is on file` or `{count} findings are on file`.
-pub(super) fn findings_on_file(count: u32) -> String {
+/// `no finding is saved yet`, `1 finding is saved` or `{count} findings are saved`.
+pub(super) fn findings_saved(count: u32) -> String {
     match count {
-        0 => "no finding is on file yet".to_owned(),
-        1 => "1 finding is on file".to_owned(),
-        count => format!("{count} findings are on file"),
+        0 => "no finding is saved yet".to_owned(),
+        1 => "1 finding is saved".to_owned(),
+        count => format!("{count} findings are saved"),
     }
 }
 

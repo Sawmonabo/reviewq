@@ -408,7 +408,7 @@ fn discussions(
     Ok(discussions)
 }
 
-/// The run's notes: fixed sections in their order, then extra notes in the order first filed.
+/// The run's notes: fixed sections in their order, then extra notes in the order first saved.
 fn notes(db: &Connection, run: &str) -> Result<Vec<NoteRecord>, StoreError> {
     let sql = format!(
         "SELECT {NOTE_COLUMNS}, n.first_sequence FROM ledger_notes n
