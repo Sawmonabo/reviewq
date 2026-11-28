@@ -257,7 +257,7 @@ export const ledgerTools = [
     "waitMs": 60000
   },
   {
-    "description": "Writes one review note, replacing its earlier text. Give section and body. title is the report's title; summary says what the MR does; rationale gives the reason for the verdict; flow is a Mermaid diagram of the principal code and data flow, then a short explanation; changes is a Before and After table, then a table of the affected operations; threads says what became of earlier review threads; questions holds open questions and decisions; verification says what you checked and what you could not; publication says which comments were posted or held back; extra is any other section, under its own title, which no other note takes. Leave out expectedRevision when you first write a note, and give the revision you last read once it exists. An empty body removes the note. Returns the note's section, its revision and how many records wait to be published. A refused call files nothing and says what to correct.",
+    "description": "Writes one review note, replacing its earlier text. Give section and body. title is the report's title; summary says what the MR does; rationale gives the reason for the verdict; flow is a Mermaid diagram of the principal code and data flow in a ```mermaid fenced block, then a short explanation, and is refused without that block; changes is a Before and After table, then a table of the affected operations, and is refused without a table; threads says what became of earlier review threads; questions holds open questions and decisions; verification says what you checked and what you could not; publication says which comments were posted or held back; extra is any other section, under its own title, which no other note takes. A first or full review cannot close until the summary, rationale, flow, changes and verification notes are on file, and once filed they cannot be removed. Leave out expectedRevision when you first write a note, and give the revision you last read once it exists. An empty body removes any other note. Returns the note's section, its revision and how many records wait to be published. A refused call files nothing and says what to correct.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,
@@ -282,7 +282,7 @@ export const ledgerTools = [
       "description": "Replaces one review note.",
       "properties": {
         "body": {
-          "description": "The note's Markdown. An empty body removes the note.",
+          "description": "The note's Markdown. An empty body removes the note, except a required one.",
           "maxLength": 32768,
           "type": "string"
         },
@@ -299,7 +299,7 @@ export const ledgerTools = [
               "$ref": "#/definitions/NoteSection"
             }
           ],
-          "description": "`title` is the report's title, on one line. `summary` says what the MR does in at most four plain paragraphs and `rationale` gives the reason for the verdict in one. `flow` is a Mermaid diagram of the principal code and data flow, then a short explanation. `changes` is a table with the two columns Before and After, then a table with the columns Affected operation, What changes and Source. `threads`, `questions`, `verification` and `publication` fill the report sections of those names, and `extra` adds a section under its own title."
+          "description": "`title` is the report's title, on one line. `summary` says what the MR does in at most four plain paragraphs and `rationale` gives the reason for the verdict in one. `flow` is a Mermaid diagram of the principal code and data flow in a fenced block that opens with a line ```mermaid, then a short explanation. `changes` is a table with the two columns Before and After, then a table with the columns Affected operation, What changes and Source. `threads`, `questions`, `verification` and `publication` fill the report sections of those names, and `extra` adds a section under its own title. A first version or a full review needs `summary`, `rationale`, `flow`, `changes` and `verification`, and once filed they cannot be removed."
         },
         "title": {
           "description": "One line naming an `extra` note. Required for `extra` and only for it.",
@@ -390,7 +390,7 @@ export const ledgerTools = [
     "waitMs": 60000
   },
   {
-    "description": "Closes the review and publishes a new version of the report from the findings and notes on file; while a review is open, only this call shows the reviewer what was filed. For the lead agent only. A first or full review needs verdict and revision: {\"sha\":\"<full SHA of the reviewed commit>\"}, or {\"sha\":null,\"reason\":\"...\"} when it is unknown. A full review of a report that already has a version also needs each finding active on that version assessed with assess_finding or changed first. A selected-thread check needs one assessment per selected discussion and takes no fullReview; ReviewQ sets its revision, and verdict is optional. With no review open, verdict and revision default to the current version's, and fullReview:true makes the call a full review. Returns the version's receipt and which findings are new, updated, retired or carried. A refused call says what to do next.",
+    "description": "Closes the review and publishes a new version of the report from the findings and notes on file; while a review is open, only this call shows the reviewer what was filed. For the lead agent only. A first or full review needs verdict, which is approve, request_changes or blocked, and revision: {\"sha\":\"<full SHA of the reviewed commit>\"}, or {\"sha\":null,\"reason\":\"...\"} when it is unknown. A first or full review also needs the summary, rationale, flow, changes and verification notes on file, so file them with record_note first. A full review of a report that already has a version also needs each finding active on that version assessed with assess_finding or changed first. A selected-thread check needs one assessment per selected discussion and takes no fullReview; ReviewQ sets its revision, and verdict is optional. With no review open, verdict and revision default to the current version's, and fullReview:true makes the call a full review. Returns the version's receipt and which findings are new, updated, retired or carried. A refused call says what to do next.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,
@@ -429,6 +429,15 @@ export const ledgerTools = [
             "nextAction"
           ],
           "type": "object"
+        },
+        "ClosingVerdict": {
+          "description": "The verdict of the review.",
+          "enum": [
+            "approve",
+            "request_changes",
+            "blocked"
+          ],
+          "type": "string"
         },
         "DiscussionIdDto": {
           "description": "A GitLab discussion ID of a selected-thread batch.",
@@ -484,18 +493,9 @@ export const ledgerTools = [
             "sha"
           ],
           "type": "object"
-        },
-        "Verdict": {
-          "enum": [
-            "approve",
-            "request_changes",
-            "blocked",
-            "not_specified"
-          ],
-          "type": "string"
         }
       },
-      "description": "Closes the review and publishes a version. A first or full review needs `verdict` and `revision`; a selected-thread check needs one entry in `assessments` per selected discussion.",
+      "description": "Closes the review and publishes a version. A first or full review needs `verdict`, `revision` and the `summary`, `rationale`, `flow`, `changes` and `verification` notes; a selected-thread check needs one entry in `assessments` per selected discussion.",
       "properties": {
         "assessments": {
           "description": "One per selected discussion of a selected-thread check, and only there.",
@@ -520,7 +520,7 @@ export const ledgerTools = [
         "verdict": {
           "allOf": [
             {
-              "$ref": "#/definitions/Verdict"
+              "$ref": "#/definitions/ClosingVerdict"
             }
           ],
           "description": "Required for a first version and a full review. Otherwise it defaults to the current version's verdict."

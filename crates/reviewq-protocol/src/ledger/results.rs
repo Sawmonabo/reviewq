@@ -166,7 +166,7 @@ pub struct NoteRecord {
 }
 
 /// The result of `finish_review`:
-/// `{receiptId,sha256,result,new,updated,retired,carried,bySubagents,emptySections}`.
+/// `{receiptId,sha256,result,new,updated,retired,carried,bySubagents}`.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FinishReceipt {
@@ -182,8 +182,6 @@ pub struct FinishReceipt {
     pub carried: u64,
     /// The findings that subagents filed or changed in this version.
     pub by_subagents: Vec<FindingIdDto>,
-    /// Which of `summary`, `rationale`, `flow`, `changes` and `verification` are not recorded.
-    pub empty_sections: Vec<NoteSection>,
 }
 
 /// The result of `needs_input`: the held pass and what it keeps unpublished.

@@ -88,16 +88,7 @@ fn ledger_writes_are_idempotent() {
                 changed: vec![RecordField::Title],
             })
         );
-        let note = NoteWrite {
-            key: NoteKey::fixed(NoteSection::Summary).unwrap(),
-            body: "Retries reuse the first key.".into(),
-            expected_revision: None,
-        };
-        store
-            .write_record(call("summary"), RecordWrite::WriteNote(note))
-            .await
-            .unwrap()
-            .unwrap();
+        file_notes(&store, &[NoteSection::Summary]).await;
         store.close(Duration::from_secs(1)).await.unwrap();
 
         let store = open(path).await;
@@ -145,13 +136,7 @@ fn publish_is_conditional() {
 
         // A record filed after the snapshot makes the commit stale.
         let early = closing(&store, "finish").await;
-        let note = NoteWrite {
-            key: NoteKey::fixed(NoteSection::Summary).unwrap(),
-            body: "Retries reuse the first key.".into(),
-            expected_revision: None,
-        };
-        let write = store.write_record(call("summary"), RecordWrite::WriteNote(note));
-        write.await.unwrap().unwrap();
+        file_notes(&store, &[NoteSection::Summary]).await;
         let outcome = store.commit_publish(full_review(early)).await;
         assert_eq!(outcome.unwrap(), PublishOutcome::Stale);
         let view = store.read_report(actor.clone(), run_id.clone(), None, false);
@@ -292,6 +277,28 @@ fn publish_is_conditional() {
         activity(&store, "idle").await;
         settle_due(&store).await.unwrap();
         assert_eq!(versions(&store).await, ["full_review", "update"]);
+        // A full review is refused, keeping every record, until the notes it needs are filed.
+        let Err(AppError::InvalidFields(errors)) =
+            finish_full_review(&store, "close-without-notes").await
+        else {
+            panic!("missing notes are a field error");
+        };
+        assert_eq!(
+            errors
+                .iter()
+                .map(|error| &*error.message)
+                .collect::<Vec<_>>(),
+            [
+                "A full review, which includes the first version of a review, needs the rationale, flow, changes and verification notes, which are not on file yet. File each with record_note, then call finish_review again. Everything already filed is kept."
+            ]
+        );
+        let needed = [
+            NoteSection::Rationale,
+            NoteSection::Flow,
+            NoteSection::Changes,
+            NoteSection::Verification,
+        ];
+        file_notes(&store, &needed).await;
         finish_full_review(&store, "close-full").await.unwrap();
         // A finding on the current version that the lead neither changed nor assessed since
         // that close still refuses one. An assessment equal to the stored one counts.
@@ -498,7 +505,6 @@ fn summary(result: ResultKind) -> ClosingSummary {
         retired: Vec::new(),
         carried: 0,
         by_subagents: Vec::new(),
-        empty_sections: Vec::new(),
     }
 }
 
@@ -671,6 +677,26 @@ async fn file(store: &SqliteStore, id: &str, title: &str) {
     fields.title = title.into();
     let create = RecordWrite::CreateFinding(Box::new(fields));
     store.write_record(call(id), create).await.unwrap().unwrap();
+}
+
+/// The lead files a short note in each of `sections`, a flow note with its Mermaid diagram.
+async fn file_notes(store: &SqliteStore, sections: &[NoteSection]) {
+    for &section in sections {
+        let body = match section {
+            NoteSection::Flow => {
+                "```mermaid\nflowchart LR\n  Retry --> Ledger\n```\n\nA retry reads the stored key."
+            }
+            _ => "Retries reuse the first key.",
+        };
+        let note = NoteWrite {
+            key: NoteKey::fixed(section).unwrap(),
+            body: body.into(),
+            expected_revision: None,
+        };
+        let write = RecordWrite::WriteNote(note);
+        let id = format!("note-{section}");
+        store.write_record(call(&id), write).await.unwrap().unwrap();
+    }
 }
 
 /// The lead's `finish_review` with `fullReview`, through the app's closing checks.

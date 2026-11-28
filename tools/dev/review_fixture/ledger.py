@@ -32,6 +32,26 @@ def note(section, body, title=None):
     return value
 
 
+# What a plan files for each note a first version or full review needs before it can close.
+CLOSING_NOTES = {
+    "summary": "Checks each parser instruction before the review step reads it.",
+    "rationale": "Request changes until every reported input is handled.",
+    "flow": "```mermaid\nflowchart LR\n  Instruction --> Tokenizer --> Parser --> Checker\n```\n\n"
+            "`Parser::read` hands each instruction to `Checker::check` before the review step.",
+    "changes": "| Before | After |\n| --- | --- |\n| The parser reads input unchecked. | `Checker` reads it first. |\n\n"
+               "| Affected operation | What changes | Source |\n| --- | --- | --- |\n"
+               "| `Parser::read` | Calls `Checker::check` first. | `src/parser.rs` |",
+    "verification": "Replayed the fixture inputs at the reviewed commit. No live provider was checked.",
+}
+
+
+def closing_notes(*own):
+    """The record_note calls for the notes a first version or full review needs, except the
+    sections in `own`, which the plan files itself."""
+    return [call("record_note", note(section, body)) for section, body in CLOSING_NOTES.items()
+            if section not in own]
+
+
 def finish(head, verdict="request_changes", **extra):
     return call("finish_review", {"verdict": verdict, "revision": {"sha": head}, **extra})
 
@@ -120,6 +140,7 @@ def reader(head):
             "An empty instruction reaches the review step.", "A replayed empty instruction was accepted.",
             details="> The original instruction remains visible in the terminal.\n\n"
                     "```mermaid\nflowchart LR\n  Input --> Parse --> Check --> Result\n```")),
+        *closing_notes("rationale"),
         finish(head),
     ]
     second = [
@@ -143,14 +164,22 @@ def filler(index, size_lines, title_prefix="Filler"):
                    proposedComment=text, details=paragraph(size_lines * 2, 2030))
 
 
-def closing(head, tail, calls):
-    return [{"turn": [*calls, call("record_note", note("publication", tail)), finish(head)]}]
+def closing(head, tail, calls, own=()):
+    """One turn that files `calls`, the closing notes the plan does not file itself, and the
+    publication note that ends in `tail`, then closes the first version."""
+    notes = closing_notes(*own)
+    return [{"turn": [*calls, *notes, call("record_note", note("publication", tail)), finish(head)]}]
 
 
 def specimens(head):
     """One plan per reader limit. Each crosses one limit and stays inside the others."""
     bytes_over = [call("record_finding", filler(i, 4)) for i in range(22)]
-    lines_over = [call("record_note", note(section, "\n".join(["Report line."] * 2520)))
+    # The flow note needs its Mermaid diagram and the changes note its table. Each takes the
+    # place of four lines, so the note stays within its 32 KiB.
+    opening = {"flow": "```mermaid\nflowchart LR\n  Report --> Reader\n```\n\n",
+               "changes": "| Before | After |\n| --- | --- |\n| Short. | Long. |\n\n"}
+    lines_over = [call("record_note", note(section, opening[section] + "\n".join(["Report line."] * 2516)
+                                           if section in opening else "\n".join(["Report line."] * 2520)))
                   for section in ("flow", "changes", "questions", "verification")]
     line_over = [call("record_finding", finding(
         "Locations in long Unicode paths", "P3", False, "quality", "Every path is long.", "The line is long.",
@@ -194,10 +223,10 @@ def specimens(head):
                              finish(head)]})
     return {
         "specimen-bytes": closing(head, f"🧪 Quote at end. {QUOTE}\n\nREPORT-BYTE-TAIL", bytes_over),
-        "specimen-lines": closing(head, "REPORT-LINES-TAIL", lines_over),
+        "specimen-lines": closing(head, "REPORT-LINES-TAIL", lines_over, ("flow", "changes", "verification")),
         "specimen-line": closing(head, "REPORT-LINE-TAIL", line_over),
         "specimen-edges": closing(head, "REPORT-EDGES-TAIL", edges_over),
-        "specimen-characters": closing(head, "REPORT-CHARACTERS-TAIL", characters_over),
+        "specimen-characters": closing(head, "REPORT-CHARACTERS-TAIL", characters_over, ("verification",)),
         "specimen-nodes": closing(head, "REPORT-NODES-TAIL", nodes_over),
         "specimen-depth": closing(head, "REPORT-DEPTH-TAIL", depth_over),
         "specimen-windowed": closing(head, "REPORT-WINDOWED-TAIL", long_cards(28)),
@@ -246,50 +275,50 @@ LEDGER_VERSIONS = {
         {"bytes": 4458, "lines": 131, "max_line_bytes": 251, "code_points": 4429, "findings": 3},
     ],
     "reader-report": [
-        {"bytes": 1253, "lines": 64, "max_line_bytes": 111, "code_points": 1241, "findings": 1,
-         "marker": {"text": "**one** &amp; two 🧪", "scalar": 705, "byte": 714}},
-        {"bytes": 1101, "lines": 51, "max_line_bytes": 213, "code_points": 1094, "findings": 0},
+        {"bytes": 1756, "lines": 77, "max_line_bytes": 111, "code_points": 1744, "findings": 1,
+         "marker": {"text": "**one** &amp; two 🧪", "scalar": 1140, "byte": 1149}},
+        {"bytes": 1604, "lines": 64, "max_line_bytes": 213, "code_points": 1597, "findings": 0},
     ],
     "specimen-bytes": [
-        {"bytes": 1076765, "lines": 817, "max_line_bytes": 2050, "code_points": 1076643, "findings": 22,
-         "marker": {"text": "**one** &amp; two 🧪", "scalar": 1076605, "byte": 1076724}},
+        {"bytes": 1077324, "lines": 832, "max_line_bytes": 2050, "code_points": 1077202, "findings": 22,
+         "marker": {"text": "**one** &amp; two 🧪", "scalar": 1077164, "byte": 1077283}},
     ],
     "specimen-lines": [
-        {"bytes": 131724, "lines": 10123, "max_line_bytes": 111, "code_points": 131718, "findings": 0,
-         "marker": {"text": "REPORT-LINES-TAIL", "scalar": 131700, "byte": 131706}},
+        {"bytes": 131843, "lines": 10128, "max_line_bytes": 111, "code_points": 131837, "findings": 0,
+         "marker": {"text": "REPORT-LINES-TAIL", "scalar": 131819, "byte": 131825}},
     ],
     "specimen-line": [
-        {"bytes": 27264, "lines": 57, "max_line_bytes": 26340, "code_points": 22455, "findings": 1,
-         "marker": {"text": "REPORT-LINE-TAIL", "scalar": 22438, "byte": 27247}},
+        {"bytes": 27823, "lines": 72, "max_line_bytes": 26340, "code_points": 23014, "findings": 1,
+         "marker": {"text": "REPORT-LINE-TAIL", "scalar": 22997, "byte": 27806}},
     ],
     "specimen-edges": [
-        {"bytes": 11133, "lines": 709, "max_line_bytes": 111, "code_points": 11124, "findings": 1,
-         "marker": {"text": "REPORT-EDGES-TAIL", "scalar": 11106, "byte": 11115}},
+        {"bytes": 11692, "lines": 724, "max_line_bytes": 111, "code_points": 11683, "findings": 1,
+         "marker": {"text": "REPORT-EDGES-TAIL", "scalar": 11665, "byte": 11674}},
     ],
     "specimen-characters": [
-        {"bytes": 33444, "lines": 105, "max_line_bytes": 593, "code_points": 33438, "findings": 0,
-         "marker": {"text": "REPORT-CHARACTERS-TAIL", "scalar": 33415, "byte": 33421}},
+        {"bytes": 33935, "lines": 120, "max_line_bytes": 593, "code_points": 33929, "findings": 0,
+         "marker": {"text": "REPORT-CHARACTERS-TAIL", "scalar": 33906, "byte": 33912}},
     ],
     "specimen-nodes": [
-        {"bytes": 100197, "lines": 123, "max_line_bytes": 8187, "code_points": 100173, "findings": 6,
-         "marker": {"text": "REPORT-NODES-TAIL", "scalar": 100155, "byte": 100179}},
+        {"bytes": 100756, "lines": 138, "max_line_bytes": 8187, "code_points": 100732, "findings": 6,
+         "marker": {"text": "REPORT-NODES-TAIL", "scalar": 100714, "byte": 100738}},
     ],
     "specimen-depth": [
-        {"bytes": 1183, "lines": 57, "max_line_bytes": 264, "code_points": 1174, "findings": 1,
-         "marker": {"text": "REPORT-DEPTH-TAIL", "scalar": 1156, "byte": 1165}},
+        {"bytes": 1742, "lines": 72, "max_line_bytes": 264, "code_points": 1733, "findings": 1,
+         "marker": {"text": "REPORT-DEPTH-TAIL", "scalar": 1715, "byte": 1724}},
     ],
     "specimen-windowed": [
-        {"bytes": 69654, "lines": 381, "max_line_bytes": 781, "code_points": 69564, "findings": 28,
-         "marker": {"text": "REPORT-WINDOWED-TAIL", "scalar": 69543, "byte": 69633}},
+        {"bytes": 70213, "lines": 396, "max_line_bytes": 781, "code_points": 70123, "findings": 28,
+         "marker": {"text": "REPORT-WINDOWED-TAIL", "scalar": 70102, "byte": 70192}},
     ],
     "specimen-changes": [
-        {"bytes": 30085, "lines": 189, "max_line_bytes": 781, "code_points": 30043, "findings": 12,
-         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 30023, "byte": 30065}},
-        {"bytes": 27882, "lines": 179, "max_line_bytes": 781, "code_points": 27842, "findings": 11,
-         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 27822, "byte": 27862}},
+        {"bytes": 30644, "lines": 204, "max_line_bytes": 781, "code_points": 30602, "findings": 12,
+         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 30582, "byte": 30624}},
+        {"bytes": 28441, "lines": 194, "max_line_bytes": 781, "code_points": 28401, "findings": 11,
+         "marker": {"text": "REPORT-CHANGES-TAIL", "scalar": 28381, "byte": 28421}},
     ],
     "specimen-blocks": [
-        {"bytes": 100083, "lines": 2445, "max_line_bytes": 167, "code_points": 99477, "findings": 200,
-         "marker": {"text": "REPORT-BLOCKS-TAIL", "scalar": 99458, "byte": 100064}},
+        {"bytes": 100642, "lines": 2460, "max_line_bytes": 167, "code_points": 100036, "findings": 200,
+         "marker": {"text": "REPORT-BLOCKS-TAIL", "scalar": 100017, "byte": 100623}},
     ],
 }

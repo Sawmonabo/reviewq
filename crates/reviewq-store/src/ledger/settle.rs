@@ -56,7 +56,9 @@ pub(super) fn candidates(db: &Connection) -> Result<Vec<SettleCandidate>, StoreE
              AND s.parent_session_key IS NOT NULL AND {BUSY}),
            EXISTS(SELECT 1 FROM recovery_episodes e WHERE e.run_id=x.run_id AND e.state IN {RECOVERING}),
            EXISTS(SELECT 1 FROM report_heads h WHERE h.run_id=x.run_id),
-           coalesce(l.sequence>l.published_sequence, 0)
+           coalesce(l.sequence>l.published_sequence, 0),
+           CASE WHEN p.kind='full_review' THEN coalesce((SELECT group_concat(DISTINCT n.section)
+             FROM ledger_notes n WHERE n.run_id=x.run_id AND n.present=1), '') END
          FROM candidates x JOIN runs r ON r.run_id=x.run_id
          JOIN reviews v ON v.review_id=r.review_id AND v.state='open'
          LEFT JOIN ledger_runs l ON l.run_id=x.run_id
@@ -83,6 +85,16 @@ pub(super) fn candidates(db: &Connection) -> Result<Vec<SettleCandidate>, StoreE
                 .map_err(|_| AppError::Internal)?,
             active_findings: u32::try_from(row.get::<_, i64>(4)?)
                 .map_err(|_| AppError::Internal)?,
+            full_review_notes: row
+                .get::<_, Option<String>>(10)?
+                .map(|sections| {
+                    sections
+                        .split(',')
+                        .filter(|section| !section.is_empty())
+                        .map(parse)
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?,
             facts: SettleFacts {
                 lead_idle: row.get(5)?,
                 children_idle: row.get(6)?,

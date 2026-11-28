@@ -11,6 +11,7 @@ pub use display::{
     HtmlRendering, MAX_DISPLAY_BLOCKS, MAX_DISPLAY_HEADING_BYTES, MAX_DISPLAY_HEADINGS_BYTES,
     build_display_index, build_report_display_index,
 };
+pub(crate) use drawings::is_mermaid;
 pub use drawings::{
     DRAWING_RECIPE, DrawingOutput, DrawingRenderer, MAX_DRAWING_BYTES, mermaid_sources,
 };

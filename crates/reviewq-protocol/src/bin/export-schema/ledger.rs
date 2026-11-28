@@ -7,12 +7,12 @@ use std::io::{self, Write};
 use reviewq_protocol::deadlines::tool_deadline;
 use reviewq_protocol::followups::NextAction;
 use reviewq_protocol::ledger::{
-    AssessFinding, FinishReview, LEDGER_TOOLS, LedgerTool, NeedsInput, NoteSection, RecordFinding,
-    RecordNote, ReviewLedger, validate_against,
+    AssessFinding, ClosingVerdict, FinishReview, LEDGER_TOOLS, LedgerTool, NeedsInput, NoteSection,
+    RecordFinding, RecordNote, ReviewLedger, validate_against,
 };
 use reviewq_protocol::reports::{
     Assessment, FindingBasis, FindingBasisKind, FindingConclusion, FindingLocation, FindingSection,
-    ReportRevision, Severity, Verdict,
+    ReportRevision, Severity,
 };
 use reviewq_protocol::{DiscussionIdDto, FindingIdDto, GitShaDto};
 use schemars::JsonSchema;
@@ -177,7 +177,7 @@ fn examples() -> Result<Vec<(LedgerTool, Value)>, Box<dyn Error>> {
         ..ReviewLedger::default()
     };
     let finish_review = FinishReview {
-        verdict: Some(Verdict::RequestChanges),
+        verdict: Some(ClosingVerdict::RequestChanges),
         revision: Some(ReportRevision {
             sha: Some(
                 GitShaDto::new("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").ok_or("example SHA")?,

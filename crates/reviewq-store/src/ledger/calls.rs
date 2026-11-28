@@ -186,7 +186,6 @@ pub(super) fn finish_json(ack: &FinishReceipt, assessments: &[Assessment]) -> Va
         "retired": ids(&summary.retired),
         "carried": summary.carried,
         "bySubagents": ids(&summary.by_subagents),
-        "emptySections": summary.empty_sections.iter().map(ToString::to_string).collect::<Vec<_>>(),
         "assessments": assessments.iter().map(|assessment| json!({
             "discussionId": assessment.discussion_id,
             "conclusion": assessment.conclusion.to_string(),
@@ -214,10 +213,6 @@ pub(super) fn finish_from(value: &Value) -> Result<(FinishReceipt, Vec<Assessmen
             retired: ids(&value["retired"])?,
             carried: count(&value["carried"])?,
             by_subagents: ids(&value["bySubagents"])?,
-            empty_sections: list(&value["emptySections"])?
-                .iter()
-                .map(|section| parse(string(section)?))
-                .collect::<Result<_, _>>()?,
         },
     };
     let assessments = list(&value["assessments"])?

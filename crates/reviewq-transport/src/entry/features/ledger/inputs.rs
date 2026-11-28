@@ -225,12 +225,11 @@ fn conclusion(value: report_dto::FindingConclusion) -> FindingConclusion {
     }
 }
 
-fn verdict(value: report_dto::Verdict) -> Verdict {
+fn verdict(value: dto::ClosingVerdict) -> Verdict {
     match value {
-        report_dto::Verdict::Approve => Verdict::Approve,
-        report_dto::Verdict::RequestChanges => Verdict::RequestChanges,
-        report_dto::Verdict::Blocked => Verdict::Blocked,
-        report_dto::Verdict::NotSpecified => Verdict::NotSpecified,
+        dto::ClosingVerdict::Approve => Verdict::Approve,
+        dto::ClosingVerdict::RequestChanges => Verdict::RequestChanges,
+        dto::ClosingVerdict::Blocked => Verdict::Blocked,
     }
 }
 

@@ -125,6 +125,15 @@
         ],
         "type": "object"
       },
+      "ClosingVerdict": {
+        "description": "The verdict of the review.",
+        "enum": [
+          "approve",
+          "request_changes",
+          "blocked"
+        ],
+        "type": "string"
+      },
       "DiscussionIdDto": {
         "description": "A GitLab discussion ID of a selected-thread batch.",
         "maxLength": 256,
@@ -179,18 +188,9 @@
           "sha"
         ],
         "type": "object"
-      },
-      "Verdict": {
-        "enum": [
-          "approve",
-          "request_changes",
-          "blocked",
-          "not_specified"
-        ],
-        "type": "string"
       }
     },
-    "description": "Closes the review and publishes a version. A first or full review needs `verdict` and `revision`; a selected-thread check needs one entry in `assessments` per selected discussion.",
+    "description": "Closes the review and publishes a version. A first or full review needs `verdict`, `revision` and the `summary`, `rationale`, `flow`, `changes` and `verification` notes; a selected-thread check needs one entry in `assessments` per selected discussion.",
     "properties": {
       "assessments": {
         "description": "One per selected discussion of a selected-thread check, and only there.",
@@ -215,7 +215,7 @@
       "verdict": {
         "allOf": [
           {
-            "$ref": "#/definitions/Verdict"
+            "$ref": "#/definitions/ClosingVerdict"
           }
         ],
         "description": "Required for a first version and a full review. Otherwise it defaults to the current version's verdict."
@@ -425,7 +425,7 @@
     "description": "Replaces one review note.",
     "properties": {
       "body": {
-        "description": "The note's Markdown. An empty body removes the note.",
+        "description": "The note's Markdown. An empty body removes the note, except a required one.",
         "maxLength": 32768,
         "type": "string"
       },
@@ -442,7 +442,7 @@
             "$ref": "#/definitions/NoteSection"
           }
         ],
-        "description": "`title` is the report's title, on one line. `summary` says what the MR does in at most four plain paragraphs and `rationale` gives the reason for the verdict in one. `flow` is a Mermaid diagram of the principal code and data flow, then a short explanation. `changes` is a table with the two columns Before and After, then a table with the columns Affected operation, What changes and Source. `threads`, `questions`, `verification` and `publication` fill the report sections of those names, and `extra` adds a section under its own title."
+        "description": "`title` is the report's title, on one line. `summary` says what the MR does in at most four plain paragraphs and `rationale` gives the reason for the verdict in one. `flow` is a Mermaid diagram of the principal code and data flow in a fenced block that opens with a line ```mermaid, then a short explanation. `changes` is a table with the two columns Before and After, then a table with the columns Affected operation, What changes and Source. `threads`, `questions`, `verification` and `publication` fill the report sections of those names, and `extra` adds a section under its own title. A first version or a full review needs `summary`, `rationale`, `flow`, `changes` and `verification`, and once filed they cannot be removed."
       },
       "title": {
         "description": "One line naming an `extra` note. Required for `extra` and only for it.",

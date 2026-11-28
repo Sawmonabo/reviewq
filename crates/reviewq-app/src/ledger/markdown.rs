@@ -12,7 +12,10 @@ use satteri_pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 
 use super::NoteSection;
 use super::layout::{COVER_LABELS, CardLabel, CountsLine};
-use crate::reports::REPORT_MARKDOWN;
+use crate::reports::{REPORT_MARKDOWN, is_mermaid};
+
+#[cfg(test)]
+mod tests;
 
 /// Longest line of an authored field, in UTF-8 bytes without its line ending.
 pub(crate) const MAX_FIELD_LINE_BYTES: usize = 8 * 1024;
@@ -50,8 +53,12 @@ pub(crate) enum MarkdownField {
     /// The `publication` note, written after ReviewQ's list of disposition lines. Like
     /// `details`, it begins with no list or indented text.
     Publication,
-    /// The body of any other Markdown note: `flow`, `changes`, `threads`, `questions`,
-    /// `verification` or an `extra` note.
+    /// The `flow` note, which holds a top-level fenced Mermaid diagram.
+    Flow,
+    /// The `changes` note, which holds a top-level table.
+    Changes,
+    /// The body of any other Markdown note: `threads`, `questions`, `verification` or an
+    /// `extra` note.
     Note,
 }
 
@@ -63,9 +70,9 @@ impl MarkdownField {
             NoteSection::Title => None,
             NoteSection::Summary => Some(Self::Summary),
             NoteSection::Rationale => Some(Self::Rationale),
-            NoteSection::Flow
-            | NoteSection::Changes
-            | NoteSection::Threads
+            NoteSection::Flow => Some(Self::Flow),
+            NoteSection::Changes => Some(Self::Changes),
+            NoteSection::Threads
             | NoteSection::Questions
             | NoteSection::Verification
             | NoteSection::Extra => Some(Self::Note),
@@ -117,6 +124,10 @@ pub(crate) enum ProblemKind {
     CountsLine,
     /// A finding field's paragraph starts with one of the card's bold labels here.
     CardLabel(CardLabel),
+    /// The `flow` note holds no top-level fenced Mermaid block with a diagram in it.
+    NoDiagram,
+    /// The `changes` note holds no top-level table.
+    NoTable,
 }
 
 impl Display for FieldProblem {
@@ -185,6 +196,12 @@ impl Display for FieldProblem {
                 "Line {line}: start the paragraph with plain words, not \"**{}**\", which the card shows as a field label.",
                 label.text()
             ),
+            ProblemKind::NoDiagram => output.write_str(
+                "The flow note needs a Mermaid diagram of the principal code and data flow: a line ```mermaid, the diagram, then a closing ```. Add the diagram and send the note again.",
+            ),
+            ProblemKind::NoTable => output.write_str(
+                "The changes note needs a table with the two columns Before and After, then a table of the affected operations with the columns Affected operation, What changes and Source. Add the tables and send the note again.",
+            ),
         }
     }
 }
@@ -195,8 +212,8 @@ impl Display for FieldProblem {
 /// reference and holds no footnote. `field` adds its own rules: `issue`, `consequence`,
 /// the evidence text and `details` begin no paragraph with a card's bold label, the first
 /// three begin with a paragraph, and `details` and the `publication` note begin with no list
-/// or indented text. A proposed comment has no rule of its own, because it is quoted. Returns the
-/// first problem found.
+/// or indented text. A proposed comment has no rule of its own, because it is quoted. The `flow`
+/// note holds a Mermaid diagram and the `changes` note a table. Returns the first problem found.
 ///
 /// A removal is never passed here: an empty note body removes the note, and a change that
 /// removes `proposedComment` or `details` carries no text.
@@ -222,11 +239,12 @@ pub(crate) fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldP
         // The last block started inside the field and ran over the heading after it.
         Some(Block { start, kind }) => {
             let kind = match kind {
-                BlockKind::Code => ProblemKind::OpenFence,
+                BlockKind::Code { .. } => ProblemKind::OpenFence,
                 BlockKind::Html => ProblemKind::OpenHtml,
                 BlockKind::Paragraph { .. }
                 | BlockKind::Heading
                 | BlockKind::List
+                | BlockKind::Table
                 | BlockKind::Other => ProblemKind::OpenBlock,
             };
             return Err(FieldProblem {
@@ -265,8 +283,9 @@ pub(crate) fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldP
                 BlockKind::Paragraph { .. } => card_labels(text, &blocks),
                 BlockKind::Heading
                 | BlockKind::List
-                | BlockKind::Code
+                | BlockKind::Code { .. }
                 | BlockKind::Html
+                | BlockKind::Table
                 | BlockKind::Other => Err(FieldProblem {
                     line: line_of(text, first.start),
                     kind: ProblemKind::NoOpeningParagraph,
@@ -280,7 +299,33 @@ pub(crate) fn check_field(field: MarkdownField, text: &str) -> Result<(), FieldP
         MarkdownField::Publication => joins_list(text, first),
         MarkdownField::Summary => plain_paragraphs(text, &blocks, MAX_SUMMARY_PARAGRAPHS),
         MarkdownField::Rationale => plain_paragraphs(text, &blocks, 1),
+        MarkdownField::Flow => requires(
+            &blocks,
+            |kind| matches!(kind, BlockKind::Code { diagram: true }),
+            ProblemKind::NoDiagram,
+        ),
+        MarkdownField::Changes => requires(
+            &blocks,
+            |kind| matches!(kind, BlockKind::Table),
+            ProblemKind::NoTable,
+        ),
         MarkdownField::ProposedComment | MarkdownField::Note => Ok(()),
+    }
+}
+
+/// `Ok` when some top-level block is one `wanted` accepts, otherwise `missing`.
+fn requires(
+    blocks: &[Block],
+    wanted: impl Fn(&BlockKind) -> bool,
+    missing: ProblemKind,
+) -> Result<(), FieldProblem> {
+    if blocks.iter().any(|block| wanted(&block.kind)) {
+        Ok(())
+    } else {
+        Err(FieldProblem {
+            line: 1,
+            kind: missing,
+        })
     }
 }
 
@@ -391,8 +436,12 @@ enum BlockKind {
     },
     Heading,
     List,
-    Code,
+    Code {
+        /// A fenced Mermaid block with a diagram in it, not only blank lines.
+        diagram: bool,
+    },
     Html,
+    Table,
     Other,
 }
 
@@ -413,7 +462,19 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
     let mut bold: Option<String> = None;
     // Whether a top-level paragraph is being read.
     let mut in_paragraph = false;
+    // Whether a top-level fenced Mermaid block is being read.
+    let mut in_mermaid = false;
     for (event, range) in parse.events() {
+        if in_mermaid
+            && let Event::Text(value) = &event
+            && !value.trim().is_empty()
+            && let Some(Block {
+                kind: BlockKind::Code { diagram },
+                ..
+            }) = blocks.last_mut()
+        {
+            *diagram = true;
+        }
         if in_paragraph
             && let Some(Block {
                 kind: BlockKind::Paragraph { text, .. },
@@ -454,8 +515,12 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
                         }
                         Tag::Heading { .. } => BlockKind::Heading,
                         Tag::List(..) => BlockKind::List,
-                        Tag::CodeBlock(_) => BlockKind::Code,
+                        Tag::CodeBlock(kind) => {
+                            in_mermaid = is_mermaid(&kind);
+                            BlockKind::Code { diagram: false }
+                        }
                         Tag::HtmlBlock => BlockKind::Html,
+                        Tag::Table(_) => BlockKind::Table,
                         _ => BlockKind::Other,
                     };
                     blocks.push(Block {
@@ -469,6 +534,7 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
                     in_paragraph = false;
+                    in_mermaid = false;
                 }
                 // The leading strong opened inside the paragraph, at depth 1, and ends here.
                 if depth == 1
@@ -524,8 +590,9 @@ fn plain_paragraphs(text: &str, blocks: &[Block], max: usize) -> Result<(), Fiel
         let kind = match &block.kind {
             BlockKind::Heading
             | BlockKind::List
-            | BlockKind::Code
+            | BlockKind::Code { .. }
             | BlockKind::Html
+            | BlockKind::Table
             | BlockKind::Other => Some(ProblemKind::NotPlain),
             BlockKind::Paragraph { bold: Some(_), .. } => Some(ProblemKind::BoldStart),
             BlockKind::Paragraph {
@@ -641,94 +708,4 @@ fn headings(text: &str) -> Vec<Heading> {
         }
     }
     found
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stand_alone_fields() {
-        let refused = |line, kind| Err(FieldProblem { line, kind });
-        let cases = [
-            (
-                "an open top-level fence",
-                MarkdownField::Details,
-                "Setup.\n\n```rust\nlet retry = 1;\n",
-                refused(3, ProblemKind::OpenFence),
-            ),
-            (
-                "an open fence inside a list item",
-                MarkdownField::Details,
-                "Steps.\n\n- run\n  ```\n  cargo test\n",
-                Ok(()),
-            ),
-            (
-                "an unclosed HTML comment",
-                MarkdownField::Evidence,
-                "Seen in the log.\n\n<!-- trimmed output\n",
-                refused(3, ProblemKind::OpenHtml),
-            ),
-            (
-                "a summary paragraph that starts with Scope:",
-                MarkdownField::Summary,
-                "Adds retries to invoice writes.\n\nScope: the invoice path only.",
-                refused(3, ProblemKind::LabelStart("Scope:")),
-            ),
-            (
-                "a details paragraph that starts with a card label",
-                MarkdownField::Details,
-                "Context.\n\n**Proposed comment — reply in thread:** Ship it.",
-                refused(3, ProblemKind::CardLabel(CardLabel::ProposedComment)),
-            ),
-            (
-                "a footnote definition",
-                MarkdownField::Note,
-                "Retries are unbounded.\n\n[^1]: Seen in the worker log.\n",
-                refused(3, ProblemKind::Footnote),
-            ),
-            (
-                "a publication note that begins with a list",
-                MarkdownField::Publication,
-                "- Posted F-01 on the merge request.\n",
-                refused(1, ProblemKind::JoinsList),
-            ),
-            (
-                "details that begin with a sentence and then a list",
-                MarkdownField::Details,
-                "The replay steps:\n\n- drop the reply\n- retry\n",
-                Ok(()),
-            ),
-            (
-                "a summary paragraph that reads as the counts line",
-                MarkdownField::Summary,
-                "Adds retries.\n\nP0: 1 · P1: 0 · P2: 0 · P3: 0 · Blocking: 1 · Nonblocking: *0*",
-                refused(3, ProblemKind::CountsLine),
-            ),
-            (
-                "a rationale that states the counts within a sentence",
-                MarkdownField::Rationale,
-                "One finding blocks: P0: 1 · P1: 0 · P2: 0 · P3: 0 · Blocking: 1 · Nonblocking: 0",
-                Ok(()),
-            ),
-        ];
-        for (case, field, text, expected) in cases {
-            assert_eq!(check_field(field, text), expected, "{case}");
-        }
-        let shifted = [
-            (
-                "a setext heading is shifted",
-                "Intro.\n\nPlan\n====\n\nBody.\n",
-                "Intro.\n\n#### Plan\n\nBody.\n",
-            ),
-            (
-                "a quoted setext heading over two lines keeps one quote marker",
-                "> *foo\n> bar*\n> ===",
-                "> #### *foo bar*",
-            ),
-        ];
-        for (case, text, expected) in shifted {
-            assert_eq!(shift_headings(text), expected, "{case}");
-        }
-    }
 }

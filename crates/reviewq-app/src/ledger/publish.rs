@@ -4,7 +4,7 @@
 //! `update_failed` from the domain's `settle` decision.
 
 use std::cmp::Reverse;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write as _};
 
 use reviewq_domain::identity::{GitSha, ReceiptId, ReportHash, Revision, RunId};
 use reviewq_domain::ledger::{
@@ -16,6 +16,7 @@ use super::compose::{self, checked_revision, recorded_outcome, state};
 use super::passes::findings_on_file;
 use super::record::capitalized;
 use super::refusal::{for_agent, root};
+use super::required;
 use super::{
     CallBinding, Caller, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
     FailureRecord, FinishReceipt, FinishReview, LedgerSnapshot, LedgerStore, NewVersion,
@@ -33,14 +34,6 @@ const MAX_RECOMPOSES: usize = 3;
 const MAX_COMPOSED_BYTES: usize = 4 * 1024 * 1024;
 /// Records a refusal for size names, largest first.
 const NAMED_RECORDS: usize = 3;
-/// The notes whose absence the closing acknowledgement reports, in its order.
-const REPORTED_NOTES: [NoteSection; 5] = [
-    NoteSection::Summary,
-    NoteSection::Rationale,
-    NoteSection::Flow,
-    NoteSection::Changes,
-    NoteSection::Verification,
-];
 
 const CLOSING_REFUSED: &str = "ReviewQ refused the lead's closing call because this run's workspace, repository grant, settings or follow-up batch changed. The filed findings are kept. Check the run, then ask the lead to call finish_review again.";
 const UPDATE_REFUSED: &str = "ReviewQ could not publish an update because this run's workspace, repository grant or settings changed. The filed findings are kept, and ReviewQ tries again the next time the run settles.";
@@ -61,8 +54,9 @@ const KEPT_CHANGING_FOR_AGENT: &str = "Findings or notes kept changing while Rev
 ///
 /// Fails with `InvalidFields` for anything the lead corrects in its turn: a missing verdict
 /// or revision, `fullReview` or assessments that do not fit the open pass, a revision other
-/// than the selected-thread batch's, findings a full review left untouched, assessments that
-/// do not cover the batch, or text over 4 MiB. Every other refusal is also one root field
+/// than the selected-thread batch's, a first version or full review without every required
+/// note (`required`), findings a full review left untouched, assessments that do not cover the
+/// batch, or text over 4 MiB. Every other refusal is also one root field
 /// error worded for the agent: after recording `closing_refused` when the run's workspace,
 /// grant, settings or follow-up binding changed; for a child or an unattributed call,
 /// which records nothing; and when the records kept changing through three recomposes. Calls
@@ -162,7 +156,10 @@ async fn settle_run(
         Settlement::Unfinished => {
             store
                 .record_failure(FailureRecord {
-                    reason: unfinished_reason(candidate.active_findings),
+                    reason: unfinished_reason(
+                        candidate.active_findings,
+                        candidate.full_review_notes,
+                    ),
                     run: candidate.run,
                     pass: candidate.pass,
                     kind: FailureKind::UnfinishedReview,
@@ -248,11 +245,26 @@ async fn update_failed(
         .await
 }
 
-fn unfinished_reason(findings: u32) -> String {
-    format!(
-        "The lead's last turn ended without closing the review: in that turn it called neither finish_review nor needs_input. {}. What is on file stays unpublished until the lead closes the review.",
+/// Why the open pass is unfinished. A refused closing call leaves the pass open too, so the
+/// reason says no closing call was accepted, and names the required notes a full review still
+/// lacks, the usual cause of such a refusal.
+fn unfinished_reason(findings: u32, full_review_notes: Option<Vec<NoteSection>>) -> String {
+    let mut reason = format!(
+        "The lead's last turn ended without closing the review: no {} or {} call in that turn was accepted. {}.",
+        Tool::FinishReview.as_str(),
+        Tool::NeedsInput.as_str(),
         capitalized(&findings_on_file(findings))
-    )
+    );
+    if let Some(notes) =
+        full_review_notes.and_then(|notes| required::named(&required::missing(notes)))
+    {
+        let _ = write!(
+            reason,
+            " The review still needs {notes} before it can publish."
+        );
+    }
+    reason.push_str(" What is on file stays unpublished until the lead closes the review.");
+    reason
 }
 
 /// A closing call ready to commit, with what its acknowledgement and a refusal need.
@@ -364,7 +376,11 @@ fn prepare_closing(
     })
     .map_err(|errors| AppError::InvalidFields(errors.into_iter().map(closing_error).collect()))?;
     let errors = match kind {
-        VersionKind::FullReview => untouched_errors(&snapshot),
+        // The notes error comes first, so the transport's cap on the list never drops it.
+        VersionKind::FullReview => missing_notes_error(&snapshot)
+            .into_iter()
+            .chain(untouched_errors(&snapshot))
+            .collect(),
         VersionKind::SelectedThreads => revision_errors(&snapshot, input),
         VersionKind::Update => Vec::new(),
     };
@@ -460,6 +476,27 @@ fn closing_error(error: ClosingError) -> FieldError {
             "A full review, which includes the first version of a review, needs the reviewed revision: {\"sha\":\"<full SHA>\"}, or {\"sha\":null,\"reason\":\"…\"} when it is unknown.",
         ),
     }
+}
+
+/// One error naming every required note a first version or a full review lacks. Only the
+/// lead's closing call checks this. A required note cannot be removed once filed, so every
+/// later version, an update or a selected-thread result, holds them as well.
+fn missing_notes_error(snapshot: &LedgerSnapshot) -> Option<FieldError> {
+    let missing = required::missing(snapshot.notes.iter().map(|note| note.key.section()));
+    let names = required::named(&missing)?;
+    let (verb, each) = if missing.len() == 1 {
+        ("is", "it")
+    } else {
+        ("are", "each")
+    };
+    Some(FieldError::new(
+        "",
+        format!(
+            "A full review, which includes the first version of a review, needs {names}, which {verb} not on file yet. File {each} with {}, then call {} again. Everything already filed is kept.",
+            Tool::RecordNote.as_str(),
+            Tool::FinishReview.as_str(),
+        ),
+    ))
 }
 
 /// One error per active finding of the current version that a full review neither changed
@@ -637,8 +674,8 @@ fn new_version(snapshot: &LedgerSnapshot, facts: VersionFacts) -> Result<NewVers
     })
 }
 
-/// The acknowledgement's lists: each finding by its state against the parent version, the
-/// findings subagents filed or changed, and the reported notes that are missing.
+/// The acknowledgement's lists: each finding by its state against the parent version and the
+/// findings subagents filed or changed.
 fn closing_summary(snapshot: &LedgerSnapshot, result: ResultKind) -> ClosingSummary {
     let mut summary = ClosingSummary {
         result,
@@ -647,15 +684,6 @@ fn closing_summary(snapshot: &LedgerSnapshot, result: ResultKind) -> ClosingSumm
         retired: Vec::new(),
         carried: 0,
         by_subagents: Vec::new(),
-        empty_sections: REPORTED_NOTES
-            .into_iter()
-            .filter(|section| {
-                !snapshot
-                    .notes
-                    .iter()
-                    .any(|note| note.key.section() == *section)
-            })
-            .collect(),
     };
     for finding in &snapshot.findings {
         let id = finding.record.id;

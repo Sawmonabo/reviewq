@@ -10,6 +10,7 @@ use reviewq_domain::ledger::{FindingId, RecordRevision, Tool};
 use super::layout::repeats_fixed_heading;
 use super::markdown::{FieldProblem, MarkdownField, check_field};
 use super::refusal::for_agent;
+use super::required;
 use super::{
     CallBinding, FindingAssessment, FindingFields, FindingPatch, LedgerPage, LedgerRead,
     LedgerStore, MAX_ACTIVE_FINDINGS, MAX_EXTRA_NOTES, NoteKey, NoteWrite, RecordField,
@@ -100,10 +101,11 @@ pub async fn assess_finding(
 }
 
 /// Replaces one note, or removes it with a body that is empty or only whitespace. A removal
-/// is not checked.
+/// is not checked for Markdown.
 ///
-/// Fails with `InvalidFields` when the body breaks a Markdown rule for its section or an
-/// `extra` note's title repeats a fixed section's heading, with nothing written; or with one
+/// Fails with `InvalidFields` when the body breaks a Markdown rule for its section, an
+/// `extra` note's title repeats a fixed section's heading, or the call removes a required
+/// note, which every version must hold, with nothing written; or with one
 /// field error for a store refusal: a missing or stale expected revision, removing a note that
 /// is not on file, a run already at `MAX_EXTRA_NOTES`, or a caller the store cannot bind.
 /// Other store errors pass through.
@@ -122,13 +124,22 @@ pub async fn record_note(
             "This title repeats a heading the report already has. Give the extra note a title of its own, or put the text in the matching section's note.",
         ));
     }
+    let subject = Subject::Note(note.key.clone());
+    if note.body.is_empty() && required::is_required(note.key.section()) {
+        errors.push(FieldError::new(
+            "/body",
+            format!(
+                "{} is required in every version of the report, so it cannot be removed. Send its new text to replace it.",
+                capitalized(&subject.name()),
+            ),
+        ));
+    }
     if !note.body.is_empty()
         && let Some(field) = MarkdownField::for_note(note.key.section())
     {
         errors.extend(field_error("/body", field, &note.body));
     }
     checked(errors)?;
-    let subject = Subject::Note(note.key.clone());
     write_record(store, binding, subject, RecordWrite::WriteNote(note)).await
 }
 

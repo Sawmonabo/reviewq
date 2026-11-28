@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::reports::{
     Assessment, FindingBasis, FindingConclusion, FindingLocation, FindingSection, ReportRevision,
-    Severity, Verdict,
+    Severity,
 };
 use crate::{DiscussionIdDto, FindingIdDto, GitShaDto, PageCursorDto};
 
@@ -174,11 +174,13 @@ pub struct AssessFinding {
 pub struct RecordNote {
     /// `title` is the report's title, on one line. `summary` says what the MR does in at most
     /// four plain paragraphs and `rationale` gives the reason for the verdict in one. `flow` is
-    /// a Mermaid diagram of the principal code and data flow, then a short explanation.
-    /// `changes` is a table with the two columns Before and After, then a table with the
-    /// columns Affected operation, What changes and Source. `threads`, `questions`,
-    /// `verification` and `publication` fill the report sections of those names, and `extra`
-    /// adds a section under its own title.
+    /// a Mermaid diagram of the principal code and data flow in a fenced block that opens with
+    /// a line ```mermaid, then a short explanation. `changes` is a table with the two columns
+    /// Before and After, then a table with the columns Affected operation, What changes and
+    /// Source. `threads`, `questions`, `verification` and `publication` fill the report
+    /// sections of those names, and `extra` adds a section under its own title. A first
+    /// version or a full review needs `summary`, `rationale`, `flow`, `changes` and
+    /// `verification`, and once filed they cannot be removed.
     pub section: NoteSection,
     /// One line naming an `extra` note. Required for `extra` and only for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -187,7 +189,7 @@ pub struct RecordNote {
         schemars(with = "String", length(min = 1, max = MAX_EXTRA_TITLE_CHARS))
     )]
     pub title: Option<String>,
-    /// The note's Markdown. An empty body removes the note.
+    /// The note's Markdown. An empty body removes the note, except a required one.
     #[cfg_attr(feature = "schema", schemars(length(max = MAX_NOTE_BODY_BYTES)))]
     pub body: String,
     /// The revision you last read of this note. Required once the note exists.
@@ -226,9 +228,9 @@ pub struct ReviewLedger {
     pub cursor: Option<PageCursorDto>,
 }
 
-/// Closes the review and publishes a version. A first or full review needs `verdict` and
-/// `revision`; a selected-thread check needs one entry in `assessments` per selected
-/// discussion.
+/// Closes the review and publishes a version. A first or full review needs `verdict`,
+/// `revision` and the `summary`, `rationale`, `flow`, `changes` and `verification` notes; a
+/// selected-thread check needs one entry in `assessments` per selected discussion.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -236,8 +238,8 @@ pub struct FinishReview {
     /// Required for a first version and a full review. Otherwise it defaults to the current
     /// version's verdict.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "schema", schemars(with = "Verdict"))]
-    pub verdict: Option<Verdict>,
+    #[cfg_attr(feature = "schema", schemars(with = "ClosingVerdict"))]
+    pub verdict: Option<ClosingVerdict>,
     /// The reviewed commit. Required for a first version and a full review. ReviewQ binds a
     /// selected-thread check's commit itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -251,6 +253,18 @@ pub struct FinishReview {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(length(max = MAX_ASSESSMENTS)))]
     pub assessments: Vec<Assessment>,
+}
+
+// A stored report can also read `not_specified`, as imported ones do, but a closing call always
+// states one of these three, so the schema offers no other.
+/// The verdict of the review.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum ClosingVerdict {
+    Approve,
+    RequestChanges,
+    Blocked,
 }
 
 /// Records a question the reviewer must answer before the review can finish, and holds the

@@ -15,6 +15,7 @@ pub mod publish;
 pub mod readback;
 pub mod record;
 mod refusal;
+mod required;
 mod version;
 
 pub use links::{MAX_TICKET_LINKS, ReportLinks};
@@ -610,6 +611,10 @@ pub struct SettleCandidate {
     pub pass: Option<PassId>,
     /// Findings on file, for an `unfinished_review` reason.
     pub active_findings: u32,
+    /// The sections of the notes on file when the open pass is a full review, so an
+    /// `unfinished_review` reason can name the notes its closing call still needs. `None`
+    /// for a selected-thread pass or no pass.
+    pub full_review_notes: Option<Vec<NoteSection>>,
     pub facts: SettleFacts,
 }
 

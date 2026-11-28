@@ -8,6 +8,7 @@ use reviewq_domain::ledger::{GateDecision, PassKind, PassState, Tool};
 use super::readback::push_quoted;
 use super::record::capitalized;
 use super::refusal::{for_agent, root};
+use super::required;
 use super::{CallBinding, GateAnswer, GateRequest, HoldReceipt, LedgerStore, OpenPass};
 use crate::access::AppError;
 
@@ -112,13 +113,15 @@ fn asked(question: &str, when: &str) -> String {
 }
 
 /// The closing call `pass` owes, as an instruction: `call finish_review with …`. A full
-/// review needs a verdict and the reviewed commit; a selected-thread check needs one
-/// assessment per selected discussion.
+/// review needs a verdict, the reviewed commit and the required notes on file; a
+/// selected-thread check needs one assessment per selected discussion.
 fn closing_call(pass: &OpenPass) -> String {
     match pass.kind {
-        PassKind::FullReview => {
-            "call finish_review with your verdict and the reviewed commit".to_owned()
-        }
+        PassKind::FullReview => format!(
+            "call {} with your verdict and the reviewed commit, with {} on file",
+            Tool::FinishReview.as_str(),
+            required::named(&required::REQUIRED_NOTES).unwrap_or_default()
+        ),
         PassKind::SelectedThreads => {
             match pass.batch.as_ref().map(|batch| batch.discussion_ids.len()) {
                 Some(1) => {

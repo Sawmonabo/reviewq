@@ -96,11 +96,6 @@ pub(super) fn finish(receipt: FinishReceipt) -> Result<dto::FinishReceipt, AppEr
         retired: ids(summary.retired)?,
         carried: u64::from(summary.carried),
         by_subagents: ids(summary.by_subagents)?,
-        empty_sections: summary
-            .empty_sections
-            .into_iter()
-            .map(note_section)
-            .collect(),
     })
 }
 

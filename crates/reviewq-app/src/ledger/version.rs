@@ -11,7 +11,7 @@ use reviewq_domain::identity::{
 use reviewq_domain::ledger::{FindingId, RecordRevision, VersionKind};
 use reviewq_domain::session::LeadTarget;
 
-use super::{Caller, FindingRecord, NoteRecord, NoteSection, OpenPass, PassId, ReportLinks};
+use super::{Caller, FindingRecord, NoteRecord, OpenPass, PassId, ReportLinks};
 use crate::access::FieldError;
 use crate::followups::ResultKind;
 use crate::reports::{
@@ -51,9 +51,6 @@ pub struct ClosingSummary {
     pub carried: u32,
     /// Findings a subagent filed or changed since the parent version.
     pub by_subagents: Vec<FindingId>,
-    /// Which of the `summary`, `rationale`, `flow`, `changes` and `verification` notes are
-    /// missing.
-    pub empty_sections: Vec<NoteSection>,
 }
 
 /// What `finish_review` reads before composing.

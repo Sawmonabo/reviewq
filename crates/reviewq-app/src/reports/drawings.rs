@@ -26,6 +26,12 @@ pub trait DrawingRenderer: Send + Sync {
     fn expire(&self) -> AppFuture<'_, ()>;
 }
 
+/// Whether a fenced code block's info string makes it a Mermaid diagram, as the page decides:
+/// its `language-` class takes the info string up to the first space or tab.
+pub(crate) fn is_mermaid(kind: &CodeBlockKind<'_>) -> bool {
+    matches!(kind, CodeBlockKind::Fenced(info) if info.split([' ', '\t']).next() == Some("mermaid"))
+}
+
 /// Read only actual Mermaid fences from authorized Markdown. The consumer also
 /// hashes the canonical browser fence before attaching a derivative.
 pub fn mermaid_sources(markdown: &str) -> Vec<String> {
@@ -37,9 +43,7 @@ pub fn mermaid_sources(markdown: &str) -> Vec<String> {
     let parser = Parser::new_ext(markdown, REPORT_MARKDOWN);
     for event in parser {
         match event {
-            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info)))
-                if info.split_whitespace().next() == Some("mermaid") =>
-            {
+            Event::Start(Tag::CodeBlock(kind)) if is_mermaid(&kind) => {
                 source = Some(String::new());
             }
             Event::Text(text) => {
