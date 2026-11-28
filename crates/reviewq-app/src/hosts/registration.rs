@@ -1,4 +1,4 @@
-use reviewq_domain::identity::{MrIdentity, ReviewId, Revision};
+use reviewq_domain::identity::{ReviewId, Revision};
 use reviewq_domain::session::LeadTarget;
 
 use crate::access::{Actor, AppError};
@@ -8,13 +8,15 @@ use crate::workspace::WorkspaceStore;
 
 use super::{HostProof, LeadStore, RegisterLead};
 
+/// The stored review `actor` may register a lead on, in a configured project, with the
+/// settings revision it was read under.
 pub async fn authorize_registration(
     store: &(impl ReviewLookup + WorkspaceStore + ?Sized),
     actor: Actor,
     review: ReviewId,
-) -> Result<(Revision, MrIdentity), AppError> {
+) -> Result<(Revision, ReviewSource), AppError> {
     let (revision, source) = store.authorized_source(actor.clone(), review).await?.value;
-    let mr = source.identity;
+    let mr = &source.identity;
     let workspace = store.workspace_context(actor).await?.value;
     if revision != workspace.revision {
         return Err(AppError::StaleRevision);
@@ -26,7 +28,7 @@ pub async fn authorize_registration(
     {
         return Err(AppError::NotFound);
     }
-    Ok((revision, mr))
+    Ok((revision, source))
 }
 
 /// One binding operation for operator selection and host-issued terminal links.

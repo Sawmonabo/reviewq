@@ -1,5 +1,5 @@
 use reviewq_app::access::{Actor, AppError};
-use reviewq_app::sources::ReviewResolution;
+use reviewq_app::sources::{ReviewResolution, resolve_review};
 use reviewq_domain::identity::{ReviewId, SessionKey};
 
 use super::{Entry, pages::parse};
@@ -39,9 +39,13 @@ pub(super) async fn resolve(
     if active.revision != workspace.revision {
         return Err(AppError::StaleRevision);
     }
-    let resolved = source
-        .resolve(workspace.projects, target.to_owned())
-        .await?;
+    let resolved = resolve_review(
+        entry.store.as_ref(),
+        source.as_ref(),
+        workspace.projects,
+        target.to_owned(),
+    )
+    .await?;
     if entry.active_source().await?.revision != active.revision {
         return Err(AppError::StaleRevision);
     }

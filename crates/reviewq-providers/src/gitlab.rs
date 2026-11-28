@@ -5,8 +5,8 @@ use reviewq_app::access::{AppError, AppFuture};
 use reviewq_app::queue::{MergeRequestState, ReviewAuthor, ReviewSource};
 use reviewq_app::settings::SourceLease;
 use reviewq_app::sources::{
-    AuthenticatedReviewHead, MatchedReview, ReviewResolution, ReviewSourceReader, UnverifiedTrack,
-    WorkflowSnapshot,
+    AuthenticatedReviewHead, MatchedReview, ReviewAddress, ReviewResolution, ReviewSourceReader,
+    UnverifiedTrack, WorkflowSnapshot,
 };
 use reviewq_app::workspace::ConfiguredProject;
 use reviewq_domain::identity::{GitLabOrigin, GitSha, MrIdentity, ProjectId, TicketKey};
@@ -67,11 +67,11 @@ impl ReviewSourceReader for GitLab {
             if identity.origin() != &self.identity {
                 return Err(AppError::NotFound);
             }
-            let project = self.project(identity.project_id()).await?;
             let mr = self
                 .merge_request(identity.project_id(), identity.iid())
                 .await?;
-            self.review(identity.project_id(), &project.path_with_namespace, mr)
+            let path = lookup::project_path(&mr)?;
+            self.review(identity.project_id(), &path, mr)
         })
     }
 
@@ -142,6 +142,10 @@ impl ReviewSourceReader for GitLab {
     ) -> AppFuture<'_, ReviewResolution> {
         Box::pin(self.resolve_target(projects, target))
     }
+
+    fn address(&self, target: &str) -> Result<ReviewAddress, AppError> {
+        self.target_address(target)
+    }
 }
 
 #[derive(Deserialize)]
@@ -165,6 +169,12 @@ struct MergeRequest {
     draft: bool,
     diff_refs: Option<changes::DiffRefs>,
     changes_count: Option<serde_json::Value>,
+    references: Option<References>,
+}
+
+#[derive(Deserialize)]
+struct References {
+    full: String,
 }
 
 impl MergeRequest {

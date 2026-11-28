@@ -9,7 +9,7 @@ use crate::access::{Actor, AppError, AppFuture};
 use crate::decisions::{Decision, Frontier};
 use crate::events::Snapshot;
 use crate::hosts::HostPhase;
-use crate::sources::SourceSync;
+use crate::sources::{ReviewAddress, SourceSync};
 
 mod archive;
 mod filters;
@@ -99,6 +99,15 @@ impl SelectedLead {
 /// Direct lookup used by review bookmarks and the selected-run browser path.
 pub trait ReviewLookup: Send + Sync {
     fn review_by_mr(&self, actor: Actor, mr: MrIdentity) -> AppFuture<'_, ReviewId>;
+
+    /// The one stored review at `address` that `actor` may read in a configured project,
+    /// without asking the source. For a ticket, only its open reviews count. `None` when
+    /// the stored rows give no single review, so the caller asks the source.
+    fn known_review(
+        &self,
+        actor: Actor,
+        address: ReviewAddress,
+    ) -> AppFuture<'_, Option<ReviewSource>>;
 
     fn authorized_source(
         &self,

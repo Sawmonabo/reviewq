@@ -29,7 +29,7 @@ pub(in crate::entry) async fn register(
         serde_json::from_slice(&bytes).map_err(|_| AppError::InvalidRequest)?;
     let review_id = parse(input.review_id.as_str())?;
     let native: NativeSessionId = parse(input.native_id.as_str())?;
-    let (revision, mr) = authorize_registration(entry.store.as_ref(), actor, review_id).await?;
+    let (revision, review) = authorize_registration(entry.store.as_ref(), actor, review_id).await?;
     let source = entry.active_source().await?;
     if source.revision != revision {
         return Err(AppError::StaleRevision.into());
@@ -38,10 +38,12 @@ pub(in crate::entry) async fn register(
         .scope
         .repositories
         .iter()
-        .find(|repository| repository.project == mr.project_id())
+        .find(|repository| repository.project == review.identity.project_id())
         .and_then(|repository| repository.checkout.as_ref())
         .map(|checkout| checkout.root.as_path().to_string_lossy().into_owned());
-    let reader = source.reader.ok_or(AppError::Unavailable)?;
+    if source.reader.is_none() {
+        return Err(AppError::Unavailable.into());
+    }
     let (provider, proof) = match input.provider {
         HostProviderDto::Codex => (
             HostProvider::Codex,
@@ -67,11 +69,7 @@ pub(in crate::entry) async fn register(
     {
         return Err(AppError::Conflict.into());
     }
-    let remote = reader.review(mr.clone()).await?;
-    if remote.identity != mr {
-        return Err(AppError::Conflict.into());
-    }
-    let registered = register_proven(entry.store.as_ref(), proof, remote, revision).await?;
+    let registered = register_proven(entry.store.as_ref(), proof, review, revision).await?;
     if let (HostProvider::Codex, Some(host)) = (provider, &entry.host) {
         let _ = host.approve_hooks().await;
     }

@@ -1,10 +1,12 @@
-use reviewq_domain::identity::{EventCursor, GitSha, MrIdentity, Revision, TicketKey};
+use reviewq_domain::identity::{
+    EventCursor, GitLabOrigin, GitSha, MergeRequestIid, MrIdentity, Revision, TicketKey,
+};
 use reviewq_domain::settings::{BoardScope, CheckoutBinding};
 
 use crate::access::{Actor, AppError, AppFuture};
 use crate::changes::ChangeSource;
 use crate::events::Snapshot;
-use crate::queue::{MergeRequestState, ReviewSource};
+use crate::queue::{MergeRequestState, ReviewLookup, ReviewSource};
 use crate::settings::ActiveSource;
 use crate::workspace::{ConfiguredProject, WorkspaceStore};
 
@@ -72,11 +74,46 @@ pub trait ReviewSourceReader: ChangeSource {
         projects: Vec<ConfiguredProject>,
         target: String,
     ) -> AppFuture<'_, ReviewResolution>;
+
+    /// Reads what a `resolve` target names from its text alone, with no provider call. Fails
+    /// as `resolve` does on the same text: `InvalidRequest` when malformed, `NotFound` for a
+    /// URL at another origin.
+    fn address(&self, target: &str) -> Result<ReviewAddress, AppError>;
+}
+
+/// What a link target names at this source's origin.
+pub enum ReviewAddress {
+    /// The merge request with this IID in the project at exactly this path.
+    MergeRequest {
+        origin: GitLabOrigin,
+        project_path: String,
+        iid: MergeRequestIid,
+    },
+    /// The reviews tied to this ticket.
+    Ticket {
+        origin: GitLabOrigin,
+        key: TicketKey,
+    },
 }
 
 pub enum ReviewResolution {
     Found(ReviewSource),
     Ambiguous(Vec<String>),
+}
+
+/// Finds the review `target` names: the one the app already holds when its stored rows give
+/// exactly one, without a provider call, otherwise what `source` resolves in `projects`.
+pub async fn resolve_review(
+    store: &(impl ReviewLookup + ?Sized),
+    source: &dyn ReviewSourceReader,
+    projects: Vec<ConfiguredProject>,
+    target: String,
+) -> Result<ReviewResolution, AppError> {
+    let address = source.address(&target)?;
+    match store.known_review(Actor::local_operator(), address).await? {
+        Some(review) => Ok(ReviewResolution::Found(review)),
+        None => source.resolve(projects, target).await,
+    }
 }
 
 /// A board-filtered Jira issue with provider-verified fields.

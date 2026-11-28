@@ -11,8 +11,8 @@ use reviewq_domain::session::{
 use crate::access::{Actor, AppError, AppFuture};
 use crate::events::Snapshot;
 use crate::history::{HistorySession, NativeHistoryPage, NativePosition};
-use crate::queue::ReviewSource;
-use crate::sources::{ReviewResolution, ReviewSourceReader};
+use crate::queue::{ReviewLookup, ReviewSource};
+use crate::sources::{ReviewResolution, ReviewSourceReader, resolve_review};
 use crate::workspace::WorkspaceStore;
 
 mod claude;
@@ -281,7 +281,7 @@ pub enum NativeLink {
 
 /// Registers a verified Codex conversation in the current configured review scope.
 pub async fn link_codex(
-    store: &(impl WorkspaceStore + LeadStore + ?Sized),
+    store: &(impl WorkspaceStore + LeadStore + ReviewLookup + ?Sized),
     source: &dyn ReviewSourceReader,
     host: &dyn NativeHost,
     native_id: NativeSessionId,
@@ -294,9 +294,11 @@ pub async fn link_codex(
     link_proven(store, source, proof, target).await
 }
 
-/// Links either provider using its independently verified native identity.
+/// Links either provider using its independently verified native identity, to the review the
+/// app already holds for `target` when it holds exactly one, otherwise to what the source
+/// resolves.
 pub async fn link_proven(
-    store: &(impl WorkspaceStore + LeadStore + ?Sized),
+    store: &(impl WorkspaceStore + LeadStore + ReviewLookup + ?Sized),
     source: &dyn ReviewSourceReader,
     proof: HostProof,
     target: String,
@@ -305,7 +307,7 @@ pub async fn link_proven(
         .workspace_context(Actor::local_operator())
         .await?
         .value;
-    let review = match source.resolve(workspace.projects, target).await? {
+    let review = match resolve_review(store, source, workspace.projects, target).await? {
         ReviewResolution::Found(review) => review,
         ReviewResolution::Ambiguous(urls) => return Ok(NativeLink::Ambiguous(urls)),
     };
