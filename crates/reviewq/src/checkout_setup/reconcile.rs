@@ -218,9 +218,14 @@ async fn command_line_setups(
             let common = common.as_path();
             if let Err(error) = readdress(store, profile, common, url).await {
                 left = true;
+                // A checkout's own Git folder is the `.git` in its main worktree.
+                let folder = common
+                    .parent()
+                    .filter(|_| common.ends_with(".git"))
+                    .unwrap_or(common);
                 eprintln!(
                     "ReviewQ could not give the checkout at {} its new address and tries again: {error}",
-                    common.display()
+                    folder.display()
                 );
             }
         }

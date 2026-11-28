@@ -97,9 +97,10 @@ impl Inventory {
     /// wrote, or it no longer holds ReviewQ's part. Where the folder is no longer a worktree of
     /// the checkout, ReviewQ still removes what proves to be its own: its Codex table, by its
     /// marker, a recorded URL and this key's bearer, and a skill whose bytes are the ones it
-    /// recorded there. Anything else there is left untouched. When Git cannot say where a
-    /// Codex config stands, its table goes by the same proof, so the bearer never outlives the
-    /// record; anything else Git cannot place waits for its answer.
+    /// recorded there and that no repository there keeps. Anything else there is left
+    /// untouched. When Git cannot say where a Codex config stands, its table goes by the same
+    /// proof, so the bearer never outlives the record; anything else Git cannot place waits
+    /// for its answer.
     pub(super) async fn local_removal(
         &self,
         owned: &Owned,
@@ -125,10 +126,6 @@ impl Inventory {
         let (tracked, elsewhere) = match relative {
             Some(relative) => match git::destination(file, common, relative).await {
                 Ok(git::Destination::Elsewhere) => (false, true),
-                // A skill Git tracks is a copy the repository keeps, with no key in it.
-                Ok(git::Destination::Tracked) if matches!(owned, Owned::Skill { .. }) => {
-                    return Ok(None);
-                }
                 Ok(git::Destination::Tracked) => (true, false),
                 Ok(git::Destination::Owned) => (false, false),
                 Err(_) if codex_config => (false, false),
@@ -136,6 +133,13 @@ impl Inventory {
             },
             None => (false, false),
         };
+        // A skill a repository tracks is a copy it keeps, with no key in it: the checkout's,
+        // or another repository's that now stands where a worktree was. Equal bytes prove
+        // nothing there, as the skill is the same for everyone. One whose repository cannot
+        // say stays as well.
+        if matches!(owned, Owned::Skill { .. }) && (tracked || elsewhere && git::kept(file).await) {
+            return Ok(None);
+        }
         let Some(before) = files::read_written(file)? else {
             return Ok(None);
         };

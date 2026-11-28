@@ -11,10 +11,10 @@ make web-install
 make package
 ```
 
-The package target prints its directory, manifest digest and required platform loader. It validates the Claude plugin and marketplace with `~/.local/bin/claude` when present. Set `REVIEWQ_PACKAGE_CLAUDE` to select another executable. Use the printed package directory in place of `/absolute/path/to/bundle`.
+The package target prints its directory, manifest digest and required platform loader. It validates the Claude plugin and marketplace with `~/.local/bin/claude` when present. Set `REVIEWQ_PACKAGE_CLAUDE` to select another executable. Use the printed package directory, an absolute path, as `<release folder>`.
 
 ```sh
-/absolute/path/to/bundle/bin/reviewq install --from /absolute/path/to/bundle
+<release folder>/bin/reviewq install --from <release folder>
 ~/.local/bin/reviewq
 ```
 

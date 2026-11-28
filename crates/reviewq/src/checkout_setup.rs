@@ -419,10 +419,26 @@ mod tests {
         std::fs::create_dir(&profile)?;
         git(&root, &["init", "-q", "repo"]);
         git(&repo, &["commit", "-q", "--allow-empty", "-m", "start"]);
+        let url = "http://127.0.0.1:9/mcp";
+        // Servers written inline could not hold a table ReviewQ can later prove and remove.
+        let config = repo.join(".codex/config.toml");
+        std::fs::create_dir(repo.join(".codex"))?;
+        let inline = "mcp_servers = { other = { url = \"http://127.0.0.1:1/mcp\" } }\n";
+        std::fs::write(&config, inline)?;
+        let checkout = git::discover(Some(&repo)).await?;
+        let lock = files::hold(&profile, &checkout.common)?;
+        let Err(error) = prepare(&profile, checkout, url, None, lock, SETUP_AGAIN).await else {
+            panic!("setup refuses servers written inline");
+        };
+        assert!(
+            error.to_string().contains("[mcp_servers.<name>] table"),
+            "{error}"
+        );
+        assert_eq!(std::fs::read_to_string(&config)?, inline);
+        std::fs::remove_file(&config)?;
         let checkout = git::discover(Some(&repo)).await?;
         let common = checkout.common.clone();
         let lock = files::hold(&profile, &common)?;
-        let url = "http://127.0.0.1:9/mcp";
         let mut changes = prepare(&profile, checkout, url, None, lock, SETUP_AGAIN).await?;
         changes
             .plan
@@ -431,13 +447,17 @@ mod tests {
         changes.finish()?;
         let key = files::existing_credential(&profile, &common)?.ok_or("no key")?;
         let bearer = URL_SAFE_NO_PAD.encode(key);
-        let config = repo.join(".codex/config.toml");
         let written = std::fs::read_to_string(&config)?;
         assert!(written.contains(&bearer));
         // The user's comment above ReviewQ's table, which ends the file, stays as it was.
         let user = "model = \"o3\"\n\n# Kept by the user\n";
         let marker = "# Managed by ReviewQ";
-        let edited = written.replacen(&format!("\n{marker}"), &format!("{user}{marker}"), 1);
+        // A copy of ReviewQ's marker line goes with it.
+        let edited = written.replacen(
+            &format!("\n{marker}"),
+            &format!("{user}{marker}\n{marker}"),
+            1,
+        );
         std::fs::write(&config, edited)?;
 
         std::fs::OpenOptions::new()
@@ -468,6 +488,8 @@ mod tests {
         git(&repo, &["commit", "-q", "--allow-empty", "-m", "start"]);
         git(&repo, &["worktree", "add", "-q", "../linked"]);
         git(&repo, &["worktree", "add", "-q", "../edited"]);
+        git(&repo, &["worktree", "add", "-q", "../tracked"]);
+        git(&repo, &["worktree", "add", "-q", "../untracked"]);
         let config = root.join("linked/.codex/config.toml");
         let skill = |worktree: &str| {
             root.join(worktree)
@@ -495,10 +517,24 @@ mod tests {
         assert!(text.contains(&format!("\n{user}{marker}\n")) && text.ends_with(other));
         // The skill ReviewQ wrote goes with the folder; one changed by hand is the user's.
         std::fs::write(skill("edited"), "# Changed by the user\n")?;
+        // Where another repository now stands, a copy of the skill it tracks is its own, even
+        // with the same bytes; an untracked copy there is ReviewQ's.
+        let shared = std::fs::read(skill("linked"))?;
+        for name in ["tracked", "untracked"] {
+            std::fs::remove_dir_all(root.join(name))?;
+            git(&root, &["init", "-q", name]);
+            std::fs::create_dir_all(skill(name).parent().ok_or("no folder")?)?;
+            std::fs::write(skill(name), &shared)?;
+        }
+        git(&root.join("tracked"), &["add", "."]);
+        git(&root.join("tracked"), &["commit", "-q", "-m", "skill"]);
 
         let common = git::discover(Some(&repo)).await?.common;
         let moved = root.join("moved");
         std::fs::rename(&repo, &moved)?;
+        // A `.git` link to nothing, which Git passes over, holds no repository either.
+        std::fs::remove_file(root.join("edited/.git"))?;
+        std::os::unix::fs::symlink(root.join("gone"), root.join("edited/.git"))?;
         assert_eq!(git::discover(Some(&moved)).await?.worktrees, [moved]);
         clean_owned(&profile, &common, SETUP_AGAIN).await?;
         assert_eq!(
@@ -506,6 +542,7 @@ mod tests {
             format!("\n{user}{other}")
         );
         assert!(!skill("linked").exists());
+        assert!(!root.join("edited/.codex/config.toml").exists());
         // Its own folder goes once empty; the one holding the hand-edited skill stays.
         assert!(!root.join("linked/.agents/skills/reviewq-manage").exists());
         assert!(root.join("linked/.agents/skills").is_dir());
@@ -513,6 +550,8 @@ mod tests {
             std::fs::read_to_string(skill("edited"))?,
             "# Changed by the user\n"
         );
+        assert_eq!(std::fs::read(skill("tracked"))?, shared);
+        assert!(!skill("untracked").exists());
         assert!(files::existing_credential(&profile, &common)?.is_none());
         Ok(())
     }
@@ -536,6 +575,12 @@ mod tests {
             repo.join(".codex/config.toml"),
             root.join("linked/.codex/config.toml"),
         ];
+        // Each file keeps its own line ends, and whether it ends with one, throughout.
+        let originals = ["model = \"o3\"\r\n# Kept\r\n", "model = \"o3\""];
+        for (file, original) in configs.iter().zip(originals) {
+            std::fs::create_dir(file.parent().ok_or("no folder")?)?;
+            std::fs::write(file, original)?;
+        }
         let (ipv4, ipv6) = ("http://127.0.0.1:9/mcp", "http://[::1]:10/mcp");
         for (url, other) in [(ipv4, ipv6), (ipv6, ipv4), (ipv4, ipv6)] {
             let checkout = git::discover(Some(&repo)).await?;
@@ -560,6 +605,9 @@ mod tests {
                 );
             }
         }
+        let crlf = std::fs::read_to_string(&configs[0])?;
+        assert_eq!(crlf.matches('\n').count(), crlf.matches("\r\n").count());
+        assert!(!std::fs::read_to_string(&configs[1])?.ends_with('\n'));
         // Once the Claude entry is changed by hand, setup that no longer selects that config
         // leaves it alone and finishes, rather than stopping every checkout's setup on it.
         let edited = std::fs::read_to_string(&claude)?.replace(ipv4, "http://127.0.0.1:1/mcp");
@@ -576,7 +624,9 @@ mod tests {
 
         let common = git::discover(Some(&repo)).await?.common;
         clean_owned(&profile, &common, SETUP_AGAIN).await?;
-        assert!(configs.iter().all(|file| !file.exists()));
+        for (file, original) in configs.iter().zip(originals) {
+            assert_eq!(std::fs::read_to_string(file)?, original);
+        }
         assert_eq!(std::fs::read_to_string(&claude)?, edited);
         Ok(())
     }

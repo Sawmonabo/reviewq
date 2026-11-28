@@ -153,16 +153,14 @@ pub(super) async fn belongs(root: &Path, common: &Path) -> Result<bool, Failure>
     Ok(true)
 }
 
-/// Whether no repository can be at `root`: the folder is gone or holds no `.git`, or its `.git`
-/// is a linked worktree's file whose `gitdir:` names a Git folder that is gone, as after the
-/// main repository moved. Such a folder is no checkout, so nothing there waits for Git.
+/// Whether no repository can be at `root`: the folder is gone or holds no `.git`, its `.git` is
+/// a link to nothing, which Git passes over, or its `.git` is a linked worktree's file whose
+/// `gitdir:` names a Git folder that is gone, as after the main repository moved. Such a
+/// folder is no checkout, so nothing there waits for Git.
 fn no_repository(root: &Path) -> bool {
-    let missing = |error: std::io::Error| {
-        matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory)
-    };
     let file = root.join(".git");
-    match file.symlink_metadata() {
-        Err(error) => missing(error),
+    match file.metadata() {
+        Err(error) => missing(&error),
         // Git reads `gitdir: <folder>`, without the line end, relative to the worktree.
         Ok(metadata) if metadata.is_file() && metadata.len() <= 4096 => std::fs::read(&file)
             .ok()
@@ -173,9 +171,30 @@ fn no_repository(root: &Path) -> bool {
                     .rposition(|byte| !matches!(byte, b'\n' | b'\r'))?;
                 Some(root.join(OsStr::from_bytes(&folder[..=end])))
             })
-            .is_some_and(|folder| folder.metadata().is_err_and(missing)),
+            .is_some_and(|folder| folder.metadata().is_err_and(|error| missing(&error))),
         Ok(_) => false,
     }
+}
+
+fn missing(error: &std::io::Error) -> bool {
+    matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory)
+}
+
+/// Whether a repository keeps `file`, which is in a folder that is no longer the checkout's:
+/// the nearest repository in a folder above it tracks it, or cannot say. A `.git` for which
+/// `no_repository` holds is passed over, since a repository further up may still track the
+/// file. Only with no repository above it does nothing keep it.
+pub(super) async fn kept(file: &Path) -> bool {
+    for root in file.ancestors().skip(1) {
+        if no_repository(root) {
+            continue;
+        }
+        let Some(relative) = file.strip_prefix(root).ok().and_then(Path::to_str) else {
+            return true;
+        };
+        return tracked(root, &[relative]).await.unwrap_or(true);
+    }
+    false
 }
 
 /// Whether `folder` is in no Git checkout: neither it nor a folder above it can hold a
@@ -255,7 +274,8 @@ pub(super) async fn destination(
     relative: &str,
 ) -> Result<Destination, Failure> {
     let count = Path::new(relative).components().count();
-    // A record naming no such file in a worktree is damaged, so nothing there is ReviewQ's.
+    // A record that names no file at `relative` in a folder is damaged. With no worktree to
+    // ask, the file counts as elsewhere, where only what proves to be ReviewQ's goes.
     let Some(worktree) = file
         .ancestors()
         .nth(count)
