@@ -23,9 +23,7 @@ export async function invoke($, action, state, value, timeoutMs = 5000) {
       argv.push("claude-companion", state.id);
       // A link carries the proof: ReviewQ moves a session whose companion is live only for it.
       if (value) {
-        argv.push("--target", value.target, "--proof-stdin");
-        // The helper waits for the rows of a conversation stored a moment ago.
-        if (value.stored) argv.push("--new-conversation");
+        argv.push("--target", value, "--proof-stdin");
         stdin = JSON.stringify({ proof: state.proof });
       }
     } else {

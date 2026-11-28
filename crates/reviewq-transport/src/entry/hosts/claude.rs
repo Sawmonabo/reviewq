@@ -211,8 +211,10 @@ pub(super) async fn registered_lead(
 }
 
 /// The registered lead a hook's context names and its history session, after proving the
-/// session's transcript with the Claude companion. Fails as `registered_lead` does, and with
-/// `Forbidden` when the proof names another session or no transcript.
+/// session with the Claude companion: from its transcript, or by where the transcript belongs
+/// while Claude Code has not written it. Fails as `registered_lead` does, with `NotFound` for
+/// a transcript of another conversation, and with `Forbidden` when the proof names another
+/// session or no transcript.
 pub(super) async fn verified_context(
     entry: &Entry,
     command: ClaudeCommand,

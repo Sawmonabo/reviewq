@@ -48,12 +48,9 @@ async function current($) {
   return session;
 }
 
-// Reads this session's registration, or links it to `target`; `stored` says the conversation
-// was stored for this link a moment ago. The helper then waits up to 30 seconds for Claude
-// Code to write it, so that call is given longer than the wait.
-async function refresh($, target, stored = false) {
+async function refresh($, target) {
   const state = await current($);
-  const result = await invoke($, "registration", state, target && { target, stored }, stored ? 40_000 : undefined);
+  const result = await invoke($, "registration", state, target);
   if (state === session && await $.session.id() === state.id && !result.error) {
     state.linked = !!result.linked;
     if (result.pendingLaunch && !state.pendingUntil) {
@@ -76,15 +73,6 @@ async function registerTools($) {
   } catch (error) {
     toolsRefused = String(error?.message || error) || "no reason given";
   }
-}
-
-// ReviewQ verifies a conversation from the rows in its file, and Claude Code writes none for a
-// new conversation until it stores one. A notice is stored at once; whether one was added.
-async function storeConversation($, target) {
-  const { transcriptPath } = await $.session.info();
-  if (!transcriptPath || await $.fs.exists(transcriptPath).catch(() => true)) return false;
-  const added = await $.session.append({ message: { type: "system", content: [{ type: "text", text: `Linking this conversation to ${target} in ReviewQ.` }] } });
-  return typeof added?.uuid === "string";
 }
 
 function pending(state) {
@@ -202,15 +190,7 @@ export function register(on) {
     const refused = toolsRefused && `ReviewQ's tools are missing from this session, so it cannot run a review here. Claude Code said: ${toolsRefused}\nStart a new Claude Code session in this checkout and run /reviewq again.`;
     // A review without its tools could record nothing, so no target is linked while they are refused.
     if (refused && target) return { text: refused, isTextDisplayOnly: true };
-    const stored = !!target && await storeConversation($, target).catch(() => false);
-    // A link that is waiting on Claude Code says so under the prompt once the wait shows.
-    const waiting = stored && $.clock.after(1000, () => $.ui.status("ReviewQ is waiting for Claude Code to save this conversation…"));
-    const result = await refresh($, target, stored).finally(() => {
-      if (waiting) {
-        waiting.cancel();
-        $.ui.status(undefined);
-      }
-    });
+    const result = await refresh($, target);
     if (session?.linked) schedule($);
     if (result.rule && !refused) return { text: `${result.message}\n\n${result.rule}` };
     const status = result.message ?? result.error;

@@ -15,9 +15,6 @@ pub(super) enum ApiError {
     Application(AppError),
     // The proof gate rejected the request before performing the operation.
     BrowserProofRejected,
-    // A link's conversation is not in its native file, which a host writes a moment after it
-    // stores a new conversation's first row: not found, and worth asking again.
-    ConversationUnwritten,
     // The tool input broke these schema or value rules; the agent corrects them in its turn.
     // The list is uncapped, from the validator or the app alike, and is capped once where the
     // reply is written.
@@ -94,11 +91,6 @@ impl IntoResponse for ApiError {
                 let (status, failure) = failure(AppError::Forbidden);
                 (status, [("x-reviewq-csrf-rejected", "1")], Json(failure)).into_response()
             }
-            Self::ConversationUnwritten => {
-                let (status, mut failure) = failure(AppError::NotFound);
-                failure.error.retryable = true;
-                (status, Json(failure)).into_response()
-            }
         }
     }
 }
@@ -121,7 +113,6 @@ pub(super) fn tool_error_text(error: ApiError) -> String {
         ApiError::InvalidFields(errors) => return field_error_text(&capped(errors)),
         ApiError::Application(error) => error,
         ApiError::BrowserProofRejected => AppError::Forbidden,
-        ApiError::ConversationUnwritten => AppError::NotFound,
     };
     let (_status, failure) = failure(error);
     serde_json::to_string(&failure.error).unwrap_or(failure.error.message)

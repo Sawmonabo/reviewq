@@ -40,8 +40,8 @@ mod watch;
 pub(crate) use claude::{claude_anchor, claude_confirm_prompt};
 pub(crate) use claude_workflow::claude_workflow_opening;
 pub(crate) use locator::{
-    inspect_claude_lead, verified_claude_child, verified_claude_source, verified_codex_source,
-    verify_codex_live_source,
+    claude_lead_source, inspect_claude_lead, verified_claude_child, verified_claude_source,
+    verified_codex_source, verify_codex_live_source,
 };
 pub(crate) use proof::{codex_opening, codex_question_answered, codex_question_opening};
 pub(crate) use turn_metadata::{

@@ -99,6 +99,24 @@ pub(crate) fn verified_claude_source(
         .transpose()
 }
 
+/// The file of the Claude lead conversation `binding` names, for a link or a report of it:
+/// the one whose rows prove the binding, or `path` itself while Claude Code has written no
+/// row there, which it first does at the conversation's first prompt. `path` is only ever
+/// where this conversation's file belongs, and every read of the file proves its rows again.
+pub(crate) fn claude_lead_source(
+    binding: &NativeBinding,
+    path: Option<&AbsolutePath>,
+    cancelled: &AtomicBool,
+) -> Result<Option<AbsolutePath>, AppError> {
+    let Some(path) = path else {
+        return verified_claude_source(binding, None, cancelled);
+    };
+    Ok(match check(binding, None, path.as_path(), cancelled)? {
+        Check::Proven(_) | Check::Unwritten => Some(path.clone()),
+        Check::Other => None,
+    })
+}
+
 /// Reads the exact user's requested lead UUID in this profile. The cwd comes from
 /// the native row, since the configured review checkout is a separate choice.
 pub(crate) fn inspect_claude_lead(
@@ -264,6 +282,28 @@ pub(super) fn verify(
     candidate: &Path,
     cancelled: &AtomicBool,
 ) -> Result<Option<Source>, AppError> {
+    Ok(match check(binding, parent, candidate, cancelled)? {
+        Check::Proven(source) => Some(source),
+        Check::Unwritten | Check::Other => None,
+    })
+}
+
+/// What the file where a conversation belongs shows of it.
+enum Check {
+    /// A row proves the binding.
+    Proven(Source),
+    /// No file, or no row naming a folder yet: the host has not written the conversation.
+    Unwritten,
+    /// Rows of another conversation or another folder.
+    Other,
+}
+
+fn check(
+    binding: &NativeBinding,
+    parent: Option<&HistoryParent>,
+    candidate: &Path,
+    cancelled: &AtomicBool,
+) -> Result<Check, AppError> {
     let identity = binding.identity();
     let root = identity.profile().as_path();
     let rel = candidate
@@ -305,10 +345,11 @@ pub(super) fn verify(
         return Err(AppError::Forbidden);
     }
     let Some(file) = source_file(root, rel)? else {
-        return Ok(None);
+        return Ok(Check::Unwritten);
     };
     let metadata = file.metadata().map_err(fs_error)?;
     let provider = identity.provider();
+    let mut written = false;
     let mut budget = IDENTITY_SCAN_BYTES;
     let mut offset = 0;
     let header_records = if provider == HostProvider::Codex {
@@ -322,8 +363,8 @@ pub(super) fn verify(
         }
         let end = file::next_line(&file, offset, metadata.len(), &mut budget, cancelled)?;
         let record = identity::read(provider, file::input(&file, offset, end, cancelled));
-        if let Ok(record) = record
-            && identity_matches(&record, binding, parent)
+        if let Ok(record) = &record
+            && identity_matches(record, binding, parent)
         {
             let mut sample = Vec::new();
             file::input(&file, offset, end, cancelled)
@@ -335,7 +376,7 @@ pub(super) fn verify(
             fingerprint.update(offset.to_be_bytes());
             fingerprint.update(end.to_be_bytes());
             fingerprint.update(sample);
-            return Ok(Some(Source {
+            return Ok(Check::Proven(Source {
                 file,
                 provider,
                 native_id: identity.native_id().clone(),
@@ -348,9 +389,19 @@ pub(super) fn verify(
                 path: candidate.to_path_buf(),
             }));
         }
+        // A host's opening rows name only the conversation. One naming a folder, or another
+        // conversation, shows this file is written and is not the binding's.
+        written |= record.is_ok_and(|record| {
+            let other = |session: String| session != identity.native_id().as_str();
+            record.cwd.is_some() || record.session.is_some_and(other)
+        });
         offset = end;
     }
-    Ok(None)
+    Ok(if written {
+        Check::Other
+    } else {
+        Check::Unwritten
+    })
 }
 
 fn source_file(root: &Path, rel: &Path) -> Result<Option<File>, AppError> {

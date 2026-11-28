@@ -196,6 +196,9 @@ pub trait NativeHost: QuestionsPort + Send + Sync {
 pub trait ClaudeCompanion: QuestionsPort + Send + Sync {
     fn accepts_profile(&self, profile: &AbsolutePath) -> bool;
     fn inspect_lead(&self, session: NativeSessionId) -> AppFuture<'_, HostProof>;
+    /// Proves the lead conversation `context` names from the rows of its file, or names only
+    /// where that file belongs while Claude Code has written none. `NotFound` when the file
+    /// holds another conversation or folder, or no file is named or found.
     fn prove(&self, context: ClaudeContext) -> AppFuture<'_, HostProof>;
     fn prove_child(
         &self,

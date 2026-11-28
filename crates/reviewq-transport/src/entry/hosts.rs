@@ -178,10 +178,7 @@ pub(super) async fn claude_link(
     protocol(command.protocol_version)?;
     let companion = entry.claude.as_deref().ok_or(AppError::Unavailable)?;
     let source = entry.source_reader().await?;
-    let proof = match companion.prove(command.context()?).await {
-        Err(AppError::NotFound) => return Err(ApiError::ConversationUnwritten),
-        proof => proof?,
-    };
+    let proof = companion.prove(command.context()?).await?;
     let target = command.target.ok_or(AppError::InvalidRequest)?;
     claude::require_companion_to_link(&entry, &headers, &proof.binding).await?;
     let linked = link_proven(entry.store.as_ref(), source.as_ref(), proof, target).await?;

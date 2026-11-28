@@ -16,8 +16,8 @@ use reviewq_domain::session::{AbsolutePath, HostProvider, NativeBinding, NativeI
 use tokio::sync::Semaphore;
 
 use crate::history::{
-    Cancel, claude_anchor, claude_confirm_prompt, inspect_claude_lead, verified_claude_child,
-    verified_claude_source,
+    Cancel, claude_anchor, claude_confirm_prompt, claude_lead_source, inspect_claude_lead,
+    verified_claude_child,
 };
 
 mod cli;
@@ -192,9 +192,8 @@ impl ClaudeCompanion for Claude {
                 let identity =
                     NativeIdentity::new(HostProvider::Claude, context.profile, context.session_id);
                 let binding = NativeBinding::new(identity, context.cwd);
-                let source =
-                    verified_claude_source(&binding, context.transcript.as_ref(), &stopped)?
-                        .ok_or(AppError::NotFound)?;
+                let source = claude_lead_source(&binding, context.transcript.as_ref(), &stopped)?
+                    .ok_or(AppError::NotFound)?;
                 Ok(HostProof {
                     binding,
                     source: Some(source),
