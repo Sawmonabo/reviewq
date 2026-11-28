@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use reqwest::header::{self, HeaderMap, HeaderValue};
-use reviewq_app::access::AppError;
+use reviewq_app::access::{AppError, Service};
 use reviewq_app::settings::{CatalogItem, CatalogKind, CatalogPage, CatalogQuery, SecretToken};
 use reviewq_domain::settings::{Connection, Identity, JiraTokenType};
 use serde::Deserialize;
@@ -66,7 +66,7 @@ impl Jira {
             .join("_edge/tenant_info")
             .map_err(|_| AppError::Internal)?;
         let (_, body) = network
-            .bounded_response(tenant, HeaderMap::new(), 16 * 1024, None)
+            .bounded_response(Service::Jira, tenant, HeaderMap::new(), 16 * 1024, None)
             .await?;
         let tenant: Tenant = serde_json::from_slice(&body).map_err(|_| AppError::Unavailable)?;
         let id = uuid::Uuid::parse_str(&tenant.cloud_id).map_err(|_| AppError::Unavailable)?;
@@ -468,7 +468,13 @@ impl Jira {
         }
         let (_, body) = self
             .network
-            .bounded_response(url, self.headers.clone(), limit, self.lease.as_ref())
+            .bounded_response(
+                Service::Jira,
+                url,
+                self.headers.clone(),
+                limit,
+                self.lease.as_ref(),
+            )
             .await?;
         serde_json::from_slice(&body).map_err(|_| AppError::Unavailable)
     }

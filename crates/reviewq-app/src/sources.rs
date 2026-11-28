@@ -79,6 +79,9 @@ pub trait ReviewSourceReader: ChangeSource {
     /// call, or `None` for a ticket key. Fails as `resolve` does on the same text:
     /// `InvalidRequest` when malformed, `NotFound` for a URL at another origin.
     fn address(&self, target: &str) -> Result<Option<MergeRequestAddress>, AppError>;
+
+    /// How long GitLab's rate limit still asks ReviewQ to wait, or zero.
+    fn rate_pause(&self) -> std::time::Duration;
 }
 
 /// The merge request with this IID in the project at exactly this path on this origin.
@@ -165,6 +168,9 @@ pub trait TicketSourceReader: Send + Sync {
         continuation: Option<String>,
         limit: u16,
     ) -> AppFuture<'_, TicketPage>;
+
+    /// How long Jira's rate limit still asks ReviewQ to wait, or zero.
+    fn rate_pause(&self) -> std::time::Duration;
 }
 
 pub use scope::SprintPage;

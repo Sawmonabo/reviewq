@@ -465,6 +465,13 @@ async fn poll_source(
             () = tokio::time::sleep(interval) => {},
             () = entry.refresh_wakeup.notified() => {},
         }
+        // A rate-limited service is not asked again until the wait it named is over.
+        if let Some((_, pause)) = entry.source_pause().await {
+            tokio::select! {
+                _ = shutdown.changed() => break,
+                () = tokio::time::sleep(pause) => {},
+            }
+        }
         tokio::select! {
             _ = shutdown.changed() => break,
             _ = refresh::enqueue(&entry) => {},

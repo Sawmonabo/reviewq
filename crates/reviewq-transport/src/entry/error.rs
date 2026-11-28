@@ -4,7 +4,7 @@ use axum::extract::{FromRequest, FromRequestParts, Path, Query, Request};
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
-use reviewq_app::access::AppError;
+use reviewq_app::access::{AppError, SourceProblem};
 use reviewq_protocol::field_errors::{FieldError, bounded_field_errors};
 use reviewq_protocol::{ErrorCode, ErrorDto, Failure};
 use serde::Deserialize;
@@ -208,6 +208,7 @@ pub(super) fn failure(error: AppError) -> (StatusCode, Failure) {
         ),
         AppError::Busy => (StatusCode::TOO_MANY_REQUESTS, ErrorCode::Busy),
         AppError::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, ErrorCode::Unavailable),
+        AppError::Source(problem) => source_status(problem),
         AppError::Internal => (StatusCode::INTERNAL_SERVER_ERROR, ErrorCode::Internal),
     };
     (
@@ -217,8 +218,30 @@ pub(super) fn failure(error: AppError) -> (StatusCode, Failure) {
             error: ErrorDto {
                 code,
                 message: error.to_string(),
-                retryable: matches!(error, AppError::Busy | AppError::Unavailable),
+                retryable: match error {
+                    AppError::Busy | AppError::Unavailable => true,
+                    AppError::Source(problem) => source_retryable(problem),
+                    _ => false,
+                },
             },
         },
     )
+}
+
+/// The reply status and code for a GitLab or Jira problem: an address to correct is a bad
+/// request, a wait is `busy`, and a wrong saved address or a bot check is an unavailable
+/// service.
+fn source_status(problem: SourceProblem) -> (StatusCode, ErrorCode) {
+    match problem {
+        SourceProblem::Address(_) => (StatusCode::BAD_REQUEST, ErrorCode::InvalidRequest),
+        SourceProblem::Wait(_) => (StatusCode::TOO_MANY_REQUESTS, ErrorCode::Busy),
+        SourceProblem::WrongAddress(_) | SourceProblem::BotCheck(_) => {
+            (StatusCode::SERVICE_UNAVAILABLE, ErrorCode::Unavailable)
+        }
+    }
+}
+
+/// Whether trying again can succeed without the person changing Settings.
+fn source_retryable(problem: SourceProblem) -> bool {
+    matches!(problem, SourceProblem::BotCheck(_) | SourceProblem::Wait(_))
 }

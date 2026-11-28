@@ -72,6 +72,10 @@ impl TicketSourceReader for Jira {
         }
     }
 
+    fn rate_pause(&self) -> std::time::Duration {
+        self.network.paused_for(&self.api)
+    }
+
     fn sprints(&self, board: u64, offset: u32, include_closed: bool) -> AppFuture<'_, SprintPage> {
         Box::pin(async move {
             let mut parameters = vec![

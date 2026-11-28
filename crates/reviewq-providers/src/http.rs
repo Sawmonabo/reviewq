@@ -3,12 +3,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::{Client, StatusCode, Url, header};
-use reviewq_app::access::AppError;
+use reviewq_app::access::{AppError, Service, SourceProblem};
 use reviewq_app::settings::SourceLease;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant, sleep_until, timeout_at};
 
 mod buffer;
+mod limits;
 mod stream;
 pub(crate) use buffer::{ResponseReader, private_file};
 
@@ -16,13 +17,22 @@ const DEADLINE: Duration = Duration::from_secs(30);
 const MAX_RETRIES: u8 = 2;
 const MAX_ORIGINS: usize = 64;
 const BODY_LIMIT: usize = 32 * 1024 * 1024;
+/// The name ReviewQ gives every outside service, so the service can tell its requests apart.
+const USER_AGENT: &str = concat!("ReviewQ/", env!("CARGO_PKG_VERSION"));
 
 /// Common concurrency, cooldown and connection pooling for provider reads and settings probes.
 pub struct SourceNetwork {
     client: Client,
     loopback: Client,
     permits: Arc<Semaphore>,
-    cooldowns: Mutex<HashMap<String, Instant>>,
+    cooldowns: Mutex<HashMap<String, Cooldown>>,
+}
+
+/// When an origin may next be called, and whether the service itself asked for the wait.
+#[derive(Clone, Copy)]
+struct Cooldown {
+    until: Instant,
+    asked: bool,
 }
 
 impl SourceNetwork {
@@ -37,12 +47,13 @@ impl SourceNetwork {
 
     pub(crate) async fn bounded_response(
         &self,
+        service: Service,
         url: Url,
         headers: header::HeaderMap,
         max: usize,
         lease: Option<&SourceLease>,
     ) -> Result<(header::HeaderMap, Vec<u8>), AppError> {
-        let mut response = self.get(url, headers, lease).await?;
+        let mut response = self.get(service, url, headers, lease).await?;
         let max = max.min(BODY_LIMIT);
         if response
             .inner
@@ -65,8 +76,18 @@ impl SourceNetwork {
         Ok((metadata, bytes))
     }
 
+    /// Sends one GET to `service`, retrying a transient failure within the call's deadline.
+    ///
+    /// Before each try it waits out the origin's pause, or fails at once when the pause
+    /// outlasts the deadline: `SourceProblem::Wait` when the service asked for it. A 429 waits
+    /// for `Retry-After`, else the rate-limit reset, else a jittered backoff; a 408 or 5xx
+    /// waits for `Retry-After`, else the backoff. A 200 that spends the window's last request
+    /// pauses the origin until the reset. A redirect, which ReviewQ never follows, or a web
+    /// page where the API answers JSON fails as `SourceProblem::WrongAddress`, and a bot-check
+    /// page as `SourceProblem::BotCheck`.
     pub(crate) async fn get(
         &self,
+        service: Service,
         url: Url,
         headers: header::HeaderMap,
         lease: Option<&SourceLease>,
@@ -80,7 +101,7 @@ impl SourceNetwork {
         let client = if local { &self.loopback } else { &self.client };
         let deadline = Instant::now() + DEADLINE;
         for retry in 0..=MAX_RETRIES {
-            let permit = self.permit(&origin, deadline).await?;
+            let permit = self.permit(service, &origin, deadline).await?;
             if let Some(lease) = lease {
                 timeout_at(deadline, lease.check())
                     .await
@@ -99,8 +120,15 @@ impl SourceNetwork {
             {
                 Ok(response) => {
                     let status = response.status();
+                    if let Some(problem) = not_api(status, response.headers()) {
+                        return Err(AppError::Source(problem(service)));
+                    }
                     match status {
                         StatusCode::OK => {
+                            if let Some(wait) = limits::spent(response.headers()) {
+                                // A full cooldown table loses only this early pause.
+                                let _ = self.cooldown(&origin, wait, true);
+                            }
                             return Ok(Response {
                                 inner: response,
                                 _permit: permit,
@@ -113,23 +141,28 @@ impl SourceNetwork {
                         StatusCode::NOT_FOUND => return Err(AppError::NotFound),
                         _ => {}
                     }
-                    let transient = status == StatusCode::TOO_MANY_REQUESTS
+                    let limited = status == StatusCode::TOO_MANY_REQUESTS;
+                    let transient = limited
                         || status == StatusCode::REQUEST_TIMEOUT
                         || status.is_server_error();
-                    let failure = if status == StatusCode::TOO_MANY_REQUESTS {
-                        AppError::Busy
-                    } else {
-                        AppError::Unavailable
-                    };
                     if transient {
-                        let pause =
-                            retry_after(response.headers()).unwrap_or_else(|| jitter(retry));
-                        self.cooldown(&origin, pause)?;
+                        let asked = limits::retry_after(response.headers()).or_else(|| {
+                            limited.then(|| limits::reset(response.headers())).flatten()
+                        });
+                        self.cooldown(
+                            &origin,
+                            asked.unwrap_or_else(|| backoff(retry, limited)),
+                            asked.is_some() || limited,
+                        )?;
                     }
                     drop(response);
                     drop(permit);
                     if !transient || retry == MAX_RETRIES {
-                        return Err(failure);
+                        return Err(if limited {
+                            AppError::Source(SourceProblem::Wait(service))
+                        } else {
+                            AppError::Unavailable
+                        });
                     }
                 }
                 Err(_) => {
@@ -137,24 +170,40 @@ impl SourceNetwork {
                     if retry == MAX_RETRIES {
                         return Err(AppError::Unavailable);
                     }
-                    self.cooldown(&origin, jitter(retry))?;
+                    self.cooldown(&origin, backoff(retry, false), false)?;
                 }
             }
         }
         Err(AppError::Unavailable)
     }
 
+    /// How long the service at `origin` still asks ReviewQ to wait, or zero.
+    pub(crate) fn paused_for(&self, origin: &Url) -> Duration {
+        self.cooldown_until(&origin.origin().ascii_serialization())
+            .ok()
+            .flatten()
+            .filter(|cooldown| cooldown.asked)
+            .map_or(Duration::ZERO, |cooldown| {
+                cooldown.until.saturating_duration_since(Instant::now())
+            })
+    }
+
     async fn permit(
         &self,
+        service: Service,
         origin: &str,
         deadline: Instant,
     ) -> Result<OwnedSemaphorePermit, AppError> {
         loop {
-            if let Some(until) = self.cooldown_until(origin)?
+            if let Some(Cooldown { until, asked }) = self.cooldown_until(origin)?
                 && until > Instant::now()
             {
                 if until >= deadline {
-                    return Err(AppError::Busy);
+                    return Err(if asked {
+                        AppError::Source(SourceProblem::Wait(service))
+                    } else {
+                        AppError::Unavailable
+                    });
                 }
                 sleep_until(until).await;
             }
@@ -164,14 +213,14 @@ impl SourceNetwork {
                 .map_err(|_| AppError::Unavailable)?;
             if self
                 .cooldown_until(origin)?
-                .is_none_or(|until| until <= Instant::now())
+                .is_none_or(|cooldown| cooldown.until <= Instant::now())
             {
                 return Ok(permit);
             }
         }
     }
 
-    fn cooldown_until(&self, origin: &str) -> Result<Option<Instant>, AppError> {
+    fn cooldown_until(&self, origin: &str) -> Result<Option<Cooldown>, AppError> {
         Ok(self
             .cooldowns
             .lock()
@@ -180,16 +229,22 @@ impl SourceNetwork {
             .copied())
     }
 
-    fn cooldown(&self, origin: &str, pause: Duration) -> Result<(), AppError> {
+    /// Pauses `origin` for `pause`, keeping a longer pause already set.
+    fn cooldown(&self, origin: &str, pause: Duration, asked: bool) -> Result<(), AppError> {
         let now = Instant::now();
-        let until = now.checked_add(pause).ok_or(AppError::Busy)?;
+        let next = Cooldown {
+            until: now.checked_add(pause).ok_or(AppError::Busy)?,
+            asked,
+        };
         let mut entries = self.cooldowns.lock().map_err(|_| AppError::Internal)?;
-        entries.retain(|_, prior| *prior > now);
+        entries.retain(|_, prior| prior.until > now);
         if entries.len() >= MAX_ORIGINS && !entries.contains_key(origin) {
             return Err(AppError::Busy);
         }
-        let prior = entries.entry(origin.into()).or_insert(until);
-        *prior = (*prior).max(until);
+        let prior = entries.entry(origin.into()).or_insert(next);
+        if next.until > prior.until {
+            *prior = next;
+        }
         Ok(())
     }
 }
@@ -241,6 +296,7 @@ fn client(loopback: bool) -> Result<Client, AppError> {
     let mut builder = Client::builder()
         .connect_timeout(Duration::from_secs(5))
         .timeout(DEADLINE)
+        .user_agent(USER_AGENT)
         .redirect(reqwest::redirect::Policy::none())
         .retry(reqwest::retry::never());
     if loopback {
@@ -249,34 +305,46 @@ fn client(loopback: bool) -> Result<Client, AppError> {
     builder.build().map_err(|_| AppError::Internal)
 }
 
-fn retry_after(headers: &header::HeaderMap) -> Option<Duration> {
-    if let Some(text) = headers
-        .get(header::RETRY_AFTER)
-        .and_then(|value| value.to_str().ok())
-    {
-        return text
-            .parse::<u64>()
-            .ok()
-            .map(Duration::from_secs)
-            .or_else(|| {
-                httpdate::parse_http_date(text)
-                    .ok()
-                    .map(|time| time.duration_since(SystemTime::now()).unwrap_or_default())
-            });
+/// What answered when it was not the API. Cloudflare marks every challenge and block with
+/// `cf-mitigated`. A redirect, which ReviewQ never follows, or an HTML success or refusal is a
+/// web page, as at a saved address that is not the service's own: every endpoint ReviewQ
+/// reads answers in JSON, its errors too. An HTML 408, 429 or 5xx stays a transient fault.
+/// [Cloudflare](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/)
+fn not_api(
+    status: StatusCode,
+    headers: &header::HeaderMap,
+) -> Option<fn(Service) -> SourceProblem> {
+    if headers.contains_key("cf-mitigated") {
+        return Some(SourceProblem::BotCheck);
     }
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-    let reset: u64 = headers
-        .get("ratelimit-reset")?
-        .to_str()
-        .ok()?
-        .parse()
-        .ok()?;
-    Some(Duration::from_secs(reset.saturating_sub(now)))
+    let html = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.as_bytes().get(..9))
+        .is_some_and(|start| start.eq_ignore_ascii_case(b"text/html"));
+    let page = status.is_success()
+        || (status.is_client_error()
+            && !matches!(
+                status,
+                StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS
+            ));
+    (status.is_redirection() || (html && page)).then_some(SourceProblem::WrongAddress)
 }
 
-fn jitter(retry: u8) -> Duration {
+/// The wait before retry number `retry + 1` when the service named none. A rate-limit answer
+/// takes Atlassian's backoff: 2 seconds, doubled for each retry, times a factor from 0.7 to
+/// 1.3. A connection error, 408 or 5xx is a blip, retried quickly: 100 ms doubled for each
+/// retry, plus up to 102 ms of jitter.
+/// [Jira Cloud](https://developer.atlassian.com/cloud/jira/platform/rate-limiting/)
+fn backoff(retry: u8, limited: bool) -> Duration {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.subsec_nanos());
-    Duration::from_millis((100 << retry) + u64::from(nanos % 103))
+    Duration::from_millis(if limited {
+        (2_000 << retry) * (700 + u64::from(nanos % 601)) / 1_000
+    } else {
+        (100 << retry) + u64::from(nanos % 103)
+    })
 }
+
+#[cfg(test)]
+mod tests;

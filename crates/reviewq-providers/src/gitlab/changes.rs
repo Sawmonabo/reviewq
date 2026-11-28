@@ -1,7 +1,7 @@
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use reviewq_app::access::{AppError, AppFuture};
+use reviewq_app::access::{AppError, AppFuture, Service};
 use reviewq_app::changes::{
     ApprovalView, ChangeSource, DiscussionDrafts, DiscussionPage, DiscussionPageRequest,
     DiscussionScope, DiscussionTarget, NoteAddress, PatchBytes, PatchFile, PatchFileSelection,
@@ -330,7 +330,12 @@ impl GitLab {
         let url = self.page_url(source, "diffs", page, limit)?;
         let response = self
             .http
-            .get(url, self.headers.clone(), self.lease.as_ref())
+            .get(
+                Service::GitLab,
+                url,
+                self.headers.clone(),
+                self.lease.as_ref(),
+            )
             .await?;
         let next = next_page(response.headers(), page)?;
         Ok((response, next))

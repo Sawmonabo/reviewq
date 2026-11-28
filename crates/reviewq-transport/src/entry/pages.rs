@@ -4,7 +4,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use reviewq_app::access::AppError;
+use reviewq_app::access::{AppError, Service, SourceProblem};
 use reviewq_app::events::Snapshot;
 use reviewq_app::hosts::HostPhase;
 use reviewq_app::queue::{
@@ -68,11 +68,18 @@ pub(super) struct Context {
     projection: Option<i64>,
 }
 
-pub(super) fn source_failure(failure: SourceFailure) -> ErrorDto {
+/// The queue's sentence for a failed refresh. A refresh that failed while GitLab or Jira
+/// still asks ReviewQ to wait, as `paused` names, says so instead of the general sentence.
+pub(super) fn source_failure(failure: SourceFailure, paused: Option<Service>) -> ErrorDto {
+    if let (SourceFailure::Unavailable, Some(service)) = (failure, paused) {
+        return super::error::failure(AppError::Source(SourceProblem::Wait(service)))
+            .1
+            .error;
+    }
     let (code, message, retryable) = match failure {
         SourceFailure::Unavailable => (
             ErrorCode::Unavailable,
-            "Could not reach the configured review source.",
+            "Could not reach the configured review source. Test the connections in Settings to see why.",
             true,
         ),
         SourceFailure::TooLarge => (
@@ -94,7 +101,8 @@ pub(super) fn source_failure(failure: SourceFailure) -> ErrorDto {
 }
 
 pub(super) fn queue_sync(active: &ActiveSource, sync: SourceSync) -> QueueSync {
-    let error = sync.error.map(source_failure);
+    let paused = super::sources::paused(active).map(|(service, _)| service);
+    let error = sync.error.map(|failure| source_failure(failure, paused));
     QueueSync {
         mode: if active.collection_enabled {
             QueueSyncMode::Connected

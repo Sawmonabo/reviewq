@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use reqwest::header;
-use reviewq_app::access::{AppError, AppFuture};
+use reviewq_app::access::{AppError, AppFuture, Service};
 use reviewq_app::queue::{MergeRequestState, ReviewAuthor, ReviewSource};
 use reviewq_app::settings::SourceLease;
 use reviewq_app::sources::{
@@ -145,6 +145,10 @@ impl ReviewSourceReader for GitLab {
 
     fn address(&self, target: &str) -> Result<Option<MergeRequestAddress>, AppError> {
         self.target_address(target)
+    }
+
+    fn rate_pause(&self) -> std::time::Duration {
+        self.http.paused_for(&self.origin)
     }
 }
 
@@ -318,7 +322,12 @@ impl GitLab {
         }
         let response = self
             .http
-            .get(url, self.headers.clone(), self.lease.as_ref())
+            .get(
+                Service::GitLab,
+                url,
+                self.headers.clone(),
+                self.lease.as_ref(),
+            )
             .await?;
         let more = next_page(response.headers(), page)?.is_some();
         let body = response
@@ -420,7 +429,13 @@ impl GitLab {
             return Err(AppError::Forbidden);
         }
         self.http
-            .bounded_response(url, self.headers.clone(), max, self.lease.as_ref())
+            .bounded_response(
+                Service::GitLab,
+                url,
+                self.headers.clone(),
+                max,
+                self.lease.as_ref(),
+            )
             .await
     }
 }

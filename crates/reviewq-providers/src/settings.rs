@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use reviewq_app::access::{AppError, AppFuture};
+use reviewq_app::access::{AppError, AppFuture, Service, SourceProblem};
 use reviewq_app::settings::{
     CatalogKind, CatalogPage, CatalogQuery, ConnectionAuthority, ConnectionSources, ProjectView,
     SecretToken,
@@ -112,7 +112,12 @@ impl ConnectionSources for SourceAccounts {
     }
 
     fn normalize(&self, draft: Connection) -> Result<Connection, AppError> {
-        let origin = origin(draft.origin(), self.fixture)?
+        let service = match draft {
+            Connection::GitLab { .. } => Service::GitLab,
+            Connection::Jira { .. } => Service::Jira,
+        };
+        let origin = origin(draft.origin(), self.fixture)
+            .map_err(|_| AppError::Source(SourceProblem::Address(service)))?
             .origin()
             .ascii_serialization();
         Ok(match draft {

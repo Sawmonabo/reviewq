@@ -38,7 +38,7 @@ pub(super) async fn start(
         &headers,
         "POST",
         StatusCode::ACCEPTED,
-        async { project(enqueue(&entry).await?) },
+        async { project(&entry, enqueue(&entry).await?).await },
     )
     .await
 }
@@ -54,7 +54,7 @@ pub(super) async fn status(
             .store
             .refresh_receipt(Actor::local_operator(), parse(&id)?)
             .await?;
-        project(receipt)
+        project(&entry, receipt).await
     })
     .await
 }
@@ -103,8 +103,15 @@ pub(super) async fn enqueue(entry: &Arc<Entry>) -> Result<Snapshot<RefreshReceip
     .map_err(|_| AppError::Internal)?
 }
 
-fn project(stored: Snapshot<RefreshReceipt>) -> Result<dto::RefreshResponse, AppError> {
+async fn project(
+    entry: &Entry,
+    stored: Snapshot<RefreshReceipt>,
+) -> Result<dto::RefreshResponse, AppError> {
     let value = stored.value;
+    let paused = match value.error {
+        Some(_) => entry.source_pause().await.map(|(service, _)| service),
+        None => None,
+    };
     let state = match value.state {
         RefreshState::Running => dto::RefreshState::Running,
         RefreshState::Succeeded => dto::RefreshState::Succeeded,
@@ -122,7 +129,7 @@ fn project(stored: Snapshot<RefreshReceipt>) -> Result<dto::RefreshResponse, App
                 .map(|time| UtcTimestampDto::from_unix_milliseconds(time).ok_or(AppError::Internal))
                 .transpose()?,
             total_rows: value.total_rows.map(count).transpose()?,
-            error: value.error.map(source_failure),
+            error: value.error.map(|failure| source_failure(failure, paused)),
         },
         stored.cursor,
     )

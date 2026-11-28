@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use reviewq_app::access::AppError;
+use reviewq_app::access::{AppError, SourceProblem};
 use reviewq_app::changes::{ApprovalFacts, ApprovalRule, ApprovalView, Approver};
 use reviewq_domain::identity::{GitSha, MrIdentity};
 use serde::Deserialize;
@@ -232,7 +232,12 @@ fn approved_count(users: Vec<User>) -> Result<usize, AppError> {
 fn tolerate_unavailable<T>(result: Result<T, AppError>) -> Result<Option<T>, AppError> {
     match result {
         Ok(value) => Ok(Some(value)),
-        Err(AppError::Unavailable | AppError::NotFound | AppError::Forbidden) => Ok(None),
+        Err(
+            AppError::Unavailable
+            | AppError::NotFound
+            | AppError::Forbidden
+            | AppError::Source(SourceProblem::WrongAddress(_) | SourceProblem::BotCheck(_)),
+        ) => Ok(None),
         Err(error) => Err(error),
     }
 }
