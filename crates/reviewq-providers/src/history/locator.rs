@@ -142,7 +142,7 @@ pub(crate) fn inspect_claude_lead(
             return Err(AppError::Unavailable);
         }
         if index >= MAX_DISCOVERY_ENTRIES {
-            return Err(AppError::Busy);
+            return Err(AppError::SessionFolderTooLarge);
         }
         let directory = directory.map_err(fs_error)?;
         if !directory.file_type().map_err(fs_error)?.is_dir() {
@@ -267,7 +267,9 @@ fn visit(
         if cancelled.load(Ordering::Relaxed) {
             return Err(AppError::Unavailable);
         }
-        *budget = budget.checked_sub(1).ok_or(AppError::Busy)?;
+        *budget = budget
+            .checked_sub(1)
+            .ok_or(AppError::SessionFolderTooLarge)?;
         let item = item.map_err(fs_error)?;
         let class = item.file_type().map_err(fs_error)?;
         if depth > 0 && class.is_dir() {

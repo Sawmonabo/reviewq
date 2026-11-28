@@ -175,10 +175,7 @@ impl QuestionsPort for Codex {
                 return Ok(form);
             }
             let secret = answer.validate(&form)?;
-            let _permit = self
-                .question_proofs
-                .try_acquire()
-                .map_err(|_| AppError::Busy)?;
+            let _permit = reviewq_app::wait::permit(&self.question_proofs).await?;
             let session = answer.session();
             let thread = self.question_thread(session, true).await?;
             if form.blocking {

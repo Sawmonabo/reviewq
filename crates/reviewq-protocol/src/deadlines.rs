@@ -25,8 +25,10 @@ const PLUGIN_MARGIN: Duration = Duration::from_secs(30);
 
 /// A call that reads, or files one record.
 const SHORT: Duration = Duration::from_secs(30);
-/// A call that publishes a report version, reads GitLab or starts native work.
-const LONG: Duration = Duration::from_secs(55);
+/// A call that publishes a report version, reads GitLab or starts native work. It is the
+/// longest tool deadline, so it is also how long any ReviewQ call waits for its turn
+/// (`reviewq_app::wait::LONGEST`, which the MCP server checks is this value).
+pub const LONG: Duration = Duration::from_secs(55);
 
 /// How long the MCP server waits for the store to check a request's grant before it answers
 /// without running the request. The check counts toward the call's own deadline, so it gets the
@@ -60,6 +62,10 @@ static ACTION_TIMED_OUT: LazyLock<String> = LazyLock::new(|| {
         "ReviewQ did not answer this action in time, but it may have recorded it. Call {TRACK_POSTING} with operation reconcile before declaring the action again."
     )
 });
+/// What the model reads when a call's deadline passes before ReviewQ started it: it was still
+/// waiting for its turn behind other calls, or for the store to check its grant. Nothing ran,
+/// so the call can be repeated as it is.
+pub const NOT_STARTED: &str = "ReviewQ was busy with other calls and did not start this one in time, so nothing was stored. Repeat the call as it is.";
 /// What the model reads when a read passes its deadline.
 const READ_TIMED_OUT: &str =
     "ReviewQ did not answer this call in time. The call changes nothing, so it can be repeated.";

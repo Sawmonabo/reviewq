@@ -1,10 +1,14 @@
 //! One bounded reader worker and one writer worker per private SQLite profile.
 
+use std::future::{Future, poll_fn};
+use std::pin::pin;
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
+use reviewq_app::wait;
 use reviewq_domain::identity::EventCursor;
 use reviewq_domain::session::AbsolutePath;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
@@ -23,9 +27,6 @@ mod wal;
 pub use database::{StoppedStore, StoreIdentity};
 
 const QUEUE_CAPACITY: usize = 64;
-/// How long a call waits for room in a full worker queue before the store reports itself busy,
-/// the same bound the MCP server's waiting queue uses, so a short burst is absorbed.
-const QUEUE_WAIT: Duration = Duration::from_secs(2);
 
 type Job = Box<dyn FnOnce(&mut Connection, &Arc<profile::Profile>) + Send>;
 
@@ -45,6 +46,8 @@ pub struct SqliteStore {
     search_indexes: Arc<search_index::Indexes>,
     identity: StoreIdentity,
     workers: Mutex<Workers>,
+    /// Set by `close`: a call still waiting for room in a worker queue leaves at once.
+    closing: watch::Sender<bool>,
     wakeup: watch::Sender<EventCursor>,
     delivery_wakeup: watch::Sender<()>,
     desktop_wakeup: watch::Sender<()>,
@@ -60,8 +63,9 @@ pub(crate) struct WriteTx<'connection> {
 }
 
 impl SqliteStore {
-    /// How long `close` waits for accepted work to drain: a queued call may still be waiting
-    /// `QUEUE_WAIT` for room, and the writer ends with a checkpoint that syncs to disk.
+    /// How long `close` waits for accepted work to drain. A call still waiting for room leaves
+    /// as `close` begins, so this covers the queued jobs and the writer's closing checkpoint,
+    /// which syncs to disk.
     pub const CLOSE_DEADLINE: Duration = Duration::from_secs(10);
 
     /// Creates or verifies and opens a private profile under its exclusive lock.
@@ -84,6 +88,7 @@ impl SqliteStore {
                 search_indexes,
                 identity,
                 workers: Mutex::new(Workers { reader, writer }),
+                closing: watch::channel(false).0,
                 wakeup,
                 delivery_wakeup,
                 desktop_wakeup,
@@ -145,8 +150,10 @@ impl SqliteStore {
         .await
     }
 
-    /// Refuses new work, then drains accepted work and joins both workers to a deadline.
+    /// Refuses new work, sends away calls waiting for room, then drains accepted work and joins
+    /// both workers to a deadline.
     pub async fn close(&self, timeout: Duration) -> Result<(), StoreError> {
+        self.closing.send_replace(true);
         {
             let mut workers = self.workers.lock().map_err(|_| AppError::Internal)?;
             workers.reader.sender.take();
@@ -245,9 +252,11 @@ impl SqliteStore {
     {
         let (response, receiver) = oneshot::channel();
         // The lock only hands out the worker's sender; waiting for room happens without it.
-        // The channel serves waiters in arrival order, and a waiter that is dropped enqueues
-        // nothing. After `close` takes the stored sender no new call gets one, while a waiter
-        // already holding its copy finishes within `QUEUE_WAIT`.
+        // The channel serves waiters in arrival order, and a waiter that is dropped, as when its
+        // caller's deadline passes, enqueues nothing. A waiter waits for room at most
+        // `wait::LONGEST`, and leaves with `Unavailable` once `close` begins, dropping its copy
+        // of the sender so the worker can finish.
+        let mut closing = self.closing.subscribe();
         let sender = {
             let workers = self.workers.lock().map_err(|_| AppError::Internal)?;
             let worker = if write {
@@ -262,13 +271,18 @@ impl SqliteStore {
                 let _ = response.send(f(connection, profile));
             }
         });
-        sender
-            .send_timeout(job, QUEUE_WAIT)
+        let sent = {
+            let mut closed = pin!(closing.wait_for(|closed| *closed));
+            let mut send = pin!(wait::within(sender.send(job)));
+            poll_fn(|context| {
+                if closed.as_mut().poll(context).is_ready() {
+                    return Poll::Ready(Err(AppError::Unavailable));
+                }
+                send.as_mut().poll(context)
+            })
             .await
-            .map_err(|error| match error {
-                mpsc::error::SendTimeoutError::Timeout(_) => AppError::Busy,
-                mpsc::error::SendTimeoutError::Closed(_) => AppError::Unavailable,
-            })?;
+        };
+        sent?.map_err(|_| AppError::Unavailable)?;
         drop(sender);
         receiver.await.map_err(|_| AppError::Unavailable)?
     }
@@ -321,4 +335,110 @@ pub(crate) fn read_head(connection: &Connection) -> Result<EventCursor, StoreErr
         |row| row.get::<_, i64>(0),
     )?;
     EventCursor::try_from(value).map_err(|_| AppError::Internal.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::{Arc, mpsc};
+    use std::time::Duration;
+
+    use reviewq_app::access::AppError;
+    use reviewq_domain::session::AbsolutePath;
+    use tokio::sync::oneshot;
+    use tokio::task::JoinHandle;
+
+    use super::{QUEUE_CAPACITY, SqliteStore, StoreError};
+
+    type Call = JoinHandle<Result<(), StoreError>>;
+
+    /// Holds the writer until the returned sender is dropped, then fills its queue.
+    async fn hold_and_fill(store: &Arc<SqliteStore>) -> (mpsc::Sender<()>, Call, Vec<Call>) {
+        let (release, held) = mpsc::channel::<()>();
+        let (started, running) = oneshot::channel();
+        let holder = tokio::spawn({
+            let store = store.clone();
+            async move {
+                store
+                    .submit(true, move |_, _| {
+                        let _ = started.send(());
+                        let _ = held.recv();
+                        Ok(())
+                    })
+                    .await
+            }
+        });
+        running.await.unwrap();
+        let queued = (0..QUEUE_CAPACITY)
+            .map(|_| {
+                let store = store.clone();
+                tokio::spawn(async move { store.submit(true, |_, _| Ok(())).await })
+            })
+            .collect();
+        (release, holder, queued)
+    }
+
+    /// A write that finds the writer's queue full waits for room and completes, instead of
+    /// being refused as busy. Once `close` begins, a write still waiting for room leaves at
+    /// once as unavailable, and `close` still drains every write the queue accepted.
+    #[test]
+    fn a_full_queue_makes_a_call_wait_until_close() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let temp = tempfile::tempdir().unwrap();
+                std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o700))
+                    .unwrap();
+                let path = temp.path().join("queue.sqlite3");
+                let store = Arc::new(
+                    SqliteStore::open(AbsolutePath::from_canonical(path).unwrap())
+                        .await
+                        .unwrap(),
+                );
+
+                let (release, holder, queued) = hold_and_fill(&store).await;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let waiting = tokio::spawn({
+                    let store = store.clone();
+                    async move { store.submit(true, |_, _| Ok(())).await }
+                });
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                assert!(!waiting.is_finished());
+                drop(release);
+                waiting.await.unwrap().unwrap();
+                holder.await.unwrap().unwrap();
+                for call in queued {
+                    call.await.unwrap().unwrap();
+                }
+
+                let (release, holder, queued) = hold_and_fill(&store).await;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let waiting = tokio::spawn({
+                    let store = store.clone();
+                    async move { store.submit(true, |_, _| Ok(())).await }
+                });
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let closing = tokio::spawn({
+                    let store = store.clone();
+                    async move { store.close(SqliteStore::CLOSE_DEADLINE).await }
+                });
+                // The writer is still held, so the waiter can only leave because `close` began.
+                let left = tokio::time::timeout(SqliteStore::CLOSE_DEADLINE, waiting)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(matches!(
+                    left.map_err(StoreError::app),
+                    Err(AppError::Unavailable)
+                ));
+                drop(release);
+                closing.await.unwrap().unwrap();
+                holder.await.unwrap().unwrap();
+                for call in queued {
+                    call.await.unwrap().unwrap();
+                }
+            });
+    }
 }

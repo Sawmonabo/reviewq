@@ -118,6 +118,14 @@ pub trait NativeHistoryReader: Send + Sync {
         previous: Option<SourceAnchor>,
     ) -> AppFuture<'_, Option<NativeHead>>;
 
+    /// `head` for a live stream's periodic check, which skips a turn with `Busy` when every
+    /// read slot is taken rather than waiting for one.
+    fn poll_head(
+        &self,
+        session: HistorySession,
+        previous: Option<SourceAnchor>,
+    ) -> AppFuture<'_, Option<NativeHead>>;
+
     fn parts(
         &self,
         session: HistorySession,

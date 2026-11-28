@@ -4,16 +4,30 @@ use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
 use reviewq_app::changes::{Discussion, DiscussionDraft, DiscussionScope};
+use reviewq_app::wait;
 use reviewq_domain::identity::{EventCursor, MrIdentity};
-use tokio::sync::OnceCell;
+use tokio::sync::{OnceCell, OwnedSemaphorePermit, Semaphore};
 
 const OBSERVATIONS: usize = 5;
 const RETAINED_BYTES: usize = 8 * 1024 * 1024 / OBSERVATIONS;
 const RETAINED_PAGES: usize = 64;
 const LIFETIME: Duration = Duration::from_secs(45);
 
-#[derive(Default)]
-pub(in crate::gitlab) struct DiscussionCache(Mutex<VecDeque<Entry>>);
+pub(in crate::gitlab) struct DiscussionCache {
+    entries: Mutex<VecDeque<Entry>>,
+    /// One per caller using an observation, so a caller holding one always finds an
+    /// observation to replace when it needs a new one.
+    uses: Arc<Semaphore>,
+}
+
+impl Default for DiscussionCache {
+    fn default() -> Self {
+        Self {
+            entries: Mutex::default(),
+            uses: Arc::new(Semaphore::new(OBSERVATIONS)),
+        }
+    }
+}
 
 struct Entry {
     source: MrIdentity,
@@ -29,6 +43,8 @@ pub(super) struct Observation {
     opened: Instant,
     expires: Instant,
     pages: Mutex<VecDeque<PageSlot>>,
+    /// One per page being read, so a reader holding one always finds a page to replace.
+    page_uses: Arc<Semaphore>,
     pub(super) drafts: OnceCell<Drafts>,
 }
 
@@ -54,13 +70,27 @@ pub(super) struct Drafts {
 }
 
 impl DiscussionCache {
-    pub(super) fn observe(
+    /// The observation of `source`'s discussions in `scope`, with the place its caller holds
+    /// among `OBSERVATIONS`, waiting for a place when every observation is in use. Keep the
+    /// place while using the observation.
+    pub(super) async fn observe(
+        &self,
+        source: &MrIdentity,
+        mr_id: Option<u64>,
+        scope: &DiscussionScope,
+    ) -> Result<(OwnedSemaphorePermit, Arc<Observation>), AppError> {
+        let place = wait::owned(self.uses.clone()).await?;
+        let observation = self.find_or_open(source, mr_id, scope)?;
+        Ok((place, observation))
+    }
+
+    fn find_or_open(
         &self,
         source: &MrIdentity,
         mr_id: Option<u64>,
         scope: &DiscussionScope,
     ) -> Result<Arc<Observation>, AppError> {
-        let mut entries = self.0.lock().map_err(|_| AppError::Internal)?;
+        let mut entries = self.entries.lock().map_err(|_| AppError::Internal)?;
         let now = Instant::now();
         entries.retain(|entry| entry.observation.expires > now);
         if let Some(index) = entries.iter().position(|entry| entry.source == *source) {
@@ -89,10 +119,11 @@ impl DiscussionCache {
             return Err(AppError::CursorExpired);
         }
         while entries.len() >= OBSERVATIONS {
+            // The caller's place leaves at most `OBSERVATIONS - 1` observations in use.
             let index = entries
                 .iter()
                 .position(|entry| Arc::strong_count(&entry.observation) == 1)
-                .ok_or(AppError::Busy)?;
+                .ok_or(AppError::Internal)?;
             entries.remove(index);
         }
         let observation = Arc::new(Observation {
@@ -100,6 +131,7 @@ impl DiscussionCache {
             opened: now,
             expires: now + LIFETIME,
             pages: Mutex::default(),
+            page_uses: Arc::new(Semaphore::new(RETAINED_PAGES)),
             drafts: OnceCell::const_new(),
         });
         entries.push_back(Entry {
@@ -119,7 +151,7 @@ impl DiscussionCache {
         scope: &DiscussionScope,
         observation: &Arc<Observation>,
     ) -> Result<(), AppError> {
-        let entries = self.0.lock().map_err(|_| AppError::Internal)?;
+        let entries = self.entries.lock().map_err(|_| AppError::Internal)?;
         if observation.expires > Instant::now()
             && entries.iter().any(|entry| {
                 &entry.source == source
@@ -139,7 +171,7 @@ impl DiscussionCache {
         started: Instant,
         current: &[Option<[u8; 32]>],
     ) -> Result<bool, AppError> {
-        let mut entries = self.0.lock().map_err(|_| AppError::Internal)?;
+        let mut entries = self.entries.lock().map_err(|_| AppError::Internal)?;
         let Some(index) = entries.iter().position(|entry| entry.source == *source) else {
             return Ok(false);
         };
@@ -175,11 +207,18 @@ impl DiscussionCache {
 }
 
 impl Observation {
-    pub(super) fn page(
+    /// The slot of one page, with the place its reader holds among `RETAINED_PAGES`, waiting
+    /// for a place when every page is being read. Keep the place while using the slot.
+    pub(super) async fn page(
         &self,
         page: u32,
         limit: u16,
-    ) -> Result<Arc<OnceCell<Option<Page>>>, AppError> {
+    ) -> Result<(OwnedSemaphorePermit, Arc<OnceCell<Option<Page>>>), AppError> {
+        let place = wait::owned(self.page_uses.clone()).await?;
+        Ok((place, self.page_slot(page, limit)?))
+    }
+
+    fn page_slot(&self, page: u32, limit: u16) -> Result<Arc<OnceCell<Option<Page>>>, AppError> {
         let mut pages = self.pages.lock().map_err(|_| AppError::Internal)?;
         pages.retain(|item| item.value.initialized() || Arc::strong_count(&item.value) > 1);
         let address = (page, limit);
@@ -193,7 +232,7 @@ impl Observation {
             let index = pages
                 .iter()
                 .position(|item| Arc::strong_count(&item.value) == 1)
-                .ok_or(AppError::Busy)?;
+                .ok_or(AppError::Internal)?;
             pages.remove(index);
         }
         let slot = Arc::new(OnceCell::const_new());

@@ -9,10 +9,11 @@ use std::time::{Duration, Instant};
 use reviewq_app::access::AppError;
 use reviewq_app::history::document::{Index, MAX_INDEX_BYTES, Query, SourcePages, Window};
 use reviewq_app::history::{FileContentRef, search::SourceObservation};
+use reviewq_app::wait;
 use reviewq_domain::identity::ReportHash;
 use reviewq_domain::session::SessionTarget;
 use sha2::{Digest, Sha256};
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, OwnedSemaphorePermit, Semaphore};
 
 use super::{file, locator::Source, native_string::NativeString, records, search};
 
@@ -22,10 +23,28 @@ const RETENTION: Duration = Duration::from_secs(30);
 type Key = (SessionTarget, FileContentRef);
 type Handle = Arc<AsyncMutex<Option<Prepared>>>;
 
-#[derive(Default)]
 pub(super) struct Documents {
     active: Arc<Mutex<HashMap<Key, Slot>>>,
+    /// One per document in use. A caller holds one while it holds a handle, so a caller that
+    /// holds one always finds a free place or a document no one else is using.
+    uses: Arc<Semaphore>,
     collect: AtomicBool,
+}
+
+impl Default for Documents {
+    fn default() -> Self {
+        Self {
+            active: Arc::default(),
+            uses: Arc::new(Semaphore::new(MAX_DOCUMENTS)),
+            collect: AtomicBool::default(),
+        }
+    }
+}
+
+/// A document's handle, held in one of the places of `Documents`.
+pub(super) struct Claim {
+    pub(super) handle: Handle,
+    _use: OwnedSemaphorePermit,
 }
 
 struct Slot {
@@ -34,11 +53,37 @@ struct Slot {
 }
 
 impl Documents {
-    pub(super) fn slot(
+    /// The handle of a document, waiting for a place when every document is in use.
+    pub(super) async fn claim(
         &self,
         target: SessionTarget,
         reference: FileContentRef,
-    ) -> Result<Handle, AppError> {
+    ) -> Result<Claim, AppError> {
+        let place = wait::owned(self.uses.clone()).await?;
+        self.slot(place, target, reference)
+    }
+
+    /// The handle of a document when a place is free now; `Busy` otherwise. The background
+    /// search index skips a document then.
+    pub(super) fn try_claim(
+        &self,
+        target: SessionTarget,
+        reference: FileContentRef,
+    ) -> Result<Claim, AppError> {
+        let place = self
+            .uses
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| AppError::Busy)?;
+        self.slot(place, target, reference)
+    }
+
+    fn slot(
+        &self,
+        place: OwnedSemaphorePermit,
+        target: SessionTarget,
+        reference: FileContentRef,
+    ) -> Result<Claim, AppError> {
         if !self.collect.swap(true, Ordering::Relaxed) {
             let owner = Arc::downgrade(&self.active);
             tokio::spawn(async move {
@@ -62,7 +107,7 @@ impl Documents {
                 .filter(|(_, slot)| Arc::strong_count(&slot.handle) == 1)
                 .min_by_key(|(_, slot)| slot.touched)
                 .map(|(key, _)| key.clone())
-                .ok_or(AppError::Busy)?;
+                .ok_or(AppError::Internal)?;
             active.remove(&oldest);
         }
         let slot = active.entry(key).or_insert_with(|| Slot {
@@ -70,7 +115,10 @@ impl Documents {
             handle: Arc::default(),
         });
         slot.touched = Instant::now();
-        Ok(slot.handle.clone())
+        Ok(Claim {
+            handle: slot.handle.clone(),
+            _use: place,
+        })
     }
 }
 

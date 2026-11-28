@@ -18,5 +18,6 @@ pub mod reports;
 pub mod settings;
 pub mod sources;
 pub mod system;
+pub mod wait;
 pub mod workflow;
 pub mod workspace;

@@ -189,7 +189,9 @@ pub(super) fn failure(error: AppError) -> (StatusCode, Failure) {
         ),
         AppError::Unauthorized => (StatusCode::UNAUTHORIZED, ErrorCode::Unauthorized),
         AppError::Forbidden => (StatusCode::FORBIDDEN, ErrorCode::Forbidden),
-        AppError::NotFound => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        AppError::NotFound | AppError::SessionFolderTooLarge => {
+            (StatusCode::NOT_FOUND, ErrorCode::NotFound)
+        }
         AppError::Conflict => (StatusCode::CONFLICT, ErrorCode::Conflict),
         AppError::StaleRevision => (StatusCode::CONFLICT, ErrorCode::StaleRevision),
         AppError::IdempotencyConflict => (StatusCode::CONFLICT, ErrorCode::IdempotencyConflict),

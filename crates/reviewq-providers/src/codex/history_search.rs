@@ -27,7 +27,7 @@ impl Codex {
         session: HistorySession,
         query: RpcSearchQuery,
     ) -> Result<RpcSearchPage, AppError> {
-        let _slot = READS.try_acquire().map_err(|_| AppError::Busy)?;
+        let _slot = reviewq_app::wait::permit(&READS).await?;
         let observation = self.read_history_stamp(session.clone(), true).await?;
         let at = if let Some((saved, position)) = query.from {
             if saved != observation {

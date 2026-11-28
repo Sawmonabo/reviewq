@@ -6,9 +6,10 @@ use std::time::{Duration, Instant};
 
 use reviewq_app::access::AppError;
 use reviewq_app::history::{FileContentRef, NativeContent};
+use reviewq_app::wait;
 use reviewq_domain::identity::SessionKey;
 use sha2::{Digest, Sha256};
-use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
+use tokio::sync::{Mutex as AsyncMutex, Semaphore, mpsc, oneshot};
 
 use super::{file, locator::Source, records};
 
@@ -18,9 +19,20 @@ const RETAIN_FOR: Duration = Duration::from_secs(20);
 
 type Key = (SessionKey, FileContentRef);
 
-#[derive(Default)]
 pub(super) struct Streams {
     active: Mutex<HashMap<Key, Slot>>,
+    /// One per stream being read. A reader holds one while it reads, so a reader that holds
+    /// one always finds a free place or a stream no one else is reading.
+    readers: Arc<Semaphore>,
+}
+
+impl Default for Streams {
+    fn default() -> Self {
+        Self {
+            active: Mutex::default(),
+            readers: Arc::new(Semaphore::new(MAX_STREAMS)),
+        }
+    }
 }
 
 struct Slot {
@@ -37,6 +49,7 @@ impl Streams {
         offset: u64,
         limit: usize,
     ) -> Result<NativeContent, AppError> {
+        let _reader = wait::owned(self.readers.clone()).await?;
         let key = (session, reference.clone());
         let slot = self.slot(key)?;
         let mut current = slot.lock().await;
@@ -70,7 +83,7 @@ impl Streams {
                 .filter(|(_, slot)| Arc::strong_count(&slot.read) == 1)
                 .min_by_key(|(_, slot)| slot.touched)
                 .map(|(key, _)| key.clone())
-                .ok_or(AppError::Busy)?;
+                .ok_or(AppError::Internal)?;
             active.remove(&oldest);
         }
         let slot = active.entry(key).or_insert_with(|| Slot {

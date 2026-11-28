@@ -62,11 +62,7 @@ impl Claude {
             if session.binding.identity().profile() != &self.profile || session.source.is_none() {
                 return Err(AppError::Forbidden);
             }
-            let permit = self
-                .reads
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| AppError::Busy)?;
+            let permit = reviewq_app::wait::owned(self.reads.clone()).await?;
             let cancel = Cancel(Arc::new(AtomicBool::new(false)));
             let stopped = cancel.0.clone();
             tokio::task::spawn_blocking(move || {
@@ -86,11 +82,7 @@ impl ClaudeCompanion for Claude {
     fn inspect_lead(&self, session: NativeSessionId) -> AppFuture<'_, HostProof> {
         Box::pin(async move {
             validate_id(&session)?;
-            let permit = self
-                .reads
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| AppError::Busy)?;
+            let permit = reviewq_app::wait::owned(self.reads.clone()).await?;
             let profile = self.profile.clone();
             let cancel = Cancel(Arc::new(AtomicBool::new(false)));
             let stopped = cancel.0.clone();
@@ -180,11 +172,7 @@ impl ClaudeCompanion for Claude {
                 return Err(AppError::Forbidden);
             }
             validate_id(&context.session_id)?;
-            let permit = self
-                .reads
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| AppError::Busy)?;
+            let permit = reviewq_app::wait::owned(self.reads.clone()).await?;
             let cancel = Cancel(Arc::new(AtomicBool::new(false)));
             let stopped = cancel.0.clone();
             tokio::task::spawn_blocking(move || {

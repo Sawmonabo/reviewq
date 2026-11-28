@@ -142,8 +142,8 @@ impl GitLab {
             return Err(AppError::InvalidRequest);
         }
         let (current, mr_id) = self.discussion_context(&source, &scope.revision).await?;
-        let observation = self.discussions.observe(&source, mr_id, &scope)?;
-        let slot = observation.page(page, limit)?;
+        let (_place, observation) = self.discussions.observe(&source, mr_id, &scope).await?;
+        let (_page_place, slot) = observation.page(page, limit).await?;
         let cached = slot
             .get_or_try_init(|| async {
                 let started = Instant::now();

@@ -7,7 +7,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
-use reviewq_protocol::deadlines::{GRANT_CHECK_LIMIT, tool_deadline};
+use reviewq_protocol::deadlines::{GRANT_CHECK_LIMIT, LONG, NOT_STARTED, tool_deadline};
 use reviewq_protocol::ledger::LedgerTool;
 use reviewq_protocol::mcp::{
     AnswerAgentQuestion, GetFindings, GetReview, MANAGEMENT_TOOLS, ManagementTool,
@@ -26,7 +26,8 @@ use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tokio::time::Instant;
+use tokio::sync::Semaphore;
+use tokio::time::{Instant, timeout_at};
 
 use super::{ApiError, Entry};
 
@@ -37,6 +38,9 @@ mod operations;
 mod workflow;
 use gates::Gates;
 
+// Every wait for a turn ends by the longest tool deadline.
+const _: () = assert!(LONG.as_nanos() == reviewq_app::wait::LONGEST.as_nanos());
+
 const MAX_TOOL_RESPONSE: usize = 512 * 1024;
 /// Largest MCP request body. It is set well above the largest ledger tool input, and meant to
 /// exceed the arguments a model writes in one tool call, so a call whose input is too large
@@ -44,11 +48,26 @@ const MAX_TOOL_RESPONSE: usize = 512 * 1024;
 /// any tool code runs; the body is read under the router's 30-second body timeout and only
 /// after the grant is authenticated, or after the store did not check it in time.
 const MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;
+/// The memory MCP requests may hold at once, waiting or running. A request is charged its body
+/// (its `Content-Length`, or the largest body when it names none) plus `REQUEST_COST` for what
+/// it holds besides; one waits for its share before its body is read, so a request still
+/// waiting for memory holds only its headers. It binds for large bodies, about 62 of the
+/// largest at once; ordinary calls of a few kilobytes reach the process's open-file limit first.
+const REQUEST_MEMORY: usize = 64 * 1024 * 1024;
+/// What one request is charged besides its body: its task, the parsed call and its reply.
+const REQUEST_COST: usize = 32 * 1024;
 
 /// When a request reached the MCP server. A tool call's deadline runs from here, so the time
-/// its grant check took counts toward it.
+/// it waited for memory and for its grant check counts toward it.
 #[derive(Clone, Copy)]
 struct Arrived(Instant);
+
+/// The state of the `/mcp` admission: the service and the memory MCP requests may hold.
+#[derive(Clone)]
+struct Admission {
+    entry: Arc<Entry>,
+    memory: Arc<Semaphore>,
+}
 
 #[derive(Clone)]
 struct Server {
@@ -80,9 +99,13 @@ pub(super) fn mount(entry: Arc<Entry>) -> Router<Arc<Entry>> {
         NeverSessionManager::default().into(),
         config,
     );
+    let admission = Admission {
+        entry,
+        memory: Arc::new(Semaphore::new(REQUEST_MEMORY)),
+    };
     Router::new()
         .route_service("/mcp", sdk)
-        .layer(middleware::from_fn_with_state(entry, authenticate))
+        .layer(middleware::from_fn_with_state(admission, authenticate))
 }
 
 /// One management tool as the MCP server lists it: name, description and input schema.
@@ -101,12 +124,28 @@ fn management_tool(tool: ManagementTool) -> Tool {
     Tool::new(tool.name(), tool.description(), schema)
 }
 
+/// Admits one MCP request: it waits for its share of `REQUEST_MEMORY` before its body is read,
+/// then for the store to check its grant, both within `GRANT_CHECK_LIMIT` of its arrival, the
+/// shortest tool deadline, which runs from the same moment.
 async fn authenticate(
-    State(entry): State<Arc<Entry>>,
+    State(admission): State<Admission>,
     mut request: Request,
     next: Next,
 ) -> Response {
     let arrived = Arrived(Instant::now());
+    let checked_by = arrived.0 + GRANT_CHECK_LIMIT;
+    let Ok(Ok(_memory)) = timeout_at(
+        checked_by,
+        admission
+            .memory
+            .clone()
+            .acquire_many_owned(request_cost(&request)),
+    )
+    .await
+    else {
+        return ApiError::from(AppError::Busy).into_response();
+    };
+    let entry = admission.entry;
     let header = request
         .headers()
         .get(header::AUTHORIZATION)
@@ -121,8 +160,7 @@ async fn authenticate(
     }) else {
         return challenge();
     };
-    let checked =
-        tokio::time::timeout(GRANT_CHECK_LIMIT, entry.store.authenticate_grant(verifier)).await;
+    let checked = timeout_at(checked_by, entry.store.authenticate_grant(verifier)).await;
     match checked {
         Ok(Ok(actor)) => {
             request.headers_mut().remove(header::AUTHORIZATION);
@@ -136,10 +174,24 @@ async fn authenticate(
     }
 }
 
+/// What a request is charged of `REQUEST_MEMORY`: its body, at most the largest one, and
+/// `REQUEST_COST`.
+fn request_cost(request: &Request) -> u32 {
+    let body = request
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok())
+        .map_or(MAX_REQUEST_BODY_BYTES, |length| {
+            length.min(MAX_REQUEST_BODY_BYTES)
+        });
+    u32::try_from(body + REQUEST_COST).unwrap_or(u32::MAX)
+}
+
 /// The answer to a request whose grant the store did not check in time, so nothing ran. A tool
-/// call gets its tool's timeout sentence as its error result, which the model reads; any other
-/// request is refused as unavailable. Only here is an unauthenticated body read, within the
-/// same limit as an authenticated one.
+/// call gets the sentence that says it was not started as its error result, which the model
+/// reads; any other request is refused as unavailable. Only here is an unauthenticated body
+/// read, within the same limit as an authenticated one.
 async fn unchecked(request: Request) -> Response {
     let unavailable = || ApiError::from(AppError::Unavailable).into_response();
     let Ok(body) = axum::body::to_bytes(request.into_body(), MAX_REQUEST_BODY_BYTES).await else {
@@ -148,14 +200,12 @@ async fn unchecked(request: Request) -> Response {
     let Ok(call) = serde_json::from_slice::<Value>(&body) else {
         return unavailable();
     };
-    let (Some(id), Some("tools/call"), Some(name)) = (
-        call.get("id"),
-        call.get("method").and_then(Value::as_str),
-        call.pointer("/params/name").and_then(Value::as_str),
-    ) else {
+    let (Some(id), Some("tools/call")) =
+        (call.get("id"), call.get("method").and_then(Value::as_str))
+    else {
         return unavailable();
     };
-    let result = CallToolResult::error(vec![ContentBlock::text(tool_deadline(name).timed_out)]);
+    let result = CallToolResult::error(vec![ContentBlock::text(NOT_STARTED)]);
     let reply = serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result });
     axum::Json(reply).into_response()
 }
@@ -228,17 +278,29 @@ impl ServerHandler for Server {
             .and_then(|parts| parts.extensions.get::<Arrived>())
             .map_or_else(Instant::now, |arrived| arrived.0);
         let deadline = tool_deadline(&request.name);
+        let until = arrived + deadline.limit;
         let claude = ledger::claude_client(&context);
         let meta = context.meta;
         let cancelled = context.ct;
+        let answered = async {
+            // A turn that comes as the deadline passes is not taken: the call never started.
+            let permit = match timeout_at(until, self.gates.enter(&actor)).await {
+                Ok(permit) if Instant::now() < until => permit,
+                _ => return Err(NOT_STARTED),
+            };
+            let call = async { self.call(permit?, request, &meta, actor, claude).await };
+            timeout_at(until, call)
+                .await
+                .map_err(|_| deadline.timed_out)
+        };
         let result = tokio::select! {
             _ = cancelled.cancelled() => return Err(ErrorData::internal_error("request cancelled", None)),
-            result = tokio::time::timeout_at(arrived + deadline.limit, self.call(request, &meta, actor, claude)) => result,
+            result = answered => result,
         };
         let text = match result {
             Ok(Ok(output)) => return Ok(output.into()),
             Ok(Err(error)) => super::error::tool_error_text(error),
-            Err(_) => deadline.timed_out.to_owned(),
+            Err(sentence) => sentence.to_owned(),
         };
         Ok(CallToolResult::error(vec![ContentBlock::text(text)]).into())
     }
@@ -255,19 +317,19 @@ fn bounded_result(value: &Value) -> Result<CallToolResult, AppError> {
 }
 
 impl Server {
-    /// Runs one tool call. A reviewing tool binds its caller from the request's `_meta`. A name
+    /// Runs one tool call in its turn. A reviewing tool binds its caller from the request's `_meta`. A name
     /// the server does not list gets the host's sentence asking for the current tools, which a
     /// session still holding an older tool list needs after an update. A Claude client reaches
     /// this server only for the management tools, through its checkout's MCP server entry, so
     /// its sentence names that entry's reconnect rather than the plugin's reload.
     async fn call(
         &self,
+        _turn: gates::Permit,
         request: CallToolRequestParams,
         meta: &RequestMetaObject,
         actor: Actor,
         claude: bool,
     ) -> Result<CallToolResult, ApiError> {
-        let _permit = self.gates.enter(&actor).await?;
         let input = request.arguments.unwrap_or_default();
         if let Some(tool) = LedgerTool::from_name(&request.name) {
             return ledger::call(&self.entry, tool, meta, actor, input).await;

@@ -77,7 +77,7 @@ impl ChangeSource for GitLab {
                 page
             };
             let current = self.patch_revision(&source, revision.as_deref()).await?;
-            let slot = self
+            let (_place, slot) = self
                 .patches
                 .index(IndexKey {
                     source: source.clone(),

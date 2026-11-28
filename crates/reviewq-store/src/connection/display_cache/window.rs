@@ -107,13 +107,7 @@ impl SqliteStore {
         reference: ReportReference,
         position: DisplayWindowPosition,
     ) -> Result<Snapshot<DisplayWindow>, StoreError> {
-        let slot = Arc::new(
-            self.display_builds
-                .reads
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| AppError::Busy)?,
-        );
+        let slot = Arc::new(reviewq_app::wait::owned(self.display_builds.reads.clone()).await?);
         let (version, profile) = {
             let (actor, run, reference, slot) =
                 (actor.clone(), run.clone(), reference.clone(), slot.clone());

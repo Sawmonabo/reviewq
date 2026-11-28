@@ -36,11 +36,7 @@ impl GitLab {
         source: MrIdentity,
         request: PatchSourceRequest,
     ) -> Result<PatchSourcePage, AppError> {
-        let _permit = self
-            .patches
-            .source_reads
-            .try_acquire()
-            .map_err(|_| AppError::Busy)?;
+        let _permit = reviewq_app::wait::permit(&self.patches.source_reads).await?;
         let key = Key {
             source: source.clone(),
             revision: request.revision.clone(),

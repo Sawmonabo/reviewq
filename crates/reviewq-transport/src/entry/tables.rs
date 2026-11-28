@@ -161,7 +161,7 @@ impl Cache {
         if let Some(cached) = lookup(&self.entries, &key) {
             return cached.as_deref().cloned();
         }
-        let permit = self.producer.clone().try_acquire_owned().ok()?;
+        let permit = reviewq_app::wait::owned(self.producer.clone()).await.ok()?;
         let entries = self.entries.clone();
         let source = source.to_owned();
         tokio::task::spawn_blocking(move || {

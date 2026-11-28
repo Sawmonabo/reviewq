@@ -13,7 +13,7 @@ use reviewq_app::history::{
 };
 use reviewq_app::hosts::{ObservedAsyncQuestion, QuestionForm};
 use reviewq_domain::identity::NativeInputId;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 mod claude;
 mod claude_questions;
@@ -51,7 +51,6 @@ pub(crate) use turn_metadata::{
 pub struct FileHistory {
     reads: Arc<Semaphore>,
     searches: Semaphore,
-    pending_searches: Semaphore,
     large_records: Arc<Mutex<search::LargeRecords>>,
     search_index: Option<Arc<search::Acceleration>>,
     streams: content::Streams,
@@ -63,7 +62,6 @@ impl Default for FileHistory {
         Self {
             reads: Arc::new(Semaphore::new(4)),
             searches: Semaphore::new(1),
-            pending_searches: Semaphore::new(4),
             large_records: Arc::default(),
             search_index: None,
             streams: content::Streams::default(),
@@ -110,17 +108,27 @@ impl FileHistory {
         }
     }
 
+    /// Runs `inspect` on the session's located source in one of the read slots, waiting for
+    /// its turn.
     fn inspect<T: Send + 'static>(
         &self,
         session: HistorySession,
         inspect: impl FnOnce(locator::Source, &AtomicBool) -> Result<T, AppError> + Send + 'static,
     ) -> AppFuture<'_, Option<T>> {
         Box::pin(async move {
-            let permit = self
-                .reads
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| AppError::Busy)?;
+            let permit = reviewq_app::wait::owned(self.reads.clone()).await?;
+            self.inspect_in(permit, session, inspect).await
+        })
+    }
+
+    /// Runs `inspect` like `inspect`, in a read slot the caller already holds.
+    fn inspect_in<T: Send + 'static>(
+        &self,
+        permit: OwnedSemaphorePermit,
+        session: HistorySession,
+        inspect: impl FnOnce(locator::Source, &AtomicBool) -> Result<T, AppError> + Send + 'static,
+    ) -> AppFuture<'_, Option<T>> {
+        Box::pin(async move {
             let cancel = Cancel(Arc::new(AtomicBool::new(false)));
             let stopped = cancel.0.clone();
             tokio::task::spawn_blocking(move || {
@@ -247,6 +255,19 @@ impl NativeHistoryReader for FileHistory {
         })
     }
 
+    fn poll_head(
+        &self,
+        session: HistorySession,
+        previous: Option<SourceAnchor>,
+    ) -> AppFuture<'_, Option<NativeHead>> {
+        let Ok(permit) = self.reads.clone().try_acquire_owned() else {
+            return Box::pin(async { Err(AppError::Busy) });
+        };
+        self.inspect_in(permit, session, move |source, cancel| {
+            navigation::head(&source, previous.as_ref(), cancel)
+        })
+    }
+
     fn page(
         &self,
         session: HistorySession,
@@ -257,11 +278,7 @@ impl NativeHistoryReader for FileHistory {
             if !(1..=100).contains(&limit) {
                 return Err(AppError::InvalidRequest);
             }
-            let permit = self
-                .reads
-                .clone()
-                .try_acquire_owned()
-                .map_err(|_| AppError::Busy)?;
+            let permit = reviewq_app::wait::owned(self.reads.clone()).await?;
             let cancel = Cancel(Arc::new(AtomicBool::new(false)));
             let stopped = cancel.0.clone();
             tokio::task::spawn_blocking(move || {
@@ -323,12 +340,18 @@ impl NativeHistoryReader for FileHistory {
         query: reviewq_app::history::document::Query,
     ) -> AppFuture<'_, reviewq_app::history::document::Window> {
         Box::pin(async move {
-            let slot = self
+            let claim = self
                 .documents
-                .slot(session.target.clone(), reference.clone())?;
-            let mut slot = slot.lock_owned().await;
+                .claim(session.target.clone(), reference.clone())
+                .await?;
+            let mut slot = claim.handle.clone().lock_owned().await;
+            // The read may outlive this call when it is cancelled, so it keeps the place
+            // with the handle and gives both up together.
             self.inspect(session, move |source, cancel| {
-                documents::read(&mut slot, &source, &reference, query, cancel)
+                let read = documents::read(&mut slot, &source, &reference, query, cancel);
+                drop(slot);
+                drop(claim);
+                read
             })
             .await?
             .ok_or(AppError::NotFound)
@@ -341,21 +364,14 @@ impl NativeHistoryReader for FileHistory {
         query: HistorySearch,
     ) -> AppFuture<'_, Option<SearchPage>> {
         Box::pin(async move {
-            let _pending = self
-                .pending_searches
-                .try_acquire()
-                .map_err(|_| AppError::Busy)?;
-            let _slot = self
-                .searches
-                .acquire()
-                .await
-                .map_err(|_| AppError::Unavailable)?;
+            let _slot = reviewq_app::wait::permit(&self.searches).await?;
             let owner = session.target.clone();
             let large = self.large_records.clone();
             let index = self.search_index.clone();
             let documents = self.documents.clone();
             self.inspect(session, move |source, stop| {
-                let mut large = large.try_lock().map_err(|_| AppError::Busy)?;
+                // Only the expiry sweep shares this lock, and only for a moment.
+                let mut large = large.lock().map_err(|_| AppError::Internal)?;
                 search::read(
                     &source,
                     &owner,

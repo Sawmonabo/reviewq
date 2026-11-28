@@ -160,7 +160,7 @@ async fn run(
     let mut delay = Duration::from_secs(1);
     let mut events = None;
     loop {
-        let check = reader.head(session.clone(), previous.clone()).await;
+        let check = reader.poll_head(session.clone(), previous.clone()).await;
         let mut rpc = None;
         let mut file_path = None;
         let (current, availability, reset) = match check {

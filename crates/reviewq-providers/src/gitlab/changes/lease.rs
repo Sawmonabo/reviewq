@@ -10,7 +10,7 @@ use reviewq_app::changes::{
     PatchSourceWindow, SourcePage,
 };
 use reviewq_domain::identity::MrIdentity;
-use tokio::sync::{Mutex, OnceCell, Semaphore};
+use tokio::sync::{Mutex, OnceCell, OwnedSemaphorePermit, Semaphore};
 
 use super::source::{SourceIndex, SourceRead};
 
@@ -119,6 +119,8 @@ pub(in crate::gitlab) struct Leases {
     scans: Arc<Mutex<VecDeque<IndexLease>>>,
     pub(super) flights: super::flights::Flights,
     pub(super) source_reads: Arc<Semaphore>,
+    /// One per file-index page in use, so a caller holding one always finds a page to reuse.
+    scan_uses: Arc<Semaphore>,
 }
 
 pub(super) struct Body {
@@ -185,6 +187,7 @@ impl Leases {
             scans,
             flights: super::flights::Flights::default(),
             source_reads: Arc::new(Semaphore::new(MAX_SOURCE_READS)),
+            scan_uses: Arc::new(Semaphore::new(MAX_LEASES)),
         }
     }
 
@@ -197,6 +200,7 @@ impl Leases {
             scans: Arc::default(),
             flights: self.flights.clone(),
             source_reads: self.source_reads.clone(),
+            scan_uses: Arc::new(Semaphore::new(MAX_LEASES)),
         }
     }
 
@@ -217,7 +221,13 @@ impl Leases {
         });
     }
 
-    pub(super) async fn index(&self, key: IndexKey) -> Result<Arc<IndexSlot>, AppError> {
+    /// The slot of one file-index page, with the place it holds among `MAX_LEASES`, waiting
+    /// for a place when every page is being built or read. Keep the place while using the slot.
+    pub(super) async fn index(
+        &self,
+        key: IndexKey,
+    ) -> Result<(OwnedSemaphorePermit, Arc<IndexSlot>), AppError> {
+        let place = reviewq_app::wait::owned(self.scan_uses.clone()).await?;
         let mut scans = self.scans.lock().await;
         // The caller checks the current GitLab refs before every lookup. Retain only
         // bounded, fully verified REST pages under their original request identity.
@@ -232,13 +242,14 @@ impl Leases {
             let slot = scan.slot.clone();
             scan.used_at = Instant::now();
             scans.push_back(scan);
-            return Ok(slot);
+            return Ok((place, slot));
         }
         if scans.len() == MAX_LEASES {
+            // The caller's place leaves at most `MAX_LEASES - 1` pages in use by others.
             let unused = scans
                 .iter()
                 .position(|scan| Arc::strong_count(&scan.slot) == 1);
-            scans.remove(unused.ok_or(AppError::Busy)?);
+            scans.remove(unused.ok_or(AppError::Internal)?);
         }
         let slot = Arc::new(OnceCell::new());
         scans.push_back(IndexLease {
@@ -246,7 +257,7 @@ impl Leases {
             slot: slot.clone(),
             used_at: Instant::now(),
         });
-        Ok(slot)
+        Ok((place, slot))
     }
 
     // An index page already verified the neighboring bytes against the same refs.

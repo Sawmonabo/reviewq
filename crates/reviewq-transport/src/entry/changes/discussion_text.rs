@@ -8,7 +8,6 @@ const MAX_NOTES: usize = 64;
 static PROJECTION_SLOTS: Semaphore = Semaphore::const_new(2);
 
 pub(super) async fn project_page(items: &[PatchDiscussion]) -> Option<Vec<PatchDiscussionText>> {
-    let permit = PROJECTION_SLOTS.try_acquire().ok()?;
     let mut bytes = 0;
     let mut candidates = Vec::new();
     let open_notes = items
@@ -31,6 +30,7 @@ pub(super) async fn project_page(items: &[PatchDiscussion]) -> Option<Vec<PatchD
         return None;
     }
 
+    let permit = reviewq_app::wait::permit(&PROJECTION_SLOTS).await.ok()?;
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         let mut items = Vec::new();

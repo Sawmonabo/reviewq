@@ -111,8 +111,12 @@ pub(super) fn read(
     cancel: &AtomicBool,
     include_context: bool,
 ) -> Result<Projection, AppError> {
-    let handle = documents.slot(owner.clone(), reference.clone())?;
-    let mut cached = handle.try_lock_owned().map_err(|_| AppError::Busy)?;
+    let claim = documents.try_claim(owner.clone(), reference.clone())?;
+    let mut cached = claim
+        .handle
+        .clone()
+        .try_lock_owned()
+        .map_err(|_| AppError::Busy)?;
     let window = documents::read(
         &mut cached,
         source,

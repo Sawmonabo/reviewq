@@ -96,6 +96,9 @@ pub enum AppError {
     Unauthorized,
     Forbidden,
     NotFound,
+    /// A session's transcript is not found because the host's session folder holds more
+    /// entries than ReviewQ searches. Repeating the call finds no more, so it is not retryable.
+    SessionFolderTooLarge,
     Conflict,
     StaleRevision,
     IdempotencyConflict,
@@ -119,6 +122,9 @@ impl Display for AppError {
             Self::Unauthorized => "authentication required",
             Self::Forbidden => "forbidden",
             Self::NotFound => "resource not found",
+            Self::SessionFolderTooLarge => {
+                "ReviewQ could not find this session's transcript: the host's session folder holds more entries than ReviewQ searches. Move older sessions out of that folder, then try again."
+            }
             Self::Conflict => "resource conflict",
             Self::StaleRevision => "source revision changed",
             Self::IdempotencyConflict => "submission ID already used for different input",

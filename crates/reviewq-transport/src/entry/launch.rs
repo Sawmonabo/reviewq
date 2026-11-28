@@ -167,11 +167,7 @@ pub(super) async fn execute(
         return Err(AppError::Forbidden);
     }
     let host = entry.launchers.select(provider)?;
-    let slot = entry
-        .launch_slots
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| AppError::Busy)?;
+    let slot = reviewq_app::wait::owned(entry.launch_slots.clone()).await?;
     let prepared = load(entry, actor.clone(), review.clone(), provider).await?;
     let input = prepared.value.select(selection)?;
     if expected_revision.is_some_and(|revision| revision != input.settings)
