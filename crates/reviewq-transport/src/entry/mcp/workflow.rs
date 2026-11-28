@@ -4,9 +4,7 @@ use reviewq_app::followups::{
     OriginalMonitorRequest,
 };
 use reviewq_domain::identity::{ReviewId, Revision, RunId, SessionKey, SubmissionId};
-use reviewq_protocol::mcp::{
-    AnswerReviewQuestion, ConfigureFollowups, FollowupAction, StartReview,
-};
+use reviewq_protocol::mcp::{AnswerAgentQuestion, FollowupAction, SetThreadFollowups, StartReview};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -76,7 +74,7 @@ fn launch_output(
 pub(super) async fn followups(
     entry: &Entry,
     actor: Actor,
-    args: ConfigureFollowups,
+    args: SetThreadFollowups,
 ) -> Result<Value, AppError> {
     let submission: SubmissionId = parse(args.submission_id.as_str())?;
     let canonical = serde_json::to_vec(&args).map_err(|_| AppError::Internal)?;
@@ -200,7 +198,7 @@ fn followup_output(entry: &Entry, receipt: MonitorReceipt) -> Result<Value, AppE
 pub(super) async fn answer(
     entry: &Entry,
     actor: Actor,
-    args: AnswerReviewQuestion,
+    args: AnswerAgentQuestion,
 ) -> Result<Value, AppError> {
     let (review, target_session) = match resolve(entry, &actor, &args.target).await? {
         ResolvedReview::Review(id, session) => (id, session),

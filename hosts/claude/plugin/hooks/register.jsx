@@ -1,6 +1,6 @@
 import { invoke } from "./bridge.js";
 import { deliver, finishTurn, observeFirstStep, observeInput, observeTurn, reviewqOrigin } from "./delivery.js";
-import { refusal, registerWorkflowTools, reportTurn, stageAction } from "./workflow.js";
+import { actionToolId, refusal, registerWorkflowTools, reportTurn, stageAction } from "./workflow.js";
 import { callLedger, ledgerToolIds, registerLedgerTools } from "./ledger.js";
 import { reconcileChildren } from "./children.js";
 import { currentSettings } from "./settings.js";
@@ -297,7 +297,7 @@ export function register(on) {
     return result;
   });
 
-  on("tool.call", { tool: "mcp__reviewq__review_action" }, async ($, event) => {
+  on("tool.call", { tool: actionToolId }, async ($, event) => {
     const state = event.agentId ? undefined : await workflowLead($);
     if (!state?.linked || !(await readTurn($, state)).activeTurn) {
       return refusal("A ReviewQ action requires the linked lead and current user turn.");

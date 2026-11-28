@@ -19,9 +19,9 @@ use crate::reports::{
     ReportSummary, RevisionEvidence, Verdict,
 };
 
-/// `finish_review`'s input.
+/// `submit_review`'s input.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FinishReview {
+pub struct SubmitReview {
     pub verdict: Option<Verdict>,
     pub revision: Option<RevisionEvidence>,
     pub full_review: bool,
@@ -31,7 +31,7 @@ pub struct FinishReview {
 
 /// The acknowledgement of a closing call.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FinishReceipt {
+pub struct SubmitReceipt {
     /// The version published, or the current one for an `unchanged` batch result.
     pub receipt: ReceiptId,
     /// That version's SHA-256.
@@ -53,10 +53,10 @@ pub struct ClosingSummary {
     pub by_subagents: Vec<FindingId>,
 }
 
-/// What `finish_review` reads before composing.
+/// What `submit_review` reads before composing.
 pub enum ClosingRead {
     /// The same call was already answered. Return its acknowledgement unchanged.
-    Replayed(FinishReceipt),
+    Replayed(SubmitReceipt),
     Current(Box<ClosingSnapshot>),
     /// The lead may not close the run now. Record `closing_refused`, then refuse the call
     /// with one root field error worded for the agent.
@@ -88,7 +88,7 @@ pub struct ClosingSnapshot {
 /// A committed closing call, which a repeat with nothing changed answers again.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LastClosing {
-    pub ack: FinishReceipt,
+    pub ack: SubmitReceipt,
     /// The run's ledger sequence it committed at. An unchanged sequence means no record
     /// changed since.
     pub sequence: Revision,
@@ -202,7 +202,7 @@ pub struct PublishCommit {
 
 #[derive(Debug)]
 pub enum CommitKind {
-    /// `finish_review`.
+    /// `submit_review`.
     Closing(Box<ClosingCommit>),
     /// An update owed with no pass open. It completes no batch.
     Update(Box<NewVersion>),

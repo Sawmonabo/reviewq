@@ -21,9 +21,9 @@ mod version;
 pub use links::{MAX_TICKET_LINKS, ReportLinks};
 pub use version::{
     CardSpan, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind, Composed,
-    CoverFacts, FinishReceipt, FinishReview, LastClosing, LedgerSnapshot, NewVersion,
-    ParentFinding, ParentVersion, PublishCommit, PublishOutcome, RefusedClosing, SectionSpan,
-    SnapshotFinding, SnapshotGuard, Span, VersionFacts,
+    CoverFacts, LastClosing, LedgerSnapshot, NewVersion, ParentFinding, ParentVersion,
+    PublishCommit, PublishOutcome, RefusedClosing, SectionSpan, SnapshotFinding, SnapshotGuard,
+    Span, SubmitReceipt, SubmitReview, VersionFacts,
 };
 
 use reviewq_domain::identity::{
@@ -38,14 +38,14 @@ use reviewq_domain::session::{HostProvider, LeadTarget};
 use crate::access::{Actor, AppFuture};
 use crate::labels::labels;
 use crate::reports::{
-    FindingBasis, FindingConclusion, FindingDetails, FindingLocation, FindingSection, Severity,
+    FindingBasis, FindingConclusion, FindingDetails, FindingKind, FindingLocation, Severity,
 };
 
 /// Active findings one run may hold. The store refuses a write that would exceed it.
 pub const MAX_ACTIVE_FINDINGS: u32 = 200;
 /// `extra` notes one run may hold. The store refuses a write that would exceed it.
 pub const MAX_EXTRA_NOTES: u32 = 12;
-/// Budget of one `review_ledger` page: the sum of the UTF-8 bytes of the text fields of the
+/// Budget of one `read_draft` page: the sum of the UTF-8 bytes of the text fields of the
 /// records on it. A page holds whole records within the budget, and always at least one: a
 /// record whose fields are all at their limits can exceed the budget alone, and then fills a
 /// page by itself.
@@ -68,7 +68,7 @@ labels!(RecordField {
     Title => "title",
     Severity => "severity",
     Blocking => "blocking",
-    Section => "section",
+    Kind => "kind",
     Category => "category",
     Locations => "locations",
     Issue => "issue",
@@ -83,11 +83,11 @@ labels!(RecordField {
     Body => "body",
 });
 
-/// The category a finding shows when it names none: its section's name.
-pub fn default_category(section: FindingSection) -> &'static str {
-    match section {
-        FindingSection::Functional => "Functional",
-        FindingSection::Quality => "Quality",
+/// The category a finding shows when it names none: its kind's name.
+pub fn default_category(kind: FindingKind) -> &'static str {
+    match kind {
+        FindingKind::Functional => "Functional",
+        FindingKind::Quality => "Quality",
     }
 }
 
@@ -246,7 +246,7 @@ pub struct FindingFields {
     pub title: String,
     pub severity: Severity,
     pub blocking: bool,
-    pub section: FindingSection,
+    pub kind: FindingKind,
     /// `None` shows [`default_category`].
     pub category: Option<String>,
     /// Locations, issue, consequence, evidence, proposed comment and details.
@@ -266,7 +266,7 @@ pub struct FindingPatch {
     pub title: Option<String>,
     pub severity: Option<Severity>,
     pub blocking: Option<bool>,
-    pub section: Option<FindingSection>,
+    pub kind: Option<FindingKind>,
     pub category: Option<String>,
     pub locations: Option<Vec<FindingLocation>>,
     pub issue: Option<String>,
@@ -296,7 +296,7 @@ impl FindingFields {
     }
 }
 
-/// What became of a finding, as `assess_finding` recorded it. A retiring conclusion
+/// What became of a finding, as `set_finding_outcome` recorded it. A retiring conclusion
 /// (`FindingConclusion::retires_finding`) removes the finding from the active set.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FindingOutcome {
@@ -371,7 +371,7 @@ pub struct NoteRecord {
     pub body: String,
 }
 
-/// One record write: `record_finding`, `assess_finding` or `record_note`.
+/// One record write: `save_finding`, `set_finding_outcome` or `save_section`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RecordWrite {
     /// A new finding. The store assigns the next unused ID, or returns an equal active
@@ -383,7 +383,7 @@ pub enum RecordWrite {
         expected_revision: RecordRevision,
         patch: Box<FindingPatch>,
     },
-    AssessFinding(FindingAssessment),
+    SetFindingOutcome(FindingAssessment),
     WriteNote(NoteWrite),
 }
 
@@ -391,14 +391,14 @@ impl RecordWrite {
     /// The tool that makes this write.
     pub fn tool(&self) -> Tool {
         match self {
-            Self::CreateFinding(_) | Self::ChangeFinding { .. } => Tool::RecordFinding,
-            Self::AssessFinding(_) => Tool::AssessFinding,
-            Self::WriteNote(_) => Tool::RecordNote,
+            Self::CreateFinding(_) | Self::ChangeFinding { .. } => Tool::SaveFinding,
+            Self::SetFindingOutcome(_) => Tool::SetFindingOutcome,
+            Self::WriteNote(_) => Tool::SaveSection,
         }
     }
 }
 
-/// `assess_finding`: records what became of a finding already on the run.
+/// `set_finding_outcome`: records what became of a finding already on the run.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FindingAssessment {
     pub id: FindingId,
@@ -406,7 +406,7 @@ pub struct FindingAssessment {
     pub outcome: FindingOutcome,
 }
 
-/// `record_note`: replaces one note. An empty body removes it. A removed note keeps its
+/// `save_section`: replaces one note. An empty body removes it. A removed note keeps its
 /// revision count, so filing it again continues from there.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NoteWrite {
@@ -467,7 +467,7 @@ pub enum WriteRefusal {
     TooManyExtraNotes,
 }
 
-/// `review_ledger`: one page of the run's ledger.
+/// `read_draft`: one page of the run's ledger.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LedgerRead {
     pub selection: LedgerSelection,
@@ -548,7 +548,7 @@ pub struct OpenPass {
     pub state: PassState,
     /// The frozen batch of a selected-thread pass.
     pub batch: Option<FrozenBatch>,
-    /// The question the last `needs_input` asked: the one a waiting pass waits on, or, once
+    /// The question the last `wait_for_user` asked: the one a waiting pass waits on, or, once
     /// the lead's next turn reopened the pass, the one it asked before. `None` when the pass
     /// was never held.
     pub question: Option<String>,
@@ -566,7 +566,7 @@ pub struct FrozenBatch {
     pub discussion_ids: Vec<String>,
 }
 
-/// `needs_input`: the pass it held.
+/// `wait_for_user`: the pass it paused.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HoldReceipt {
     pub pass: PassKind,
@@ -662,11 +662,14 @@ pub trait LedgerStore: Send + Sync {
     /// `CursorExpired` when the ledger sequence moved since `after` was issued.
     fn read_ledger(&self, session: HostSession, read: LedgerRead) -> AppFuture<'_, LedgerPage>;
 
-    /// Holds the run's open pass for `needs_input` until the lead's next turn starts, and
+    /// Holds the run's open pass for `wait_for_user` until the lead's next turn starts, and
     /// returns `None` with no pass open. `Forbidden` for a child. A known call returns its
     /// stored result. Completes no assessment.
-    fn hold_pass(&self, binding: CallBinding, reason: String)
-    -> AppFuture<'_, Option<HoldReceipt>>;
+    fn hold_pass(
+        &self,
+        binding: CallBinding,
+        question: String,
+    ) -> AppFuture<'_, Option<HoldReceipt>>;
 
     /// Answers one stop request: applies `gate` to the stored facts and stores the decision's
     /// block count for the turn on the pass. The session is the lead when it is a run's lead
@@ -675,7 +678,7 @@ pub trait LedgerStore: Send + Sync {
     /// session, so a released request writes nothing once that is stored.
     fn answer_gate(&self, request: GateRequest) -> AppFuture<'_, GateAnswer>;
 
-    /// Reads what `finish_review` composes from. A known call returns `Replayed`. A call from
+    /// Reads what `submit_review` composes from. A known call returns `Replayed`. A call from
     /// a run's lead returns `Current`, or `Refused` when the run's workspace, grant or
     /// settings authority or its follow-up binding changed; the caller then records
     /// `closing_refused` and refuses the call. A call from a child is `Forbidden`, and so is one attributed to no

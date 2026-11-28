@@ -244,7 +244,7 @@ fn link_response(
     let response = Success {
         data: Linked {
             selection: selection(&registered.value)?,
-            rule: RULE,
+            rule: RULE.as_str(),
             hooks_notice,
         },
         cursor: EventCursorDto::new(registered.cursor.get()).ok_or(AppError::Internal)?,

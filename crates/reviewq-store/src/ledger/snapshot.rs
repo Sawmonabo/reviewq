@@ -15,7 +15,7 @@ use reviewq_domain::ledger::{CallerRole, FindingId, Tool};
 use reviewq_domain::session::LeadTarget;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::calls::{self, finish_from};
+use super::calls::{self, submit_from};
 use super::passes::{self, PassRow, RUN_TARGET};
 use super::rows::{self, FINDING_COLUMNS, FINDING_WIDTH, NOTE_COLUMNS, section_order};
 use super::{caller, sequence};
@@ -24,15 +24,15 @@ use crate::events::now_ms;
 use crate::queue::{identity_for_review, lead_for_run, parse, text};
 use crate::reports::authority::for_project;
 
-/// `finish_review`'s read: a replay, the snapshot of a call from the run's lead, or a refusal
+/// `submit_review`'s read: a replay, the snapshot of a call from the run's lead, or a refusal
 /// the caller records.
 pub(super) fn closing(db: &Connection, binding: &CallBinding) -> Result<ClosingRead, StoreError> {
     let caller = caller::resolve(db, binding)?;
     if caller.role() != CallerRole::Lead {
         return Err(AppError::Forbidden.into());
     }
-    if let Some((stored, _)) = calls::replay(db, &caller, Tool::FinishReview, RUN_TARGET)? {
-        return Ok(ClosingRead::Replayed(finish_from(&stored)?.0));
+    if let Some((stored, _)) = calls::replay(db, &caller, Tool::SubmitReview, RUN_TARGET)? {
+        return Ok(ClosingRead::Replayed(submit_from(&stored)?.0));
     }
     let Some(snapshot) = read(db, caller.lead.clone())? else {
         return Ok(ClosingRead::Refused(refused(
@@ -65,7 +65,7 @@ pub(super) fn closing(db: &Connection, binding: &CallBinding) -> Result<ClosingR
     }
     let last_closing = calls::last_closing(db, caller.lead.run_id().as_str())?
         .map(|(result, sequence, _)| {
-            let (ack, assessments) = finish_from(&rows::from_json(&result)?)?;
+            let (ack, assessments) = submit_from(&rows::from_json(&result)?)?;
             Ok::<_, StoreError>(LastClosing {
                 ack,
                 sequence: Revision::try_from(sequence).map_err(|_| AppError::Internal)?,
@@ -253,7 +253,7 @@ fn thread_notes(
 struct Touched {
     /// A finding whose change sequence is above this was changed or assessed since.
     after_sequence: i64,
-    /// An accepted `record_finding` or `assess_finding` call with an ordinal above this also
+    /// An accepted `save_finding` or `set_finding_outcome` call with an ordinal above this also
     /// touched its finding, even when it equalled the stored record and so advanced nothing.
     after_call: i64,
 }
@@ -321,7 +321,7 @@ fn findings(
     let called: HashSet<i64> = db
         .prepare_cached(
             "SELECT json_extract(result, '$.id') FROM ledger_calls
-             WHERE run_id=?1 AND tool IN ('record_finding','assess_finding') AND ordinal>?2",
+             WHERE run_id=?1 AND tool IN ('save_finding','set_finding_outcome') AND ordinal>?2",
         )?
         .query_map(params![run, touched.after_call], |row| row.get(0))?
         .collect::<Result<_, _>>()?;

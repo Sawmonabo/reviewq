@@ -22,7 +22,7 @@ CREATE TABLE ledger_changes (
     changed_at_ms INTEGER NOT NULL,
     severity TEXT CHECK (severity IN ('P0', 'P1', 'P2', 'P3')),
     blocking INTEGER CHECK (blocking IN (0, 1)),
-    section TEXT CHECK (section IN ('functional', 'quality')),
+    kind TEXT CHECK (kind IN ('functional', 'quality')),
     title TEXT CHECK (length(title) BETWEEN 1 AND 200),
     category TEXT CHECK (length(category) BETWEEN 1 AND 48),
     evidence_kind TEXT CHECK (evidence_kind IN ('observed', 'gap')),
@@ -42,7 +42,7 @@ CREATE TABLE ledger_changes (
     CHECK ((finding IS NULL) <> (note_section IS NULL)),
     CHECK (note_section IS NULL OR (note_title IS NOT NULL AND body IS NOT NULL
         AND (note_section = 'extra') = (note_title <> ''))),
-    CHECK (finding IS NULL OR (severity IS NOT NULL AND blocking IS NOT NULL AND section IS NOT NULL
+    CHECK (finding IS NULL OR (severity IS NOT NULL AND blocking IS NOT NULL AND kind IS NOT NULL
         AND title IS NOT NULL AND evidence_kind IS NOT NULL AND locations IS NOT NULL
         AND issue IS NOT NULL AND consequence IS NOT NULL AND evidence IS NOT NULL AND body IS NULL)),
     CHECK ((conclusion IS NULL) = (outcome_reason IS NULL)
@@ -132,8 +132,8 @@ CREATE TABLE ledger_calls (
     native_session TEXT NOT NULL CHECK (length(CAST(native_session AS BLOB)) BETWEEN 1 AND 512),
     call_id TEXT NOT NULL CHECK (length(CAST(call_id AS BLOB)) BETWEEN 1 AND 512),
     run_id TEXT NOT NULL REFERENCES runs(run_id),
-    tool TEXT NOT NULL CHECK (tool IN ('record_finding', 'assess_finding', 'record_note',
-        'finish_review', 'needs_input')),
+    tool TEXT NOT NULL CHECK (tool IN ('save_finding', 'set_finding_outcome', 'save_section',
+        'submit_review', 'wait_for_user')),
     target TEXT NOT NULL CHECK (length(CAST(target AS BLOB)) BETWEEN 1 AND 512),
     native_turn_id TEXT CHECK (length(CAST(native_turn_id AS BLOB)) BETWEEN 1 AND 512),
     sequence INTEGER NOT NULL CHECK (sequence >= 0),
@@ -143,7 +143,7 @@ CREATE TABLE ledger_calls (
     PRIMARY KEY (provider, native_session, call_id)
 ) STRICT;
 
-CREATE INDEX ledger_call_closing ON ledger_calls(run_id, native_turn_id) WHERE tool = 'finish_review';
+CREATE INDEX ledger_call_closing ON ledger_calls(run_id, native_turn_id) WHERE tool = 'submit_review';
 CREATE UNIQUE INDEX ledger_call_order ON ledger_calls(run_id, ordinal);
 
 -- One row once Codex's stop hook has reported on this installation.

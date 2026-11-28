@@ -1,5 +1,5 @@
 //! Review passes: opened inside the launch confirmation, the batch delivery and the first
-//! record write, held by `needs_input`, reopened by the lead's next turn, ended by a
+//! record write, held by `wait_for_user`, reopened by the lead's next turn, ended by a
 //! successor batch or archiving. Also the stop gate, the read-back and the Codex stop hook's
 //! report.
 
@@ -64,7 +64,7 @@ pub(super) struct PassRow {
     pub(super) batch: Option<String>,
     gate_turn: Option<String>,
     gate_blocks: u8,
-    /// The question the last `needs_input` stored: the one a waiting pass waits on, or, once
+    /// The question the last `wait_for_user` stored: the one a waiting pass waits on, or, once
     /// the lead's next turn reopened the pass, the one it asked before.
     question: Option<String>,
 }
@@ -314,22 +314,22 @@ pub(super) fn release_batch(db: &Connection, row: &PassRow) -> Result<(), StoreE
     Ok(())
 }
 
-/// `needs_input`: holds the open pass until the lead's next turn and raises the question once
+/// `wait_for_user`: holds the open pass until the lead's next turn and raises the question once
 /// per hold. The call proves its turn is running, so the lead is stored as working unless it
 /// already is or is blocked; the host's later sight of the same turn is then no change and
 /// cannot reopen the hold. A repeat while the pass still waits keeps the hold and updates its
-/// reason.
+/// question.
 pub(super) fn hold(
     tx: &mut WriteTx<'_>,
     binding: &CallBinding,
-    reason: &str,
+    question: &str,
 ) -> Result<Option<HoldReceipt>, StoreError> {
     let db = &tx.sql;
     let caller = caller::resolve(db, binding)?;
-    if !may_call(Tool::NeedsInput, caller.role()) {
+    if !may_call(Tool::WaitForUser, caller.role()) {
         return Err(AppError::Forbidden.into());
     }
-    if let Some((stored, _)) = calls::replay(db, &caller, Tool::NeedsInput, RUN_TARGET)? {
+    if let Some((stored, _)) = calls::replay(db, &caller, Tool::WaitForUser, RUN_TARGET)? {
         return calls::hold_from(&stored);
     }
     let lead = &caller.lead;
@@ -353,7 +353,7 @@ pub(super) fn hold(
                         row.id.get(),
                         caller.turn.as_ref().map(|turn| turn.as_str()),
                         time,
-                        reason
+                        question
                     ],
                     |row| row.get(0),
                 )?;
@@ -363,7 +363,7 @@ pub(super) fn hold(
                     pass: row.kind,
                     unpublished: unpublished(db, run)?,
                 },
-                format!("needs_input:{}:{held_at}", row.id.get()),
+                format!("{}:{}:{held_at}", Tool::WaitForUser.as_str(), row.id.get()),
             ))
         }
     };
@@ -372,7 +372,7 @@ pub(super) fn hold(
     calls::store(
         db,
         &caller,
-        Tool::NeedsInput,
+        Tool::WaitForUser,
         RUN_TARGET,
         sequence(db, run)?,
         &result,
@@ -451,7 +451,7 @@ fn lead_working(db: &Connection, run: &str) -> Result<bool, StoreError> {
     }
 }
 
-/// The target `needs_input` and `finish_review` store: the run, since neither names a record.
+/// The target `wait_for_user` and `submit_review` store: the run, since neither names a record.
 pub(super) const RUN_TARGET: &str = "run";
 
 /// The release of a stop request that needs no write: one from a session that is not a run's

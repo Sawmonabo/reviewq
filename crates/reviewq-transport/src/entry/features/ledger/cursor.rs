@@ -1,4 +1,4 @@
-//! The `review_ledger` cursor: the app's `LedgerCursor` signed with the service's cursor key,
+//! The `read_draft` cursor: the app's `LedgerCursor` signed with the service's cursor key,
 //! so an agent passes back only a cursor ReviewQ issued. The store checks that it belongs to
 //! the run and selection it continues.
 
@@ -6,6 +6,7 @@ use reviewq_app::access::{AppError, FieldError};
 use reviewq_app::ledger::{LedgerCursor, LedgerSelection};
 use reviewq_domain::identity::Revision;
 use reviewq_protocol::PageCursorDto;
+use reviewq_protocol::ledger::LedgerTool;
 use serde::{Deserialize, Serialize};
 
 use crate::entry::ServiceEndpoint;
@@ -62,7 +63,10 @@ pub(super) fn decode(
     let refused = || {
         AppError::InvalidFields(vec![FieldError::new(
             "/cursor",
-            "This is not a cursor review_ledger returned. Read again without cursor to start from the first page.",
+            format!(
+                "This is not a cursor {} returned. Read again without cursor to start from the first page.",
+                LedgerTool::ReadDraft.name()
+            ),
         )])
     };
     let position: Position = endpoint

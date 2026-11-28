@@ -3,8 +3,9 @@
 //! finding with its title quoted as data, newest change first, within 8,000 bytes.
 
 use std::fmt::Write as _;
+use std::sync::LazyLock;
 
-use reviewq_domain::ledger::{PassKind, PassState};
+use reviewq_domain::ledger::{PassKind, PassState, Tool};
 
 use super::passes::owed;
 use super::{FindingLine, HookSession, LedgerStore, OpenPass, ReadBack};
@@ -13,21 +14,31 @@ use crate::access::AppError;
 /// The standing rule. The launch input and the selected-thread prompt end with it, the
 /// terminal link returns it and the read-back starts with it, so it reads correctly on its
 /// own and refers to nothing around it.
-pub const RULE: &str = concat!(
-    "ReviewQ shows the reviewer only what is filed through its tools, so a finding that appears ",
-    "only in a reply or a report file never reaches them. ",
-    "File each finding with record_finding as soon as you have confirmed it rather than at the ",
-    "end, and record what became of a finding from an earlier review with assess_finding. ",
-    "Put the review's context in notes with record_note. A first or full review cannot close ",
-    "until its summary, rationale, flow, changes and verification notes are on file; the flow ",
-    "note holds a Mermaid diagram and the changes note a table. ",
-    "To check what is already on file, read it back with review_ledger instead of relying on ",
-    "memory. ",
-    "Subagents can file findings and notes as well, but only you close the review: with ",
-    "finish_review once it is complete, or with needs_input when it must wait for the ",
-    "reviewer's answer. ",
-    "Filing posts nothing to GitLab.",
-);
+pub static RULE: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        concat!(
+            "ReviewQ shows the user only what is saved through its tools, so a finding that ",
+            "appears only in a reply or a report file never reaches them. ",
+            "Save each finding with {save_finding} as soon as you have confirmed it rather than at ",
+            "the end, and set what became of a finding from an earlier review with {outcome}. ",
+            "Write the report's sections with {save_section}. A first or full review cannot be ",
+            "submitted until its summary, rationale, flow, changes and verification sections are ",
+            "saved; the flow section holds a Mermaid diagram and the changes section a table. ",
+            "To check what is already saved, read it back with {read_draft} instead of relying on ",
+            "memory. ",
+            "Subagents can save findings and sections as well, but only you close the review: ",
+            "with {submit_review} once it is complete, or with {wait_for_user} when it must wait ",
+            "for the user's reply. ",
+            "Saving posts nothing to GitLab.",
+        ),
+        save_finding = Tool::SaveFinding.as_str(),
+        outcome = Tool::SetFindingOutcome.as_str(),
+        save_section = Tool::SaveSection.as_str(),
+        read_draft = Tool::ReadDraft.as_str(),
+        submit_review = Tool::SubmitReview.as_str(),
+        wait_for_user = Tool::WaitForUser.as_str(),
+    )
+});
 
 /// Longest read-back, in bytes of UTF-8, the one bound every part of it is measured against.
 /// Both hosts put a hook's text in front of the model whole up to 10,000, Claude Code counting
@@ -43,7 +54,7 @@ pub(crate) fn append_rule(text: &mut String) {
     if !text.is_empty() {
         text.push_str("\n\n");
     }
-    text.push_str(RULE);
+    text.push_str(&RULE);
 }
 
 /// The read-back for a compacted lead session: the rule, what the open pass owes (with the
@@ -54,7 +65,7 @@ pub(crate) fn append_rule(text: &mut String) {
 /// the pass always fit, in under 6,000 bytes even when each character of the question takes
 /// four and the pass names ten discussions. Finding lines are kept whole, newest first, and
 /// when they do not all fit, the last line says how many were left out and to read them with
-/// `review_ledger`. `None` unless `session` is a run's lead session, so the hook shows
+/// `read_draft`. `None` unless `session` is a run's lead session, so the hook shows
 /// nothing.
 pub async fn read_back(
     store: &(impl LedgerStore + ?Sized),
@@ -75,7 +86,7 @@ fn text(ledger: &ReadBack) -> String {
     };
     let reserve = left_out_line(total).len();
     let mut out = Budget::default();
-    out.push(RULE);
+    out.push(&RULE);
     out.push("\n\n");
     pass_lines(
         &mut out,
@@ -105,7 +116,7 @@ fn pass_lines(out: &mut Budget, pass: Option<&OpenPass>, room: usize) {
         return;
     };
     out.push(match pass.state {
-        PassState::Waiting => "This review is waiting on the reviewer's answer. ",
+        PassState::Waiting => "This review is waiting on the user's reply. ",
         PassState::Open | PassState::Closed => "This review is still open. ",
     });
     out.push(&owed(pass));
@@ -165,7 +176,10 @@ pub(super) fn push_quoted(text: &mut String, value: &str, max_chars: usize) {
 /// The last line when `count` findings did not fit.
 fn left_out_line(count: usize) -> String {
     let findings = if count == 1 { "finding" } else { "findings" };
-    format!("\n- {count} more {findings} left out here; read them with review_ledger.")
+    format!(
+        "\n- {count} more {findings} left out here; read them with {}.",
+        Tool::ReadDraft.as_str()
+    )
 }
 
 /// Text measured in bytes of UTF-8.

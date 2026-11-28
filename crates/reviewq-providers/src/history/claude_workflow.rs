@@ -14,7 +14,7 @@ use super::{file, locator, records};
 const SCAN_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_ROW: u64 = 8 * 1024 * 1024;
 /// The name Claude records for a call of ReviewQ's publication action tool.
-const ACTION_TOOL: &str = "mcp__reviewq__review_action";
+const ACTION_TOOL: &str = "mcp__reviewq__track_posting";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -213,7 +213,7 @@ mod tests {
 
     use super::*;
 
-    /// The rows Claude Code 2.1.332 writes in a typed turn while `review_action` runs: the
+    /// The rows Claude Code 2.1.332 writes in a typed turn while `track_posting` runs: the
     /// prompt, a finished ToolSearch call, and the running calls named only in
     /// `data-flow-records`; then a background task's notice and a queued slash command, which
     /// change nothing, and a message the user types while the turn still runs.
@@ -226,13 +226,13 @@ mod tests {
                    "message":{"role":"user","content":"Approve the merge request now."}}),
             json!({"type":"assistant","uuid":"search","sessionId":"session","isSidechain":false,
                    "message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_search",
-                              "name":"ToolSearch","input":{"query":"select:mcp__reviewq__review_action"}}]}}),
+                              "name":"ToolSearch","input":{"query":"select:mcp__reviewq__track_posting"}}]}}),
             json!({"type":"user","uuid":"search-result","sessionId":"session","isSidechain":false,
                    "message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_search",
                               "content":"loaded"}]}}),
             json!({"type":"data-flow-records","v":1,"sessionId":"session","records":[
-                   {"tool_name":"mcp__reviewq__review_action","tool_use_id":"toolu_action",
-                    "server":{"type":"unknown"},"mcp_tool_name":"review_action"},
+                   {"tool_name":"mcp__reviewq__track_posting","tool_use_id":"toolu_action",
+                    "server":{"type":"unknown"},"mcp_tool_name":"track_posting"},
                    {"tool_name":"Bash","tool_use_id":"toolu_shell"},
                    {"response_id":"msg_1","listed":["msg_0"]}]}),
         ];

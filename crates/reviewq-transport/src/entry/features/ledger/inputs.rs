@@ -6,12 +6,12 @@ use reviewq_app::access::AppError;
 use reviewq_app::followups::NextAction;
 use reviewq_app::ledger::record::FindingInput;
 use reviewq_app::ledger::{
-    FindingAssessment, FindingFields, FindingOutcome, FindingPatch, FinishReview, LedgerRead,
-    LedgerSelection, NoteKey, NoteSection, NoteWrite,
+    FindingAssessment, FindingFields, FindingOutcome, FindingPatch, LedgerRead, LedgerSelection,
+    NoteKey, NoteSection, NoteWrite, SubmitReview,
 };
 use reviewq_app::reports::{
-    Assessment, FindingBasis, FindingBasisKind, FindingConclusion, FindingDetails, FindingLocation,
-    FindingSection, RevisionEvidence, Severity, Verdict,
+    Assessment, FindingBasis, FindingBasisKind, FindingConclusion, FindingDetails, FindingKind,
+    FindingLocation, RevisionEvidence, Severity, Verdict,
 };
 use reviewq_domain::ledger::RecordRevision;
 use reviewq_protocol::followups as followup_dto;
@@ -22,16 +22,16 @@ use super::cursor;
 use crate::entry::ServiceEndpoint;
 use crate::entry::pages::parse;
 
-/// `record_finding`: a new finding without `id`, otherwise a patch of the fields given. An
+/// `save_finding`: a new finding without `id`, otherwise a patch of the fields given. An
 /// empty `proposedComment` or `details` removes the field and `locations: []` clears the
 /// locations; a new finding stores neither empty text.
-pub(super) fn finding(input: dto::RecordFinding) -> Result<FindingInput, AppError> {
+pub(super) fn finding(input: dto::SaveFinding) -> Result<FindingInput, AppError> {
     let Some(id) = input.id else {
         let fields = FindingFields {
             title: given(input.title)?,
             severity: severity(given(input.severity)?),
             blocking: given(input.blocking)?,
-            section: section(given(input.section)?),
+            kind: kind(given(input.kind)?),
             category: input.category,
             body: FindingDetails {
                 locations: input
@@ -56,7 +56,7 @@ pub(super) fn finding(input: dto::RecordFinding) -> Result<FindingInput, AppErro
             title: input.title,
             severity: input.severity.map(severity),
             blocking: input.blocking,
-            section: input.section.map(section),
+            kind: input.kind.map(kind),
             category: input.category,
             locations: input
                 .locations
@@ -70,8 +70,8 @@ pub(super) fn finding(input: dto::RecordFinding) -> Result<FindingInput, AppErro
     })
 }
 
-/// `assess_finding`.
-pub(super) fn assessment(input: dto::AssessFinding) -> Result<FindingAssessment, AppError> {
+/// `set_finding_outcome`.
+pub(super) fn assessment(input: dto::SetFindingOutcome) -> Result<FindingAssessment, AppError> {
     Ok(FindingAssessment {
         id: parse(input.id.as_str())?,
         expected_revision: revision(input.expected_revision)?,
@@ -91,8 +91,8 @@ pub(super) fn assessment(input: dto::AssessFinding) -> Result<FindingAssessment,
     })
 }
 
-/// `record_note`: an `extra` note by its title, any other section by its name.
-pub(super) fn note(input: dto::RecordNote) -> Result<NoteWrite, AppError> {
+/// `save_section`: an `extra` note by its title, any other section by its name.
+pub(super) fn note(input: dto::SaveSection) -> Result<NoteWrite, AppError> {
     let key = match note_section(input.section) {
         NoteSection::Extra => NoteKey::extra(given(input.title)?),
         section => NoteKey::fixed(section).ok_or(AppError::InvalidRequest)?,
@@ -104,11 +104,11 @@ pub(super) fn note(input: dto::RecordNote) -> Result<NoteWrite, AppError> {
     })
 }
 
-/// `review_ledger`: the findings named by `ids`, the notes named by `sections`, or the short
+/// `read_draft`: the findings named by `ids`, the notes named by `sections`, or the short
 /// list when neither is given, continued after `cursor`.
 pub(super) fn read(
     endpoint: &ServiceEndpoint,
-    input: dto::ReviewLedger,
+    input: dto::ReadDraft,
 ) -> Result<LedgerRead, AppError> {
     let selection = if !input.ids.is_empty() {
         LedgerSelection::Findings(
@@ -132,9 +132,9 @@ pub(super) fn read(
     })
 }
 
-/// `finish_review`.
-pub(super) fn finish(input: dto::FinishReview) -> Result<FinishReview, AppError> {
-    Ok(FinishReview {
+/// `submit_review`.
+pub(super) fn submit(input: dto::SubmitReview) -> Result<SubmitReview, AppError> {
+    Ok(SubmitReview {
         verdict: input.verdict.map(verdict),
         revision: input.revision.map(reviewed_revision).transpose()?,
         full_review: input.full_review,
@@ -207,10 +207,10 @@ fn severity(value: report_dto::Severity) -> Severity {
     }
 }
 
-fn section(value: report_dto::FindingSection) -> FindingSection {
+fn kind(value: report_dto::FindingKind) -> FindingKind {
     match value {
-        report_dto::FindingSection::Functional => FindingSection::Functional,
-        report_dto::FindingSection::Quality => FindingSection::Quality,
+        report_dto::FindingKind::Functional => FindingKind::Functional,
+        report_dto::FindingKind::Quality => FindingKind::Quality,
     }
 }
 

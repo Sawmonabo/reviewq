@@ -107,7 +107,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
             title: "Retry writes the same invoice twice".to_owned(),
             severity: Severity::P1,
             blocking: true,
-            section: FindingSection::Functional,
+            kind: FindingKind::Functional,
             category: None,
             body: FindingDetails {
                 locations: vec![location("src/invoices.rs", Some(74))],
@@ -147,7 +147,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
             title: "`retry_key` is rebuilt on every attempt".to_owned(),
             severity: Severity::P2,
             blocking: true,
-            section: FindingSection::Quality,
+            kind: FindingKind::Quality,
             category: Some("Reliability".to_owned()),
             body: FindingDetails {
                 locations: vec![
@@ -191,7 +191,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
             title: "Two retry paths build separate keys".to_owned(),
             severity: Severity::P1,
             blocking: true,
-            section: FindingSection::Functional,
+            kind: FindingKind::Functional,
             category: None,
             body: FindingDetails {
                 locations: vec![location("src/retry.rs", Some(30))],
@@ -221,7 +221,7 @@ fn worked_findings() -> Vec<SnapshotFinding> {
             title: "Retry delay is not configurable".to_owned(),
             severity: Severity::P3,
             blocking: false,
-            section: FindingSection::Quality,
+            kind: FindingKind::Quality,
             category: None,
             body: FindingDetails {
                 locations: Vec::new(),

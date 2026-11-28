@@ -73,7 +73,7 @@ labels!(Severity {
     P2 => "P2",
     P3 => "P3",
 });
-labels!(FindingSection {
+labels!(FindingKind {
     Functional => "functional",
     Quality => "quality",
 });

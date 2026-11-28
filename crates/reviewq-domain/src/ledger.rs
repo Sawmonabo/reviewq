@@ -140,7 +140,7 @@ labelled!(
     PassState {
         /// The lead owes a closing call at the end of each of its turns.
         Open => "open",
-        /// `needs_input` held the pass. It waits on the reviewer until the lead's next turn
+        /// `wait_for_user` paused the pass. It waits on the user until the lead's next turn
         /// starts, and is open again from then.
         Waiting => "waiting",
         /// Closed by a publish, or ended by a successor batch or by archiving the run.
@@ -178,9 +178,9 @@ labelled!(
 labelled!(
     /// A delivery failure, recorded once per run, pass and kind.
     FailureKind {
-        /// The lead's turn ended with an open pass that was not waiting on the reviewer.
+        /// The lead's turn ended with an open pass that was not waiting on the user.
         UnfinishedReview => "unfinished_review",
-        /// `finish_review` was refused because the run's lead, workspace, grant, settings
+        /// `submit_review` was refused because the run's lead, workspace, grant, settings
         /// authority or follow-up binding changed.
         ClosingRefused => "closing_refused",
         /// An update owed with no pass open could not be published.
@@ -189,14 +189,14 @@ labelled!(
 );
 
 labelled!(
-    /// The six ledger tools.
+    /// The six reviewing tools.
     Tool {
-        RecordFinding => "record_finding",
-        AssessFinding => "assess_finding",
-        RecordNote => "record_note",
-        ReviewLedger => "review_ledger",
-        FinishReview => "finish_review",
-        NeedsInput => "needs_input",
+        SaveFinding => "save_finding",
+        SetFindingOutcome => "set_finding_outcome",
+        SaveSection => "save_section",
+        ReadDraft => "read_draft",
+        SubmitReview => "submit_review",
+        WaitForUser => "wait_for_user",
     }
 );
 
@@ -221,16 +221,16 @@ impl PassKind {
     }
 }
 
-/// Whether `role` may call `tool`. Only the lead closes: `finish_review` and `needs_input`
+/// Whether `role` may call `tool`. Only the lead closes: `submit_review` and `wait_for_user`
 /// refuse a child.
 pub fn may_call(tool: Tool, role: CallerRole) -> bool {
     match role {
         CallerRole::Lead => true,
         CallerRole::Child => match tool {
-            Tool::RecordFinding | Tool::AssessFinding | Tool::RecordNote | Tool::ReviewLedger => {
+            Tool::SaveFinding | Tool::SetFindingOutcome | Tool::SaveSection | Tool::ReadDraft => {
                 true
             }
-            Tool::FinishReview | Tool::NeedsInput => false,
+            Tool::SubmitReview | Tool::WaitForUser => false,
         },
     }
 }
@@ -238,7 +238,7 @@ pub fn may_call(tool: Tool, role: CallerRole) -> bool {
 /// Whether filing or changing a record opens a full-review pass: only on a run with no
 /// published version and no pass that is not closed, because a first version needs a verdict
 /// and a reviewed revision. Starting a review opens a full-review pass and a delivered batch a
-/// selected-thread pass; a message the reviewer sends, report feedback and a publication action
+/// selected-thread pass; a message the user sends, report feedback and a publication action
 /// open nothing.
 pub fn record_opens_pass(has_version: bool, pass_open: bool) -> bool {
     !has_version && !pass_open
@@ -278,7 +278,7 @@ pub enum GateDecision {
 /// Blocks only a lead's stop while its pass is open and not waiting, no blocking question or
 /// permission is pending, and fewer than `MAX_GATE_BLOCKS` blocks were given in this stop
 /// sequence. A stop with `stop_hook_active` false starts a new sequence at 0. Never blocks a
-/// child, a turn that owes nothing, or a turn in which `needs_input` held the pass.
+/// child, a turn that owes nothing, or a turn in which `wait_for_user` paused the pass.
 pub fn gate(facts: GateFacts) -> GateDecision {
     let earlier = if facts.stop_hook_active {
         facts.blocks
@@ -329,7 +329,7 @@ pub enum Settlement {
 /// A settled run with an open pass that is not waiting is unfinished. A settled run with a
 /// version, no pass and unpublished records gets an update. Anything else needs nothing yet:
 /// records on a run with no version and no pass, which archiving the review leaves, wait for
-/// the lead, whose next record opens a full-review pass and whose `finish_review` publishes
+/// the lead, whose next record opens a full-review pass and whose `submit_review` publishes
 /// them as a full review.
 pub fn settle(facts: SettleFacts) -> Settlement {
     if !facts.lead_idle || !facts.children_idle || facts.recovery_pending {
@@ -345,7 +345,7 @@ pub fn settle(facts: SettleFacts) -> Settlement {
     }
 }
 
-/// What a `finish_review` call states and finds.
+/// What a `submit_review` call states and finds.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ClosingFacts {
     /// The run has a published version.

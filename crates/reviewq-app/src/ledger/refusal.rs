@@ -1,4 +1,4 @@
-//! A refused ledger call as a sentence for the calling agent: one the store could not bind to
+//! A refused reviewing tool call as a sentence for the calling agent: one the store could not bind to
 //! a review, and a lead-only call from a subagent. Each becomes the call's one root field
 //! error, which the agent reads and acts on in its turn.
 
@@ -11,7 +11,7 @@ use crate::access::{AppError, FieldError};
 /// error saying what to do next; every other error is returned unchanged. The store refuses
 /// both an unbound caller and a subagent's lead-only call with `Forbidden`. For a lead-only
 /// tool the two are told apart by the binding when it names a Claude subagent, and otherwise
-/// by reading the short ledger as the caller, which a subagent may do and an unbound caller
+/// by reading the short list of saved findings and sections as the caller, which a subagent may do and an unbound caller
 /// may not.
 pub(super) async fn for_agent(
     store: &(impl LedgerStore + ?Sized),
@@ -25,8 +25,11 @@ pub(super) async fn for_agent(
     let lead_only = !may_call(tool, CallerRole::Child);
     let message = if lead_only && from_subagent(store, session).await {
         format!(
-            "Only the review's lead agent can call {}, and this call comes from a subagent. Report what you found to the lead agent instead; you can still file findings and notes with record_finding, assess_finding and record_note.",
-            tool.as_str()
+            "Only the review's lead agent can call {}, and this call comes from a subagent. Report what you found to the lead agent instead; you can still save findings and sections with {}, {} and {}.",
+            tool.as_str(),
+            Tool::SaveFinding.as_str(),
+            Tool::SetFindingOutcome.as_str(),
+            Tool::SaveSection.as_str()
         )
     } else {
         unlinked(session, tool)

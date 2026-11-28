@@ -3,8 +3,8 @@
 use reviewq_app::access::AppError;
 use reviewq_app::ledger::passes::owed;
 use reviewq_app::ledger::{
-    Author, FindingLine, FindingRecord, FinishReceipt, HoldReceipt, LedgerEntries, LedgerPage,
-    NoteKey, NoteLine, NoteRecord, NoteSection, OpenPass, RecordReceipt, default_category,
+    Author, FindingLine, FindingRecord, HoldReceipt, LedgerEntries, LedgerPage, NoteKey, NoteLine,
+    NoteRecord, NoteSection, OpenPass, RecordReceipt, SubmitReceipt, default_category,
 };
 use reviewq_domain::identity::GitSha;
 use reviewq_domain::ledger::{FindingId, PassKind, PassState};
@@ -16,7 +16,7 @@ use super::{LedgerResult, cursor};
 use crate::entry::ServiceEndpoint;
 use crate::entry::features::followups::project_result_kind;
 use crate::entry::features::reports::{
-    project_basis, project_conclusion, project_finding_section, project_location, project_severity,
+    project_basis, project_conclusion, project_finding_kind, project_location, project_severity,
 };
 
 /// The result of an accepted, equal or replayed record write.
@@ -47,7 +47,7 @@ pub(super) fn receipt(receipt: RecordReceipt) -> Result<LedgerResult, AppError> 
     })
 }
 
-/// One `review_ledger` page: the short list with the current version and the open pass, or
+/// One `read_draft` page: the short list with the current version and the open pass, or
 /// whole records. A further page carries a signed cursor.
 pub(super) fn page(
     endpoint: &ServiceEndpoint,
@@ -68,7 +68,7 @@ pub(super) fn page(
                 .into_iter()
                 .map(finding_line)
                 .collect::<Result<_, _>>()?,
-            notes: notes.into_iter().map(note_line).collect(),
+            sections: notes.into_iter().map(note_line).collect(),
             cursor,
         }),
         LedgerEntries::Full { findings, notes } => dto::LedgerPage::Records(dto::LedgerRecords {
@@ -76,17 +76,17 @@ pub(super) fn page(
                 .into_iter()
                 .map(finding_record)
                 .collect::<Result<_, _>>()?,
-            notes: notes.into_iter().map(note_record).collect(),
+            sections: notes.into_iter().map(note_record).collect(),
             cursor,
         }),
     })
 }
 
-/// `finish_review`'s acknowledgement.
-pub(super) fn finish(receipt: FinishReceipt) -> Result<dto::FinishReceipt, AppError> {
+/// `submit_review`'s acknowledgement.
+pub(super) fn submit(receipt: SubmitReceipt) -> Result<dto::SubmitReceipt, AppError> {
     let summary = receipt.summary;
     let ids = |ids: Vec<FindingId>| ids.into_iter().map(finding_id).collect::<Result<_, _>>();
-    Ok(dto::FinishReceipt {
+    Ok(dto::SubmitReceipt {
         receipt_id: resource(receipt.receipt.as_str())?,
         sha256: report_dto::ReportHashDto::new(receipt.sha256.as_str())
             .ok_or(AppError::Internal)?,
@@ -99,7 +99,7 @@ pub(super) fn finish(receipt: FinishReceipt) -> Result<dto::FinishReceipt, AppEr
     })
 }
 
-/// `needs_input`'s acknowledgement.
+/// `wait_for_user`'s acknowledgement.
 pub(super) fn held(receipt: HoldReceipt) -> dto::HeldReceipt {
     dto::HeldReceipt {
         pass: pass_kind(receipt.pass),
@@ -155,10 +155,10 @@ fn finding_record(record: FindingRecord) -> Result<dto::FindingRecord, AppError>
         title: fields.title,
         severity: project_severity(fields.severity),
         blocking: fields.blocking,
-        section: project_finding_section(fields.section),
+        kind: project_finding_kind(fields.kind),
         category: fields
             .category
-            .unwrap_or_else(|| default_category(fields.section).to_owned()),
+            .unwrap_or_else(|| default_category(fields.kind).to_owned()),
         locations: body.locations.into_iter().map(project_location).collect(),
         issue: body.issue,
         consequence: body.consequence,

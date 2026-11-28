@@ -1,5 +1,5 @@
 import { invoke } from "./bridge.js";
-import { actionWaitMs } from "./ledger-schema.js";
+import { actionTool } from "./ledger-schema.js";
 
 const sha = { type: "string", pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" };
 const digest = { type: "string", pattern: "^[a-f0-9]{64}$" };
@@ -21,10 +21,12 @@ const declaration = {
   additionalProperties: false,
 };
 
+export const actionToolId = `mcp__reviewq__${actionTool.name}`;
+
 export async function registerWorkflowTools($) {
   await $.tool.register({
-    name: "review_action",
-    description: "Record an explicit user's authorization for the stated GitLab notes or approval, or reconcile the current authorization. The tool records and verifies evidence. Use GitLab through the usual native workflow only under the user's exact authorization.",
+    name: actionTool.name,
+    description: actionTool.description,
     inputSchema: { type: "object", properties: {
       operation: { enum: ["declare", "reconcile"] }, declaration,
     }, required: ["operation"], additionalProperties: false },
@@ -44,7 +46,7 @@ export async function stageAction($, state, event) {
     context.turnId = state.turn.activeTurn;
     context.declaration = event.declaration;
   }
-  const result = await invoke($, declare ? "action" : "action-status", state, context, actionWaitMs);
+  const result = await invoke($, declare ? "action" : "action-status", state, context, actionTool.waitMs);
   return toolResult(result);
 }
 

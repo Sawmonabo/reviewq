@@ -1,20 +1,10 @@
 {
-  "assess_finding": {
-    "expectedRevision": 1,
-    "id": "F-01",
-    "outcome": "fixed",
-    "reason": "The retry now reuses the stored key."
+  "read_draft": {
+    "ids": [
+      "F-01"
+    ]
   },
-  "finish_review": {
-    "revision": {
-      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    },
-    "verdict": "request_changes"
-  },
-  "needs_input": {
-    "reason": "Should a retried invoice keep its original number?"
-  },
-  "record_finding": {
+  "save_finding": {
     "blocking": true,
     "consequence": "A lost acknowledgement creates a duplicate invoice.",
     "evidence": {
@@ -22,23 +12,33 @@
       "text": "Replaying the request after a dropped reply inserted two rows."
     },
     "issue": "The retry builds a fresh idempotency key after the first insert commits.",
+    "kind": "functional",
     "locations": [
       {
         "line": 74,
         "path": "src/invoices.rs"
       }
     ],
-    "section": "functional",
     "severity": "P1",
     "title": "Retry writes the same invoice twice"
   },
-  "record_note": {
+  "save_section": {
     "body": "The MR retries invoice creation when the payment provider times out.",
     "section": "summary"
   },
-  "review_ledger": {
-    "ids": [
-      "F-01"
-    ]
+  "set_finding_outcome": {
+    "expectedRevision": 1,
+    "id": "F-01",
+    "outcome": "fixed",
+    "reason": "The retry now reuses the stored key."
+  },
+  "submit_review": {
+    "revision": {
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "verdict": "request_changes"
+  },
+  "wait_for_user": {
+    "question": "Should a retried invoice keep its original number?"
   }
 }

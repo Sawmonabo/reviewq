@@ -4,11 +4,13 @@ use std::path::Path;
 use reviewq_app::hosts::{ClaudeHost, ClaudeQuestionAnswers, claude_answer_digest};
 use reviewq_domain::identity::NativeSessionId;
 use reviewq_domain::session::HostProvider;
+use reviewq_protocol::actions::TRACK_POSTING;
 use reviewq_protocol::deadlines::tool_deadline;
 use reviewq_protocol::ledger::{
     LedgerBinding, LedgerRequest, LedgerTool, MAX_LEDGER_RESULT_BYTES, MAX_TOOL_INPUT_BYTES,
     oversized_input,
 };
+use reviewq_protocol::mcp::UNKNOWN_TOOL_CLAUDE;
 use reviewq_protocol::{ErrorCode, HistoryTurnIdDto, ResourceIdDto, SessionKeyDto};
 use reviewq_transport::{ServiceEndpoint, field_error_text, ledger_refusal_text};
 use serde::Deserialize;
@@ -97,10 +99,10 @@ pub(crate) async fn claude_bridge(
     let headers = companion_headers(&endpoint, proof)?;
     let body = serde_json::to_vec(&payload)?;
     let (status, body) = match operation {
-        // `review_action` answers within its tool's deadline, the one limit on the call, so a
+        // `track_posting` answers within its tool's deadline, the one limit on the call, so a
         // slow GitLab read ends with its message.
         ClaudeBridgeOperation::Action | ClaudeBridgeOperation::ActionStatus => {
-            let deadline = tool_deadline("review_action");
+            let deadline = tool_deadline(TRACK_POSTING);
             tokio::time::timeout(
                 deadline.limit,
                 post(&client_with_timeout(None)?, &endpoint, path, body, headers),
@@ -121,9 +123,9 @@ pub(crate) async fn claude_bridge(
                 return Err(refused("ReviewQ did not authorize this delivery", &body).into());
             }
             _ => match status.as_u16() {
-                404 => "This Claude session has no verified ReviewQ binding.",
-                409 => "Another ReviewQ companion owns this Claude session.",
-                412 => "Reload the ReviewQ plugin in this Claude session.",
+                404 => "This Claude session has no verified ReviewQ binding.".to_owned(),
+                409 => "Another ReviewQ companion owns this Claude session.".to_owned(),
+                412 => "Reload the ReviewQ plugin in this Claude session.".to_owned(),
                 _ => {
                     let what = "ReviewQ could not record this Claude session observation";
                     return Err(refused(what, &body).into());
@@ -196,9 +198,9 @@ fn refused(what: &str, reply: &[u8]) -> String {
     }
 }
 
-/// What the model reads when ReviewQ refuses `review_action`, from the refusal's error code:
+/// What the model reads when ReviewQ refuses `track_posting`, from the refusal's error code:
 /// a declaration when `declare`, else a reconcile. A refused declaration stores nothing.
-fn action_refusal(declare: bool, reply: &[u8]) -> &'static str {
+fn action_refusal(declare: bool, reply: &[u8]) -> String {
     #[derive(Deserialize)]
     struct Refusal {
         error: Code,
@@ -208,7 +210,7 @@ fn action_refusal(declare: bool, reply: &[u8]) -> &'static str {
         code: ErrorCode,
     }
     let code = serde_json::from_slice::<Refusal>(reply).map(|refusal| refusal.error.code);
-    match (code, declare) {
+    let text = match (code, declare) {
         (Ok(ErrorCode::InvalidRequest), true) => {
             "ReviewQ refused this declaration, so nothing was recorded. It needs intent and reviewedSha, the merge request's full head SHA; comments and both take 1 to 50 distinct comments, and approval and cancel take none. Correct it and declare the action again."
         }
@@ -222,39 +224,41 @@ fn action_refusal(declare: bool, reply: &[u8]) -> &'static str {
             "ReviewQ takes a publication action only in a turn that the user's latest instruction started, typed in this conversation or sent from ReviewQ. This turn did not start that way, so nothing was recorded. Ask the user for the instruction."
         }
         (Ok(ErrorCode::NotFound), true) => {
-            "ReviewQ found no open review_action call in the current turn of this conversation's linked review, or a comment names a discussion that is not on the merge request, so nothing was recorded."
+            "ReviewQ found no open {TRACK_POSTING} call in the current turn of this conversation's linked review, or a comment names a discussion that is not on the merge request, so nothing was recorded."
         }
         (Ok(ErrorCode::NotFound), false) => {
-            "ReviewQ found no open review_action call in the current turn of this conversation's linked review."
+            "ReviewQ found no open {TRACK_POSTING} call in the current turn of this conversation's linked review."
         }
         (Ok(ErrorCode::StaleRevision), true) => {
             "The merge request no longer matches this declaration: it is not open at reviewedSha, or ReviewQ's settings changed. Nothing was recorded. Read the merge request again before declaring the action."
         }
         (Ok(ErrorCode::StaleRevision), false) => {
-            "The action changed while ReviewQ checked it. Call review_action with operation reconcile again to read it."
+            "The action changed while ReviewQ checked it. Call {TRACK_POSTING} with operation reconcile again to read it."
         }
         (Ok(ErrorCode::Conflict), true) => {
-            "Something newer stands in this declaration's way: the merge request is not open, the user has a newer instruction waiting, a later action is declared, or this turn changed while ReviewQ checked it. Nothing was recorded. Call review_action with operation reconcile to read the current action."
+            "Something newer stands in this declaration's way: the merge request is not open, the user has a newer instruction waiting, a later action is declared, or this turn changed while ReviewQ checked it. Nothing was recorded. Call {TRACK_POSTING} with operation reconcile to read the current action."
         }
         (Ok(ErrorCode::Conflict), false) => {
             "The merge request or the GitLab user changed since the action was declared, the user has a newer instruction waiting, or this turn changed while ReviewQ checked it."
         }
         (Ok(ErrorCode::IdempotencyConflict), _) => {
-            "This review_action call already declared a different action, so nothing new was recorded. Call review_action with operation reconcile to read it."
+            "This {TRACK_POSTING} call already declared a different action, so nothing new was recorded. Call {TRACK_POSTING} with operation reconcile to read it."
         }
         (Ok(ErrorCode::PayloadTooLarge), _) => {
             "This action, or the transcript entry ReviewQ read to check it, is larger than ReviewQ accepts."
         }
         (Ok(ErrorCode::Busy), _) => {
-            "ReviewQ cannot settle this action yet, so nothing was recorded. Call review_action again in a moment."
+            "ReviewQ cannot settle this action yet, so nothing was recorded. Call {TRACK_POSTING} again in a moment."
         }
         (Ok(ErrorCode::Unavailable), _) => {
-            "ReviewQ could not read GitLab or this conversation's transcript, or the merge request's project is no longer configured, so it could not check the action. Check the GitLab connection and project settings, then call review_action again."
+            "ReviewQ could not read GitLab or this conversation's transcript, or the merge request's project is no longer configured, so it could not check the action. Check the GitLab connection and project settings, then call {TRACK_POSTING} again."
         }
         _ => {
-            "ReviewQ failed while checking this action. Call review_action with operation reconcile before declaring the action again."
+            "ReviewQ failed while checking this action. Call {TRACK_POSTING} with operation reconcile before declaring the action again."
         }
-    }
+    };
+    // Each sentence names the tool by its one constant.
+    text.replace("{TRACK_POSTING}", TRACK_POSTING)
 }
 
 /// ReviewQ's key for a linked Claude session.
@@ -279,16 +283,20 @@ struct LedgerCall {
 /// is the tool's result, or `{"error":text}` for a refusal, with the text the MCP server gives
 /// Codex for the same refusal. It makes the signed status check and that one call, within the
 /// tool's deadline, and nothing else. A call too large to carry gets the validator's refusal
-/// without either request. Fails, with the message on stderr, when the call on stdin cannot be
-/// read or names no ledger tool, when the listener is not this installation's ready service,
-/// when ReviewQ cannot be reached or gives no readable reply, or with the tool's timeout
-/// sentence when its deadline passes.
+/// without either request, and a call naming a tool ReviewQ does not serve, as a plugin loaded
+/// before an update can, gets `UNKNOWN_TOOL_CLAUDE` without them. Fails, with the message on
+/// stderr, when the call on stdin cannot be read, when the listener is not this installation's
+/// ready service, when ReviewQ cannot be reached or gives no readable reply, or with the tool's
+/// timeout sentence when its deadline passes.
 async fn ledger(profile: &Path, native: &NativeSessionId) -> Result<(), Failure> {
     let Some(call) = read_within(LEDGER_CALL_LIMIT)? else {
         return print_refusal(&field_error_text(&[oversized_input()]));
     };
     let call: LedgerCall = serde_json::from_slice(&call)?;
-    let tool = LedgerTool::from_name(&call.tool).ok_or("Unknown ReviewQ ledger tool.")?;
+    // A plugin loaded before an update can still call a tool by a name ReviewQ no longer serves.
+    let Some(tool) = LedgerTool::from_name(&call.tool) else {
+        return print_refusal(UNKNOWN_TOOL_CLAUDE);
+    };
     let body = serde_json::to_vec(&LedgerRequest {
         binding: LedgerBinding {
             session_key: SessionKeyDto::new(session_key(native)?)
@@ -313,12 +321,12 @@ async fn ledger(profile: &Path, native: &NativeSessionId) -> Result<(), Failure>
     .await
     .map_err(|_| deadline.timed_out)??;
     if !status.is_success() {
-        let text = ledger_refusal_text(&reply)
-            .ok_or("ReviewQ gave no readable reply to this ledger call.")?;
+        let text =
+            ledger_refusal_text(&reply).ok_or("ReviewQ gave no readable reply to this call.")?;
         return print_refusal(&text);
     }
     if reply.is_empty() {
-        return Err("ReviewQ gave no reply to this ledger call.".into());
+        return Err("ReviewQ gave no reply to this call.".into());
     }
     let mut stdout = std::io::stdout().lock();
     stdout.write_all(&reply)?;

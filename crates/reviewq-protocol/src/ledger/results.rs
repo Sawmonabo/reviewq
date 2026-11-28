@@ -1,39 +1,39 @@
-//! What each ledger tool returns on success.
+//! What each reviewing tool returns on success.
 
 use serde::{Deserialize, Serialize};
 
 use super::NoteSection;
 use crate::followups::ResultKind;
 use crate::reports::{
-    FindingBasis, FindingConclusion, FindingLocation, FindingSection, ReportHashDto, Severity,
+    FindingBasis, FindingConclusion, FindingKind, FindingLocation, ReportHashDto, Severity,
 };
 use crate::{DiscussionIdDto, FindingIdDto, GitShaDto, PageCursorDto, ResourceIdDto};
 
-/// The result of `record_finding` and `assess_finding`: `{id,revision,unpublished}`.
+/// The result of `save_finding` and `set_finding_outcome`: `{id,revision,unpublished}`.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FindingReceipt {
     pub id: FindingIdDto,
     /// The finding's revision after this call. An unchanged write keeps the stored one.
     pub revision: u64,
-    /// How many findings and notes changed since the last published version.
+    /// How many findings and sections changed since the last published version.
     pub unpublished: u64,
 }
 
-/// The result of `record_note`: `{section,title?,revision,unpublished}`.
+/// The result of `save_section`: `{section,title?,revision,unpublished}`.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteReceipt {
     pub section: NoteSection,
-    /// The extra note's title. Absent for every other section.
+    /// The extra section's title. Absent for every other section.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     pub revision: u64,
-    /// How many findings and notes changed since the last published version.
+    /// How many findings and sections changed since the last published version.
     pub unpublished: u64,
 }
 
-/// The result of `review_ledger`: the short list for an empty input, otherwise whole records.
+/// The result of `read_draft`: the short list for an empty input, otherwise whole records.
 /// Serialize only: the two shapes differ by fields, not by a tag.
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
@@ -42,7 +42,7 @@ pub enum LedgerPage {
     Records(LedgerRecords),
 }
 
-/// The short list: the current version, the open pass, one line per active finding and note.
+/// The short list: the current version, the open pass, one line per active finding and saved section.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LedgerSummary {
@@ -51,7 +51,7 @@ pub struct LedgerSummary {
     /// The open pass, or null when none is open.
     pub pass: Option<LedgerPass>,
     pub findings: Vec<FindingLine>,
-    pub notes: Vec<NoteLine>,
+    pub sections: Vec<NoteLine>,
     /// Pass it back with the same input for the rest, or null when this page is the last.
     pub cursor: Option<PageCursorDto>,
 }
@@ -61,7 +61,7 @@ pub struct LedgerSummary {
 #[serde(rename_all = "camelCase")]
 pub struct LedgerRecords {
     pub findings: Vec<FindingRecord>,
-    pub notes: Vec<NoteRecord>,
+    pub sections: Vec<NoteRecord>,
     /// Pass it back with the same input for the rest, or null when this page is the last.
     pub cursor: Option<PageCursorDto>,
 }
@@ -79,10 +79,10 @@ pub enum PassKind {
 #[serde(rename_all = "camelCase")]
 pub struct LedgerPass {
     pub kind: PassKind,
-    /// True while the pass waits on the reviewer's answer to `needs_input`.
+    /// True while `wait_for_user` paused the pass and it waits on the user's reply.
     pub waiting: bool,
     /// Plain sentences naming what the closing call must supply and the question the pass
-    /// last asked with `needs_input`, if any.
+    /// last asked with `wait_for_user`, if any.
     pub owes: String,
     /// The selected discussions a selected-thread pass needs one assessment for each.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -102,7 +102,7 @@ pub struct FindingLine {
     pub author: String,
 }
 
-/// One note in the short list.
+/// One saved section in the short list.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteLine {
@@ -127,7 +127,7 @@ pub struct FindingRecord {
     pub title: String,
     pub severity: Severity,
     pub blocking: bool,
-    pub section: FindingSection,
+    pub kind: FindingKind,
     pub category: String,
     pub locations: Vec<FindingLocation>,
     pub issue: String,
@@ -137,7 +137,7 @@ pub struct FindingRecord {
     pub proposed_comment: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<String>,
-    /// The latest outcome `assess_finding` recorded, if any.
+    /// The latest outcome `set_finding_outcome` recorded, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<RecordedOutcome>,
 }
@@ -154,7 +154,7 @@ pub struct RecordedOutcome {
     pub checked_sha: Option<GitShaDto>,
 }
 
-/// A note as stored, at its current revision.
+/// A saved section, at its current revision.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteRecord {
@@ -165,11 +165,11 @@ pub struct NoteRecord {
     pub body: String,
 }
 
-/// The result of `finish_review`:
+/// The result of `submit_review`:
 /// `{receiptId,sha256,result,new,updated,retired,carried,bySubagents}`.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FinishReceipt {
+pub struct SubmitReceipt {
     /// The published version, or for an `unchanged` selected-thread result the current one.
     pub receipt_id: ResourceIdDto,
     /// SHA-256 of the version's composed text.
@@ -184,12 +184,12 @@ pub struct FinishReceipt {
     pub by_subagents: Vec<FindingIdDto>,
 }
 
-/// The result of `needs_input`: the held pass and what it keeps unpublished.
+/// The result of `wait_for_user`: the paused pass and what it keeps unpublished.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HeldReceipt {
-    /// The pass that now waits on the reviewer.
+    /// The pass that now waits on the user.
     pub pass: PassKind,
-    /// How many findings and notes changed since the last published version.
+    /// How many findings and sections changed since the last published version.
     pub unpublished: u64,
 }

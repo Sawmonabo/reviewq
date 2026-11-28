@@ -4,7 +4,7 @@ use reviewq_app::hosts::{DeliveryReceipt, MessageBody, MessageReplay, SubmitMess
 use reviewq_app::queue::{ManagementFilter, RunSummary};
 use reviewq_domain::identity::{ReviewId, RunId, SessionKey, SubmissionId};
 use reviewq_protocol::mcp::{
-    GetReview, ListReviews, ReadTranscript, ReportRead, ReviewFilter, SendReviewMessage,
+    GetReview, ReadAgentTranscript, ReportRead, ReviewFilter, SearchReviews, SendAgentMessage,
     TranscriptRead,
 };
 use serde_json::{Value, json};
@@ -22,7 +22,7 @@ pub(super) use crate::entry::targets::{ResolvedReview, resolve};
 pub(super) async fn list(
     entry: &Entry,
     actor: Actor,
-    args: ListReviews,
+    args: SearchReviews,
 ) -> Result<Value, AppError> {
     let limit = list_limit(args.limit)?;
     let offset = args.offset.unwrap_or(0);
@@ -313,7 +313,7 @@ fn fit_page(
 pub(super) async fn transcript(
     entry: &Entry,
     actor: Actor,
-    args: ReadTranscript,
+    args: ReadAgentTranscript,
 ) -> Result<Value, AppError> {
     let (review, target_session) = match resolve(entry, &actor, &args.target).await? {
         ResolvedReview::Review(id, session) => (id, session),
@@ -385,7 +385,7 @@ pub(super) async fn transcript(
 pub(super) async fn send(
     entry: &Entry,
     actor: Actor,
-    args: SendReviewMessage,
+    args: SendAgentMessage,
 ) -> Result<Value, AppError> {
     if !entry.sends_allowed {
         return Err(AppError::Forbidden);

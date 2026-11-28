@@ -1,4 +1,4 @@
-//! Publishing: `finish_review`'s closing checks, composing outside any transaction, the
+//! Publishing: `submit_review`'s closing checks, composing outside any transaction, the
 //! conditional commit with at most three recomposes on a stale snapshot and the display index
 //! after it; and settling, which publishes an update or records `unfinished_review` or
 //! `update_failed` from the domain's `settle` decision.
@@ -19,8 +19,8 @@ use super::refusal::{for_agent, root};
 use super::required;
 use super::{
     CallBinding, Caller, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
-    FailureRecord, FinishReceipt, FinishReview, LedgerSnapshot, LedgerStore, NewVersion,
-    NoteSection, PublishCommit, PublishOutcome, SettleCandidate, SnapshotGuard, VersionFacts,
+    FailureRecord, LedgerSnapshot, LedgerStore, NewVersion, NoteSection, PublishCommit,
+    PublishOutcome, SettleCandidate, SnapshotGuard, SubmitReceipt, SubmitReview, VersionFacts,
 };
 use crate::access::{AppError, FieldError};
 use crate::followups::ResultKind;
@@ -35,13 +35,29 @@ const MAX_COMPOSED_BYTES: usize = 4 * 1024 * 1024;
 /// Records a refusal for size names, largest first.
 const NAMED_RECORDS: usize = 3;
 
-const CLOSING_REFUSED: &str = "ReviewQ refused the lead's closing call because this run's workspace, repository grant, settings or follow-up batch changed. The filed findings are kept. Check the run, then ask the lead to call finish_review again.";
+/// What the user reads when the lead's closing call is refused.
+fn closing_refused() -> String {
+    format!(
+        "ReviewQ refused the lead's closing call because this run's workspace, repository grant, settings or follow-up batch changed. The filed findings are kept. Check the run, then ask the lead to call {} again.",
+        Tool::SubmitReview.as_str()
+    )
+}
 const UPDATE_REFUSED: &str = "ReviewQ could not publish an update because this run's workspace, repository grant or settings changed. The filed findings are kept, and ReviewQ tries again the next time the run settles.";
 const UPDATE_KEPT_CHANGING: &str = "ReviewQ could not publish an update because the findings kept changing while it was composed. They are kept, and ReviewQ tries again the next time the run settles.";
-/// What the lead reads when its closing call is refused; the user reads `CLOSING_REFUSED`.
-const CLOSING_REFUSED_FOR_AGENT: &str = "ReviewQ could not close this review because its workspace, repository access, settings or follow-up batch changed. Every finding and note is kept, and ReviewQ already shows the user why. Stop here and tell the user the review could not be closed; do not call finish_review again until they have looked.";
+/// What the lead reads when its closing call is refused; the user reads `closing_refused`.
+fn closing_refused_for_agent() -> String {
+    format!(
+        "ReviewQ could not submit this review because its workspace, repository access, settings or follow-up batch changed. Every saved finding and section is kept, and ReviewQ already shows the user why. Stop here and tell the user the review could not be submitted; do not call {} again until they have looked.",
+        Tool::SubmitReview.as_str()
+    )
+}
 /// What the lead reads when the records kept changing through every recompose.
-const KEPT_CHANGING_FOR_AGENT: &str = "Findings or notes kept changing while ReviewQ composed the report, so nothing was published yet, and every record is kept. If subagents are still filing, wait for them to finish, then call finish_review again.";
+fn kept_changing_for_agent() -> String {
+    format!(
+        "Findings or sections kept changing while ReviewQ composed the report, so nothing was published yet, and everything saved is kept. If subagents are still saving, wait for them to finish, then call {} again.",
+        Tool::SubmitReview.as_str()
+    )
+}
 
 /// Closes the run's review for the lead and publishes, from a snapshot read in one short
 /// transaction and committed conditionally; nothing is held open while composing. A repeat of
@@ -61,25 +77,25 @@ const KEPT_CHANGING_FOR_AGENT: &str = "Findings or notes kept changing while Rev
 /// grant, settings or follow-up binding changed; for a child or an unattributed call,
 /// which records nothing; and when the records kept changing through three recomposes. Calls
 /// for different runs may run at once; a call that loses a race on its own run recomposes.
-pub async fn finish_review(
+pub async fn submit_review(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
-    input: FinishReview,
-) -> Result<FinishReceipt, AppError> {
+    input: SubmitReview,
+) -> Result<SubmitReceipt, AppError> {
     let session = binding.session.clone();
     match close(store, binding, &input).await {
-        Err(error) => Err(for_agent(store, &session, Tool::FinishReview, error).await),
+        Err(error) => Err(for_agent(store, &session, Tool::SubmitReview, error).await),
         closed => closed,
     }
 }
 
-/// `finish_review` up to its refusals for a caller the store cannot bind, which it returns
+/// `submit_review` up to its refusals for a caller the store cannot bind, which it returns
 /// as the store's `Forbidden`.
 async fn close(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
-    input: &FinishReview,
-) -> Result<FinishReceipt, AppError> {
+    input: &SubmitReview,
+) -> Result<SubmitReceipt, AppError> {
     for _ in 0..=MAX_RECOMPOSES {
         let closing = match store.closing_snapshot(binding.clone()).await? {
             ClosingRead::Replayed(ack) => return Ok(ack),
@@ -89,12 +105,12 @@ async fn close(
                         run: refused.run,
                         pass: refused.pass,
                         kind: FailureKind::ClosingRefused,
-                        reason: CLOSING_REFUSED.to_owned(),
+                        reason: closing_refused(),
                         sequence: refused.sequence,
                         turn: refused.turn,
                     })
                     .await?;
-                return Err(root(CLOSING_REFUSED_FOR_AGENT));
+                return Err(root(&closing_refused_for_agent()));
             }
             ClosingRead::Current(closing) => *closing,
         };
@@ -107,14 +123,14 @@ async fn close(
             Ok(PublishOutcome::Published(receipt)) => {
                 // The version is readable without its index, so a failure here is ignored.
                 let _ = store.index_version(prepared.run, receipt.clone()).await;
-                return Ok(FinishReceipt {
+                return Ok(SubmitReceipt {
                     receipt,
                     sha256: prepared.sha256,
                     summary: prepared.summary,
                 });
             }
             Ok(PublishOutcome::Unchanged) => {
-                return Ok(FinishReceipt {
+                return Ok(SubmitReceipt {
                     receipt: prepared.current.ok_or(AppError::Internal)?,
                     sha256: prepared.sha256,
                     summary: prepared.summary,
@@ -124,12 +140,12 @@ async fn close(
             Ok(PublishOutcome::Invalid(errors)) => return Err(AppError::InvalidFields(errors)),
             Err(AppError::Conflict) => {
                 store.record_failure(prepared.refusal).await?;
-                return Err(root(CLOSING_REFUSED_FOR_AGENT));
+                return Err(root(&closing_refused_for_agent()));
             }
             Err(error) => return Err(error),
         }
     }
-    Err(root(KEPT_CHANGING_FOR_AGENT))
+    Err(root(&kept_changing_for_agent()))
 }
 
 /// Settles every run that may need it from its stored state: publishes the update a run owes,
@@ -251,8 +267,8 @@ async fn update_failed(
 fn unfinished_reason(findings: u32, full_review_notes: Option<Vec<NoteSection>>) -> String {
     let mut reason = format!(
         "The lead's last turn ended without closing the review: no {} or {} call in that turn was accepted. {}.",
-        Tool::FinishReview.as_str(),
-        Tool::NeedsInput.as_str(),
+        Tool::SubmitReview.as_str(),
+        Tool::WaitForUser.as_str(),
         capitalized(&findings_on_file(findings))
     );
     if let Some(notes) =
@@ -284,7 +300,7 @@ struct PreparedClosing {
 /// no record changed since, no pass opened, its version is still current, and the call
 /// states nothing other than the current version's verdict, revision and kind or the
 /// assessments that call closed with.
-fn repeated(closing: &ClosingSnapshot, input: &FinishReview) -> Option<Answer> {
+fn repeated(closing: &ClosingSnapshot, input: &SubmitReview) -> Option<Answer> {
     let last = closing.last_closing.as_ref()?;
     let snapshot = &closing.snapshot;
     let parent = snapshot.parent.as_ref()?;
@@ -305,7 +321,7 @@ fn repeated(closing: &ClosingSnapshot, input: &FinishReview) -> Option<Answer> {
 /// version, and the call asks for no full review and states no verdict or revision other than
 /// the current version's. No version is written. A first version, a full review and a pass's
 /// close always compose.
-fn restates_current(closing: &ClosingSnapshot, input: &FinishReview) -> Option<Answer> {
+fn restates_current(closing: &ClosingSnapshot, input: &SubmitReview) -> Option<Answer> {
     let snapshot = &closing.snapshot;
     let parent = snapshot.parent.as_ref()?;
     let receipt = snapshot.guard.head.clone()?;
@@ -315,7 +331,7 @@ fn restates_current(closing: &ClosingSnapshot, input: &FinishReview) -> Option<A
         && parent.sequence == snapshot.guard.sequence
         && restates_version(&parent.summary, input);
     nothing_new.then(|| Answer {
-        ack: FinishReceipt {
+        ack: SubmitReceipt {
             receipt,
             sha256: parent.summary.reference.hash.clone(),
             summary: closing_summary(snapshot, ResultKind::Unchanged),
@@ -326,7 +342,7 @@ fn restates_current(closing: &ClosingSnapshot, input: &FinishReview) -> Option<A
 
 /// A closing call's answer without a new version, and the assessments its stored call keeps.
 struct Answer {
-    ack: FinishReceipt,
+    ack: SubmitReceipt,
     assessments: Vec<Assessment>,
 }
 
@@ -347,7 +363,7 @@ fn answered(closing: ClosingSnapshot, answer: Answer) -> PreparedClosing {
 }
 
 /// Whether the call's verdict and revision, when given, equal the version's.
-fn restates_version(summary: &ReportSummary, input: &FinishReview) -> bool {
+fn restates_version(summary: &ReportSummary, input: &SubmitReview) -> bool {
     input
         .verdict
         .is_none_or(|verdict| verdict == summary.verdict)
@@ -361,7 +377,7 @@ fn restates_version(summary: &ReportSummary, input: &FinishReview) -> bool {
 /// selected-thread pass completes `unchanged` without one.
 fn prepare_closing(
     closing: ClosingSnapshot,
-    input: &FinishReview,
+    input: &SubmitReview,
 ) -> Result<PreparedClosing, AppError> {
     let ClosingSnapshot {
         caller, snapshot, ..
@@ -434,7 +450,7 @@ fn prepared(
         run: run.clone(),
         pass: guard.pass,
         kind: FailureKind::ClosingRefused,
-        reason: CLOSING_REFUSED.to_owned(),
+        reason: closing_refused(),
         sequence: guard.sequence,
         turn: caller.turn.clone(),
     };
@@ -492,9 +508,9 @@ fn missing_notes_error(snapshot: &LedgerSnapshot) -> Option<FieldError> {
     Some(FieldError::new(
         "",
         format!(
-            "A full review, which includes the first version of a review, needs {names}, which {verb} not on file yet. File {each} with {}, then call {} again. Everything already filed is kept.",
-            Tool::RecordNote.as_str(),
-            Tool::FinishReview.as_str(),
+            "A full review, which includes the first version of a review, needs {names}, which {verb} not saved yet. Save {each} with {}, then call {} again. Everything already saved is kept.",
+            Tool::SaveSection.as_str(),
+            Tool::SubmitReview.as_str(),
         ),
     ))
 }
@@ -526,8 +542,11 @@ fn untouched_errors(snapshot: &LedgerSnapshot) -> Vec<FieldError> {
             FieldError::new(
                 "",
                 format!(
-                    "{} \"{}\" is on the current version but this review neither changed nor assessed it. Record what became of it with assess_finding, or change it with record_finding.",
-                    finding.record.id, finding.record.fields.title
+                    "{} \"{}\" is on the current version but this review neither changed it nor set its outcome. Set what became of it with {}, or change it with {}.",
+                    finding.record.id,
+                    finding.record.fields.title,
+                    Tool::SetFindingOutcome.as_str(),
+                    Tool::SaveFinding.as_str()
                 ),
             )
         })
@@ -536,7 +555,7 @@ fn untouched_errors(snapshot: &LedgerSnapshot) -> Vec<FieldError> {
 
 /// A selected-thread pass reviews the frozen batch's checked SHA, so a stated revision must
 /// be that SHA.
-fn revision_errors(snapshot: &LedgerSnapshot, input: &FinishReview) -> Vec<FieldError> {
+fn revision_errors(snapshot: &LedgerSnapshot, input: &SubmitReview) -> Vec<FieldError> {
     let Some(batch) = snapshot.pass.as_ref().and_then(|pass| pass.batch.as_ref()) else {
         return Vec::new();
     };
@@ -555,7 +574,7 @@ fn revision_errors(snapshot: &LedgerSnapshot, input: &FinishReview) -> Vec<Field
 
 fn full_review_facts(
     snapshot: &LedgerSnapshot,
-    input: &FinishReview,
+    input: &SubmitReview,
 ) -> Result<VersionFacts, AppError> {
     let reviewed = input.revision.clone().ok_or(AppError::Internal)?;
     let exact = exact_sha(&reviewed);
@@ -574,7 +593,7 @@ fn full_review_facts(
 
 fn selected_threads_facts(
     snapshot: &LedgerSnapshot,
-    input: &FinishReview,
+    input: &SubmitReview,
 ) -> Result<VersionFacts, AppError> {
     let parent = snapshot.parent.as_ref().ok_or(AppError::Internal)?;
     let batch = snapshot
@@ -722,8 +741,8 @@ impl TooLarge {
             });
         let notes = snapshot.notes.iter().map(|note| {
             let name = match note.key.title() {
-                Some(title) => format!("the extra note \"{title}\""),
-                None => format!("the {} note", note.key.section()),
+                Some(title) => format!("the extra section \"{title}\""),
+                None => format!("the {} section", note.key.section()),
             };
             (name, note.body.len())
         });

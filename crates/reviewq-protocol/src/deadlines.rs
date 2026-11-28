@@ -1,9 +1,12 @@
 //! How long ReviewQ takes at most to answer one call of a tool a model calls, on either host,
 //! and what the model reads when it does not answer in time.
 
+use std::sync::LazyLock;
 use std::time::Duration;
 
+use crate::actions::TRACK_POSTING;
 use crate::ledger::LedgerTool;
+use crate::mcp::ManagementTool;
 
 /// The least time a host gives one call of a tool on ReviewQ's MCP server before it ends the
 /// call with its own timeout, which tells the model nothing about what ReviewQ did. Claude Code
@@ -33,16 +36,30 @@ pub const GRANT_CHECK_LIMIT: Duration = SHORT;
 // ReviewQ's answer, not the host's timeout, ends every call, with time left to carry it back.
 const _: () = assert!(LONG.as_secs() + 5 <= HOST_TOOL_TIMEOUT.as_secs());
 
-/// What the model reads when a ledger call that records something passes its deadline;
-/// `review_ledger` only reads, so it gets the read's sentence. The service may still have
-/// stored the call, so a blind repeat of a revision-guarded call would be refused as stale.
-const LEDGER_TIMED_OUT: &str = "ReviewQ did not answer this ledger call in time, but it may have stored it. Read the ledger with review_ledger before repeating the call.";
+/// What the model reads when a reviewing call that saves something passes its deadline;
+/// `read_draft` only reads, so it gets the read's sentence. The service may still have stored
+/// the call, so a blind repeat of a revision-guarded call would be refused as stale.
+static SAVE_TIMED_OUT: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "ReviewQ did not answer this call in time, but it may have stored it. Read what is saved with {} before repeating the call.",
+        LedgerTool::ReadDraft.name()
+    )
+});
 /// What the model reads when a management call that changes something passes its deadline.
 /// Each such call carries a `submissionId`, and a repeat with the same one returns the stored
 /// outcome instead of acting twice.
-const CHANGE_TIMED_OUT: &str = "ReviewQ did not answer this call in time, but it may have stored it. Read the review with GetReview before repeating the call, and repeat it only with the same submissionId.";
-/// What the model reads when `review_action` passes its deadline.
-const ACTION_TIMED_OUT: &str = "ReviewQ did not answer this action in time, but it may have recorded it. Call review_action with operation reconcile before declaring the action again.";
+static CHANGE_TIMED_OUT: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "ReviewQ did not answer this call in time, but it may have stored it. Read the review with {} before repeating the call, and repeat it only with the same submissionId.",
+        ManagementTool::GetReview.name()
+    )
+});
+/// What the model reads when `track_posting` passes its deadline.
+static ACTION_TIMED_OUT: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "ReviewQ did not answer this action in time, but it may have recorded it. Call {TRACK_POSTING} with operation reconcile before declaring the action again."
+    )
+});
 /// What the model reads when a read passes its deadline.
 const READ_TIMED_OUT: &str =
     "ReviewQ did not answer this call in time. The call changes nothing, so it can be repeated.";
@@ -62,24 +79,22 @@ impl ToolDeadline {
     }
 }
 
-/// The deadline of the tool a host lists as `name`: a ledger tool, a management tool of the MCP
-/// server, or the Claude plugin's `review_action`. It holds for the whole call on either host:
-/// the Claude bridge's status check and request together, and the MCP server's handling of a
-/// call from its arrival, the grant check and admission included. `finish_review` publishes a
-/// version, so it gets the longer limit, and so does every call that reads GitLab or starts
-/// native work. A name ReviewQ does not serve gets a read's deadline; its call is refused at
-/// once.
+/// The deadline of the tool a host lists as `name`: a reviewing tool, a management tool of the
+/// MCP server, or the Claude plugin's `track_posting`. It holds for the whole call on either
+/// host: the Claude bridge's status check and request together, and the MCP server's handling
+/// of a call from its arrival, the grant check and admission included. `submit_review`
+/// publishes a version, so it gets the longer limit, and so does every call that reads GitLab
+/// or starts native work. A name ReviewQ does not serve gets a read's deadline; its call is
+/// refused at once.
 pub fn tool_deadline(name: &str) -> ToolDeadline {
-    let (limit, timed_out) = match (LedgerTool::from_name(name), name) {
-        (Some(LedgerTool::FinishReview), _) => (LONG, LEDGER_TIMED_OUT),
-        (Some(LedgerTool::ReviewLedger), _) => (SHORT, READ_TIMED_OUT),
-        (Some(_), _) => (SHORT, LEDGER_TIMED_OUT),
-        (
-            None,
-            "SendReviewMessage" | "StartReview" | "AnswerReviewQuestion" | "ConfigureFollowups",
-        ) => (LONG, CHANGE_TIMED_OUT),
-        (None, "review_action") => (LONG, ACTION_TIMED_OUT),
-        (None, _) => (SHORT, READ_TIMED_OUT),
+    let (limit, timed_out) = match (LedgerTool::from_name(name), ManagementTool::from_name(name)) {
+        (Some(LedgerTool::SubmitReview), _) => (LONG, SAVE_TIMED_OUT.as_str()),
+        (Some(LedgerTool::ReadDraft), _) => (SHORT, READ_TIMED_OUT),
+        (Some(_), _) => (SHORT, SAVE_TIMED_OUT.as_str()),
+        (None, Some(tool)) if tool.changes() => (LONG, CHANGE_TIMED_OUT.as_str()),
+        (None, Some(_)) => (SHORT, READ_TIMED_OUT),
+        (None, None) if name == TRACK_POSTING => (LONG, ACTION_TIMED_OUT.as_str()),
+        (None, None) => (SHORT, READ_TIMED_OUT),
     };
     ToolDeadline { limit, timed_out }
 }

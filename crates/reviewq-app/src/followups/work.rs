@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use reviewq_domain::identity::{GitSha, NativeTurnId, Revision};
+use reviewq_domain::ledger::Tool;
 use reviewq_domain::session::LeadTarget;
 
 use crate::access::{AppError, AppFuture};
@@ -159,12 +160,13 @@ async fn prepare(
             "Read each identified discussion and the current code. ",
             "Preserve unrelated findings, questions, qualifications and user dispositions. ",
             "Do not post or edit GitLab notes, approve, merge, resolve discussions, or change Jira. ",
-            "Close this check with finish_review and one assessment per listed discussion, each covering that discussion's finding IDs."
+            "Close this check with {} and one assessment per listed discussion, each covering that discussion's finding IDs."
         ),
         source.review.project_path,
         source.review.identity.iid(),
         source.review.head_sha,
         check.batch_id,
+        Tool::SubmitReview.as_str(),
     );
     if let Some(base) = &check.base {
         prompt.push_str(&format!(

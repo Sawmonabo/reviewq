@@ -10,8 +10,9 @@ use reviewq_app::access::{Actor, AppError};
 use reviewq_protocol::deadlines::{GRANT_CHECK_LIMIT, tool_deadline};
 use reviewq_protocol::ledger::LedgerTool;
 use reviewq_protocol::mcp::{
-    AnswerReviewQuestion, ConfigureFollowups, GetReview, ListReviews, ReadTranscript,
-    SendReviewMessage, StartReview,
+    AnswerAgentQuestion, GetReview, MANAGEMENT_TOOLS, ManagementTool, ReadAgentTranscript,
+    SearchReviews, SendAgentMessage, SetThreadFollowups, StartReview, UNKNOWN_TOOL_CLAUDE,
+    UNKNOWN_TOOL_CODEX,
 };
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
@@ -22,7 +23,6 @@ use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData, RoleServer, ServerHandler};
-use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -68,30 +68,11 @@ pub(super) fn mount(entry: Arc<Entry>) -> Router<Arc<Entry>> {
     let application = Server {
         entry: entry.clone(),
         gates: Arc::new(Gates::default()),
-        tools: vec![
-            tool::<ListReviews>("ListReviews", "List scoped review summaries."),
-            tool::<GetReview>("GetReview", "Read a registered review and its native runs."),
-            tool::<ReadTranscript>(
-                "ReadTranscript",
-                "Read a bounded page of a native transcript.",
-            ),
-            tool::<SendReviewMessage>(
-                "SendReviewMessage",
-                "Queue an explicit message for the selected lead.",
-            ),
-            tool::<StartReview>("StartReview", "Start an explicitly selected native review."),
-            tool::<AnswerReviewQuestion>(
-                "AnswerReviewQuestion",
-                "Answer one exact pending native question.",
-            ),
-            tool::<ConfigureFollowups>(
-                "ConfigureFollowups",
-                "Configure review follow-ups for an exact registered lead.",
-            ),
-        ]
-        .into_iter()
-        .chain(ledger::tools())
-        .collect(),
+        tools: MANAGEMENT_TOOLS
+            .into_iter()
+            .map(management_tool)
+            .chain(ledger::tools())
+            .collect(),
     };
     let sdk = StreamableHttpService::new(
         move || Ok(application.clone()),
@@ -103,13 +84,19 @@ pub(super) fn mount(entry: Arc<Entry>) -> Router<Arc<Entry>> {
         .layer(middleware::from_fn_with_state(entry, authenticate))
 }
 
-fn tool<T: JsonSchema>(name: &'static str, description: &'static str) -> Tool {
-    let schema = schemars::schema_for!(T)
-        .to_value()
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
-    Tool::new(name, description, schema)
+/// One management tool as the MCP server lists it: name, description and input schema.
+fn management_tool(tool: ManagementTool) -> Tool {
+    let schema = match tool {
+        ManagementTool::SearchReviews => schemars::schema_for!(SearchReviews),
+        ManagementTool::GetReview => schemars::schema_for!(GetReview),
+        ManagementTool::ReadAgentTranscript => schemars::schema_for!(ReadAgentTranscript),
+        ManagementTool::SendAgentMessage => schemars::schema_for!(SendAgentMessage),
+        ManagementTool::StartReview => schemars::schema_for!(StartReview),
+        ManagementTool::AnswerAgentQuestion => schemars::schema_for!(AnswerAgentQuestion),
+        ManagementTool::SetThreadFollowups => schemars::schema_for!(SetThreadFollowups),
+    };
+    let schema = schema.to_value().as_object().cloned().unwrap_or_default();
+    Tool::new(tool.name(), tool.description(), schema)
 }
 
 async fn authenticate(
@@ -239,11 +226,12 @@ impl ServerHandler for Server {
             .and_then(|parts| parts.extensions.get::<Arrived>())
             .map_or_else(Instant::now, |arrived| arrived.0);
         let deadline = tool_deadline(&request.name);
+        let claude = ledger::claude_client(&context);
         let meta = context.meta;
         let cancelled = context.ct;
         let result = tokio::select! {
             _ = cancelled.cancelled() => return Err(ErrorData::internal_error("request cancelled", None)),
-            result = tokio::time::timeout_at(arrived + deadline.limit, self.call(request, &meta, actor)) => result,
+            result = tokio::time::timeout_at(arrived + deadline.limit, self.call(request, &meta, actor, claude)) => result,
         };
         let text = match result {
             Ok(Ok(output)) => return Ok(output.into()),
@@ -265,29 +253,48 @@ fn bounded_result(value: &Value) -> Result<CallToolResult, AppError> {
 }
 
 impl Server {
-    /// Runs one tool call. A ledger tool binds its caller from the request's `_meta`.
+    /// Runs one tool call. A reviewing tool binds its caller from the request's `_meta`. A name
+    /// the server does not list gets the host's sentence asking for the current tools, which a
+    /// session still holding an older tool list needs after an update.
     async fn call(
         &self,
         request: CallToolRequestParams,
         meta: &RequestMetaObject,
         actor: Actor,
+        claude: bool,
     ) -> Result<CallToolResult, ApiError> {
         let _permit = self.gates.enter(&actor).await?;
         let input = request.arguments.unwrap_or_default();
         if let Some(tool) = LedgerTool::from_name(&request.name) {
             return ledger::call(&self.entry, tool, meta, actor, input).await;
         }
-        let result = match request.name.as_ref() {
-            "ListReviews" => operations::list(&self.entry, actor, arguments(input)?).await,
-            "GetReview" => operations::get(&self.entry, actor, arguments(input)?).await,
-            "ReadTranscript" => operations::transcript(&self.entry, actor, arguments(input)?).await,
-            "SendReviewMessage" => operations::send(&self.entry, actor, arguments(input)?).await,
-            "StartReview" => workflow::start(&self.entry, actor, arguments(input)?).await,
-            "AnswerReviewQuestion" => workflow::answer(&self.entry, actor, arguments(input)?).await,
-            "ConfigureFollowups" => {
-                workflow::followups(&self.entry, actor, arguments(input)?).await
+        let Some(tool) = ManagementTool::from_name(&request.name) else {
+            let text = if claude {
+                UNKNOWN_TOOL_CLAUDE
+            } else {
+                UNKNOWN_TOOL_CODEX
+            };
+            return Ok(CallToolResult::error(vec![ContentBlock::text(text)]));
+        };
+        let entry = &self.entry;
+        let result = match tool {
+            ManagementTool::SearchReviews => {
+                operations::list(entry, actor, arguments(input)?).await
             }
-            _ => Err(AppError::NotFound),
+            ManagementTool::GetReview => operations::get(entry, actor, arguments(input)?).await,
+            ManagementTool::ReadAgentTranscript => {
+                operations::transcript(entry, actor, arguments(input)?).await
+            }
+            ManagementTool::SendAgentMessage => {
+                operations::send(entry, actor, arguments(input)?).await
+            }
+            ManagementTool::StartReview => workflow::start(entry, actor, arguments(input)?).await,
+            ManagementTool::AnswerAgentQuestion => {
+                workflow::answer(entry, actor, arguments(input)?).await
+            }
+            ManagementTool::SetThreadFollowups => {
+                workflow::followups(entry, actor, arguments(input)?).await
+            }
         }?;
         Ok(bounded_result(&result)?)
     }

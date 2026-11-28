@@ -16,7 +16,7 @@ use crate::queue::{parse, text};
 
 /// The columns `finding` decodes, in order, from `ledger_changes c`.
 pub(super) const FINDING_COLUMNS: &str = "c.finding, c.revision, c.author, c.title, c.severity,
-    c.blocking, c.section, c.category, c.locations, c.issue, c.consequence, c.evidence_kind,
+    c.blocking, c.kind, c.category, c.locations, c.issue, c.consequence, c.evidence_kind,
     c.evidence, c.proposed_comment, c.details, c.conclusion, c.outcome_reason,
     c.discussion_ids, c.checked_sha";
 
@@ -64,7 +64,7 @@ pub(super) fn finding(row: &Row<'_>, at: usize) -> Result<FindingRecord, StoreEr
             title: row.get(at + 3)?,
             severity: parse(text(row, at + 4)?)?,
             blocking: row.get(at + 5)?,
-            section: parse(text(row, at + 6)?)?,
+            kind: parse(text(row, at + 6)?)?,
             category: row.get(at + 7)?,
             body: details(row, at + 8)?,
         },
@@ -216,7 +216,7 @@ pub(super) fn finding_changes(before: &FindingRecord, after: &FindingRecord) -> 
         (RecordField::Title, old.title != new.title),
         (RecordField::Severity, old.severity != new.severity),
         (RecordField::Blocking, old.blocking != new.blocking),
-        (RecordField::Section, old.section != new.section),
+        (RecordField::Kind, old.kind != new.kind),
         (RecordField::Category, old.category != new.category),
         (
             RecordField::Locations,

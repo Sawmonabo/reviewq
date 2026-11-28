@@ -4,7 +4,7 @@
 use reviewq_app::access::AppError;
 use reviewq_app::followups::NextAction;
 use reviewq_app::ledger::{
-    Caller, ClosingSummary, FinishReceipt, HoldReceipt, NoteKey, RecordReceipt,
+    Caller, ClosingSummary, HoldReceipt, NoteKey, RecordReceipt, SubmitReceipt,
 };
 use reviewq_app::reports::Assessment;
 use reviewq_domain::identity::Revision;
@@ -60,7 +60,7 @@ pub(super) fn replay(
     Ok(Some((from_json(&result)?, sequence)))
 }
 
-/// The target of a `record_finding` create, which names no record; its result holds the ID.
+/// The target of a `save_finding` create, which names no record; its result holds the ID.
 pub(super) const NEW_FINDING: &str = "finding:new";
 
 pub(super) fn finding_target(id: FindingId) -> String {
@@ -117,7 +117,7 @@ pub(super) fn last_closing(
     Ok(db
         .prepare_cached(
             "SELECT result, sequence, ordinal FROM ledger_calls
-             WHERE run_id=?1 AND tool='finish_review' ORDER BY ordinal DESC LIMIT 1",
+             WHERE run_id=?1 AND tool='submit_review' ORDER BY ordinal DESC LIMIT 1",
         )?
         .query_row([run], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
         .optional()?)
@@ -174,7 +174,7 @@ pub(super) fn hold_from(value: &Value) -> Result<Option<HoldReceipt>, StoreError
 }
 
 /// A closing acknowledgement with the assessments it closed a selected-thread pass with.
-pub(super) fn finish_json(ack: &FinishReceipt, assessments: &[Assessment]) -> Value {
+pub(super) fn submit_json(ack: &SubmitReceipt, assessments: &[Assessment]) -> Value {
     let summary = &ack.summary;
     let ids = |ids: &[FindingId]| ids.iter().map(|id| id.number()).collect::<Vec<_>>();
     json!({
@@ -196,14 +196,14 @@ pub(super) fn finish_json(ack: &FinishReceipt, assessments: &[Assessment]) -> Va
     })
 }
 
-pub(super) fn finish_from(value: &Value) -> Result<(FinishReceipt, Vec<Assessment>), StoreError> {
+pub(super) fn submit_from(value: &Value) -> Result<(SubmitReceipt, Vec<Assessment>), StoreError> {
     let ids = |value: &Value| -> Result<Vec<FindingId>, StoreError> {
         list(value)?
             .iter()
             .map(|id| finding_id(integer(id)?))
             .collect()
     };
-    let ack = FinishReceipt {
+    let ack = SubmitReceipt {
         receipt: parse(string(&value["receipt"])?)?,
         sha256: parse(string(&value["sha256"])?)?,
         summary: ClosingSummary {

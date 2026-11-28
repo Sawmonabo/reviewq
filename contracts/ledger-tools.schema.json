@@ -1,5 +1,287 @@
 {
-  "assess_finding": {
+  "read_draft": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "definitions": {
+      "FindingIdDto": {
+        "description": "A report finding ID: `F-` and the finding's number, written with at least two digits and no other leading zero, such as `F-01` or `F-100`.",
+        "maxLength": 11,
+        "pattern": "^F-(0[1-9]|[1-9][0-9]{1,8})$",
+        "type": "string"
+      },
+      "NoteSection": {
+        "description": "A section of the report, which `save_section` writes.",
+        "enum": [
+          "title",
+          "summary",
+          "rationale",
+          "flow",
+          "changes",
+          "threads",
+          "questions",
+          "verification",
+          "publication",
+          "extra"
+        ],
+        "type": "string"
+      },
+      "PageCursorDto": {
+        "description": "An opaque keyset continuation for list resources.",
+        "maxLength": 8192,
+        "maxUtf8Bytes": 8192,
+        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+        "type": "string"
+      }
+    },
+    "description": "Reads the saved findings and sections. With no field it returns the short list. Give `ids` or `sections`, not both.",
+    "properties": {
+      "cursor": {
+        "allOf": [
+          {
+            "$ref": "#/definitions/PageCursorDto"
+          }
+        ],
+        "description": "The cursor a previous result returned. Send it with the same `ids` or `sections`."
+      },
+      "ids": {
+        "description": "Findings to read in full. Leave out `sections` when you give these.",
+        "items": {
+          "$ref": "#/definitions/FindingIdDto"
+        },
+        "maxItems": 10,
+        "type": "array",
+        "uniqueItems": true
+      },
+      "sections": {
+        "description": "Sections to read in full. `extra` reads every extra section. Leave out `ids` when you give these.",
+        "items": {
+          "$ref": "#/definitions/NoteSection"
+        },
+        "maxItems": 10,
+        "type": "array",
+        "uniqueItems": true
+      }
+    },
+    "title": "ReadDraft",
+    "type": "object"
+  },
+  "save_finding": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "definitions": {
+      "FindingBasis": {
+        "additionalProperties": false,
+        "description": "What the agent confirmed (`observed`) or could not verify (`gap`).",
+        "properties": {
+          "kind": {
+            "$ref": "#/definitions/FindingBasisKind"
+          },
+          "text": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "text"
+        ],
+        "type": "object"
+      },
+      "FindingBasisKind": {
+        "enum": [
+          "observed",
+          "gap"
+        ],
+        "type": "string"
+      },
+      "FindingIdDto": {
+        "description": "A report finding ID: `F-` and the finding's number, written with at least two digits and no other leading zero, such as `F-01` or `F-100`.",
+        "maxLength": 11,
+        "pattern": "^F-(0[1-9]|[1-9][0-9]{1,8})$",
+        "type": "string"
+      },
+      "FindingKind": {
+        "enum": [
+          "functional",
+          "quality"
+        ],
+        "type": "string"
+      },
+      "FindingLocation": {
+        "additionalProperties": false,
+        "description": "A file a finding points at, with an optional 1-based line.",
+        "properties": {
+          "line": {
+            "format": "uint32",
+            "maximum": 4294967295,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "path": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "Severity": {
+        "description": "A finding's severity, most severe first.",
+        "enum": [
+          "P0",
+          "P1",
+          "P2",
+          "P3"
+        ],
+        "type": "string"
+      }
+    },
+    "description": "Saves a new finding, or changes the finding named by `id`. A new finding gives `title`, `severity`, `blocking`, `kind`, `issue`, `consequence` and `evidence`. A change gives `id`, `expectedRevision` and only the fields it changes.",
+    "properties": {
+      "blocking": {
+        "description": "Whether the lead holds the merge on this finding.",
+        "type": "boolean"
+      },
+      "category": {
+        "description": "A one-line label without `·`, such as Security or Tests. Defaults to the kind's name.",
+        "maxLength": 48,
+        "minLength": 1,
+        "type": "string"
+      },
+      "consequence": {
+        "description": "Markdown starting with a paragraph: why it matters.",
+        "maxLength": 8192,
+        "minLength": 1,
+        "type": "string"
+      },
+      "details": {
+        "description": "Markdown for diagrams, tables and longer reasoning, shown after the evidence. An empty string removes it.",
+        "maxLength": 16384,
+        "type": "string"
+      },
+      "evidence": {
+        "$ref": "#/definitions/FindingBasis"
+      },
+      "expectedRevision": {
+        "description": "The revision you last read of the finding named by `id`. Required with `id`.",
+        "format": "uint64",
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "id": {
+        "allOf": [
+          {
+            "$ref": "#/definitions/FindingIdDto"
+          }
+        ],
+        "description": "The finding to change. Leave it out to save a new finding."
+      },
+      "issue": {
+        "description": "Markdown starting with a paragraph: what is wrong.",
+        "maxLength": 8192,
+        "minLength": 1,
+        "type": "string"
+      },
+      "kind": {
+        "allOf": [
+          {
+            "$ref": "#/definitions/FindingKind"
+          }
+        ],
+        "description": "`functional` or `quality`. Security and correctness concerns are functional."
+      },
+      "locations": {
+        "description": "The files the finding points at. An empty list removes them.",
+        "items": {
+          "$ref": "#/definitions/FindingLocation"
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "proposedComment": {
+        "description": "Markdown starting with a paragraph: the comment the lead would post. An empty string removes it.",
+        "maxLength": 8192,
+        "type": "string"
+      },
+      "severity": {
+        "$ref": "#/definitions/Severity"
+      },
+      "title": {
+        "description": "One line naming the problem, without a severity label such as `P1 –`.",
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "title": "SaveFinding",
+    "type": "object"
+  },
+  "save_section": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "additionalProperties": false,
+    "definitions": {
+      "NoteSection": {
+        "description": "A section of the report, which `save_section` writes.",
+        "enum": [
+          "title",
+          "summary",
+          "rationale",
+          "flow",
+          "changes",
+          "threads",
+          "questions",
+          "verification",
+          "publication",
+          "extra"
+        ],
+        "type": "string"
+      }
+    },
+    "description": "Replaces one section of the report.",
+    "properties": {
+      "body": {
+        "description": "The section's Markdown. An empty body removes the section, except a required one.",
+        "maxLength": 32768,
+        "type": "string"
+      },
+      "expectedRevision": {
+        "description": "The revision you last read of this section. Required once the section exists.",
+        "format": "uint64",
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "section": {
+        "allOf": [
+          {
+            "$ref": "#/definitions/NoteSection"
+          }
+        ],
+        "description": "`title` is the report's title, on one line. `summary` says what the MR does in at most four plain paragraphs and `rationale` gives the reason for the verdict in one. `flow` is a Mermaid diagram of the principal code and data flow in a fenced block that opens with a line ```mermaid, then a short explanation. `changes` is a table with the two columns Before and After, then a table with the columns Affected operation, What changes and Source. `threads`, `questions`, `verification` and `publication` fill the report sections of those names, and `extra` adds a section under its own title. A first version or a full review needs `summary`, `rationale`, `flow`, `changes` and `verification`, and once saved they cannot be removed."
+      },
+      "title": {
+        "description": "One line naming an `extra` section. Required for `extra` and only for it.",
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "section",
+      "body"
+    ],
+    "title": "SaveSection",
+    "type": "object"
+  },
+  "set_finding_outcome": {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "additionalProperties": false,
     "definitions": {
@@ -33,7 +315,7 @@
         "type": "string"
       }
     },
-    "description": "Records what became of a finding already on file.",
+    "description": "Sets what became of a finding already saved.",
     "properties": {
       "checkedSha": {
         "allOf": [
@@ -83,10 +365,10 @@
       "outcome",
       "reason"
     ],
-    "title": "AssessFinding",
+    "title": "SetFindingOutcome",
     "type": "object"
   },
-  "finish_review": {
+  "submit_review": {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "additionalProperties": false,
     "definitions": {
@@ -190,7 +472,7 @@
         "type": "object"
       }
     },
-    "description": "Closes the review and publishes a version. A first or full review needs `verdict`, `revision` and the `summary`, `rationale`, `flow`, `changes` and `verification` notes; a selected-thread check needs one entry in `assessments` per selected discussion.",
+    "description": "Closes the review and publishes a version. A first or full review needs `verdict`, `revision` and the `summary`, `rationale`, `flow`, `changes` and `verification` sections; a selected-thread check needs one entry in `assessments` per selected discussion.",
     "properties": {
       "assessments": {
         "description": "One per selected discussion of a selected-thread check, and only there.",
@@ -201,7 +483,7 @@
         "type": "array"
       },
       "fullReview": {
-        "description": "Publish a full review of the whole MR. Every active finding of the last version must then be changed or assessed.",
+        "description": "Publish a full review of the whole MR. Every active finding of the last version must then be changed or given an outcome.",
         "type": "boolean"
       },
       "revision": {
@@ -221,307 +503,25 @@
         "description": "Required for a first version and a full review. Otherwise it defaults to the current version's verdict."
       }
     },
-    "title": "FinishReview",
+    "title": "SubmitReview",
     "type": "object"
   },
-  "needs_input": {
+  "wait_for_user": {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "additionalProperties": false,
-    "description": "Records a question the reviewer must answer before the review can finish, and holds the review until then. It publishes nothing.",
+    "description": "Pauses the review until the user replies to a question that must be answered before the review can finish. It publishes nothing.",
     "properties": {
-      "reason": {
-        "description": "The question, and what the review waits on. Ask it in your reply as well: the reviewer is told only that the review needs input.",
+      "question": {
+        "description": "The question, and what the review waits on. Ask it in your reply as well: the user is told only that the review needs input.",
         "maxLength": 1024,
         "minLength": 1,
         "type": "string"
       }
     },
     "required": [
-      "reason"
+      "question"
     ],
-    "title": "NeedsInput",
-    "type": "object"
-  },
-  "record_finding": {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "additionalProperties": false,
-    "definitions": {
-      "FindingBasis": {
-        "additionalProperties": false,
-        "description": "What the agent confirmed (`observed`) or could not verify (`gap`).",
-        "properties": {
-          "kind": {
-            "$ref": "#/definitions/FindingBasisKind"
-          },
-          "text": {
-            "maxLength": 8192,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "text"
-        ],
-        "type": "object"
-      },
-      "FindingBasisKind": {
-        "enum": [
-          "observed",
-          "gap"
-        ],
-        "type": "string"
-      },
-      "FindingIdDto": {
-        "description": "A report finding ID: `F-` and the finding's number, written with at least two digits and no other leading zero, such as `F-01` or `F-100`.",
-        "maxLength": 11,
-        "pattern": "^F-(0[1-9]|[1-9][0-9]{1,8})$",
-        "type": "string"
-      },
-      "FindingLocation": {
-        "additionalProperties": false,
-        "description": "A file a finding points at, with an optional 1-based line.",
-        "properties": {
-          "line": {
-            "format": "uint32",
-            "maximum": 4294967295,
-            "minimum": 1,
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "path": {
-            "maxLength": 512,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "path"
-        ],
-        "type": "object"
-      },
-      "FindingSection": {
-        "enum": [
-          "functional",
-          "quality"
-        ],
-        "type": "string"
-      },
-      "Severity": {
-        "description": "A finding's severity, most severe first.",
-        "enum": [
-          "P0",
-          "P1",
-          "P2",
-          "P3"
-        ],
-        "type": "string"
-      }
-    },
-    "description": "Files a new finding, or changes the finding named by `id`. A new finding gives `title`, `severity`, `blocking`, `section`, `issue`, `consequence` and `evidence`. A change gives `id`, `expectedRevision` and only the fields it changes.",
-    "properties": {
-      "blocking": {
-        "description": "Whether the lead holds the merge on this finding.",
-        "type": "boolean"
-      },
-      "category": {
-        "description": "A one-line label without `·`, such as Security or Tests. Defaults to the section's name.",
-        "maxLength": 48,
-        "minLength": 1,
-        "type": "string"
-      },
-      "consequence": {
-        "description": "Markdown starting with a paragraph: why it matters.",
-        "maxLength": 8192,
-        "minLength": 1,
-        "type": "string"
-      },
-      "details": {
-        "description": "Markdown for diagrams, tables and longer reasoning, shown after the evidence. An empty string removes it.",
-        "maxLength": 16384,
-        "type": "string"
-      },
-      "evidence": {
-        "$ref": "#/definitions/FindingBasis"
-      },
-      "expectedRevision": {
-        "description": "The revision you last read of the finding named by `id`. Required with `id`.",
-        "format": "uint64",
-        "maximum": 9007199254740991,
-        "minimum": 1,
-        "type": "integer"
-      },
-      "id": {
-        "allOf": [
-          {
-            "$ref": "#/definitions/FindingIdDto"
-          }
-        ],
-        "description": "The finding to change. Leave it out to file a new finding."
-      },
-      "issue": {
-        "description": "Markdown starting with a paragraph: what is wrong.",
-        "maxLength": 8192,
-        "minLength": 1,
-        "type": "string"
-      },
-      "locations": {
-        "description": "The files the finding points at. An empty list removes them.",
-        "items": {
-          "$ref": "#/definitions/FindingLocation"
-        },
-        "maxItems": 8,
-        "type": "array"
-      },
-      "proposedComment": {
-        "description": "Markdown starting with a paragraph: the comment the lead would post. An empty string removes it.",
-        "maxLength": 8192,
-        "type": "string"
-      },
-      "section": {
-        "allOf": [
-          {
-            "$ref": "#/definitions/FindingSection"
-          }
-        ],
-        "description": "`functional` or `quality`. Security and correctness concerns are functional."
-      },
-      "severity": {
-        "$ref": "#/definitions/Severity"
-      },
-      "title": {
-        "description": "One line naming the problem, without a severity label such as `P1 –`.",
-        "maxLength": 200,
-        "minLength": 1,
-        "type": "string"
-      }
-    },
-    "title": "RecordFinding",
-    "type": "object"
-  },
-  "record_note": {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "additionalProperties": false,
-    "definitions": {
-      "NoteSection": {
-        "description": "The section a review note fills.",
-        "enum": [
-          "title",
-          "summary",
-          "rationale",
-          "flow",
-          "changes",
-          "threads",
-          "questions",
-          "verification",
-          "publication",
-          "extra"
-        ],
-        "type": "string"
-      }
-    },
-    "description": "Replaces one review note.",
-    "properties": {
-      "body": {
-        "description": "The note's Markdown. An empty body removes the note, except a required one.",
-        "maxLength": 32768,
-        "type": "string"
-      },
-      "expectedRevision": {
-        "description": "The revision you last read of this note. Required once the note exists.",
-        "format": "uint64",
-        "maximum": 9007199254740991,
-        "minimum": 1,
-        "type": "integer"
-      },
-      "section": {
-        "allOf": [
-          {
-            "$ref": "#/definitions/NoteSection"
-          }
-        ],
-        "description": "`title` is the report's title, on one line. `summary` says what the MR does in at most four plain paragraphs and `rationale` gives the reason for the verdict in one. `flow` is a Mermaid diagram of the principal code and data flow in a fenced block that opens with a line ```mermaid, then a short explanation. `changes` is a table with the two columns Before and After, then a table with the columns Affected operation, What changes and Source. `threads`, `questions`, `verification` and `publication` fill the report sections of those names, and `extra` adds a section under its own title. A first version or a full review needs `summary`, `rationale`, `flow`, `changes` and `verification`, and once filed they cannot be removed."
-      },
-      "title": {
-        "description": "One line naming an `extra` note. Required for `extra` and only for it.",
-        "maxLength": 120,
-        "minLength": 1,
-        "type": "string"
-      }
-    },
-    "required": [
-      "section",
-      "body"
-    ],
-    "title": "RecordNote",
-    "type": "object"
-  },
-  "review_ledger": {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "additionalProperties": false,
-    "definitions": {
-      "FindingIdDto": {
-        "description": "A report finding ID: `F-` and the finding's number, written with at least two digits and no other leading zero, such as `F-01` or `F-100`.",
-        "maxLength": 11,
-        "pattern": "^F-(0[1-9]|[1-9][0-9]{1,8})$",
-        "type": "string"
-      },
-      "NoteSection": {
-        "description": "The section a review note fills.",
-        "enum": [
-          "title",
-          "summary",
-          "rationale",
-          "flow",
-          "changes",
-          "threads",
-          "questions",
-          "verification",
-          "publication",
-          "extra"
-        ],
-        "type": "string"
-      },
-      "PageCursorDto": {
-        "description": "An opaque keyset continuation for list resources.",
-        "maxLength": 8192,
-        "maxUtf8Bytes": 8192,
-        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
-        "type": "string"
-      }
-    },
-    "description": "Reads the ledger. With no field it returns the short list. Give `ids` or `sections`, not both.",
-    "properties": {
-      "cursor": {
-        "allOf": [
-          {
-            "$ref": "#/definitions/PageCursorDto"
-          }
-        ],
-        "description": "The cursor a previous result returned. Send it with the same `ids` or `sections`."
-      },
-      "ids": {
-        "description": "Findings to read in full. Leave out `sections` when you give these.",
-        "items": {
-          "$ref": "#/definitions/FindingIdDto"
-        },
-        "maxItems": 10,
-        "type": "array",
-        "uniqueItems": true
-      },
-      "sections": {
-        "description": "Note sections to read in full. `extra` reads every extra note. Leave out `ids` when you give these.",
-        "items": {
-          "$ref": "#/definitions/NoteSection"
-        },
-        "maxItems": 10,
-        "type": "array",
-        "uniqueItems": true
-      }
-    },
-    "title": "ReviewLedger",
+    "title": "WaitForUser",
     "type": "object"
   }
 }

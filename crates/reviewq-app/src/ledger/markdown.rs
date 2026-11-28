@@ -197,10 +197,10 @@ impl Display for FieldProblem {
                 label.text()
             ),
             ProblemKind::NoDiagram => output.write_str(
-                "The flow note needs a Mermaid diagram of the principal code and data flow: a line ```mermaid, the diagram, then a closing ```. Add the diagram and send the note again.",
+                "The flow section needs a Mermaid diagram of the principal code and data flow: a line ```mermaid, the diagram, then a closing ```. Add the diagram and send the section again.",
             ),
             ProblemKind::NoTable => output.write_str(
-                "The changes note needs a table with the two columns Before and After, then a table of the affected operations with the columns Affected operation, What changes and Source. Add the tables and send the note again.",
+                "The changes section needs a table with the two columns Before and After, then a table of the affected operations with the columns Affected operation, What changes and Source. Add the tables and send the section again.",
             ),
         }
     }

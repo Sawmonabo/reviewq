@@ -6,8 +6,8 @@ use reviewq_app::access::AppError;
 use reviewq_app::events::ResourceKey;
 use reviewq_app::followups::ResultKind;
 use reviewq_app::ledger::{
-    ClosingCommit, CommitKind, FinishReceipt, NewVersion, PublishCommit, PublishOutcome,
-    SnapshotGuard,
+    ClosingCommit, CommitKind, NewVersion, PublishCommit, PublishOutcome, SnapshotGuard,
+    SubmitReceipt,
 };
 use reviewq_app::notifications::{Kind, Observation, Source};
 use reviewq_app::reports::RevisionEvidence;
@@ -18,7 +18,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use super::calls::{self, finish_json};
+use super::calls::{self, submit_json};
 use super::passes::{self, RUN_TARGET};
 use super::sequence;
 use crate::connection::WriteTx;
@@ -44,7 +44,7 @@ pub(super) fn commit(
     // A closing call already stored, by a concurrent request with its call ID: the next
     // snapshot replays its acknowledgement.
     if let CommitKind::Closing(closing) = &kind
-        && calls::replay(db, &closing.call, Tool::FinishReview, RUN_TARGET)?.is_some()
+        && calls::replay(db, &closing.call, Tool::SubmitReview, RUN_TARGET)?.is_some()
     {
         return Ok(PublishOutcome::Stale);
     }
@@ -169,7 +169,7 @@ fn close(
             )?
             .execute(params![pass.get(), receipt.as_str(), time])?;
     }
-    let ack = FinishReceipt {
+    let ack = SubmitReceipt {
         receipt: receipt.clone(),
         sha256,
         summary,
@@ -177,10 +177,10 @@ fn close(
     calls::store(
         &tx.sql,
         &call,
-        Tool::FinishReview,
+        Tool::SubmitReview,
         RUN_TARGET,
         guard.sequence,
-        &finish_json(&ack, &assessments),
+        &submit_json(&ack, &assessments),
     )?;
     if let Some(manifest) = manifest {
         let kind = if version.is_some() {

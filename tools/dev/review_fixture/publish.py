@@ -30,7 +30,7 @@ def run_plan(service, plan, native_id):
             if "data" not in reply:
                 refusal = reply.get("fieldErrors") or reply.get("error")
                 raise Refused(f"{lead} call {calls} ({item['tool']}) was refused: {json.dumps(refusal)}")
-            if item["tool"] == "finish_review":
+            if item["tool"] == "submit_review":
                 versions.append(reply["data"]["receiptId"])
         sequence += 1
         service.heartbeat(native_id, "idle", sequence, turn)

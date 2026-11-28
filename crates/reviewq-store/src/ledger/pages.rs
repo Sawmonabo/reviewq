@@ -1,4 +1,4 @@
-//! `review_ledger`: one page of a run's ledger, holding whole records up to the page budget.
+//! `read_draft`: one page of a run's ledger, holding whole records up to the page budget.
 
 use reviewq_app::access::{AppError, FieldError};
 use reviewq_app::ledger::{
@@ -20,7 +20,7 @@ pub(super) fn read(
     read: LedgerRead,
 ) -> Result<LedgerPage, StoreError> {
     let (lead, agent) = caller::attribute(db, session)?;
-    if !may_call(Tool::ReviewLedger, agent.role()) {
+    if !may_call(Tool::ReadDraft, agent.role()) {
         return Err(AppError::Forbidden.into());
     }
     let run = lead.run_id();

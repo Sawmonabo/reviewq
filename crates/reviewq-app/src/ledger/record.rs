@@ -1,4 +1,4 @@
-//! The four record tools: `record_finding`, `assess_finding`, `record_note` and `review_ledger`.
+//! The four record tools: `save_finding`, `set_finding_outcome`, `save_section` and `read_draft`.
 //! Each checks its Markdown fields with `markdown::check_field`, returns every field error
 //! together, then makes one `LedgerStore` call and words a `WriteRefusal`, or a caller the
 //! store cannot bind, as a field error. The protocol checked field shapes, sizes and titles;
@@ -18,7 +18,7 @@ use super::{
 };
 use crate::access::{AppError, FieldError};
 
-/// `record_finding`'s input: a new finding, or a change to one on file.
+/// `save_finding`'s input: a new finding, or a change to one on file.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FindingInput {
     /// Filed without `id`. ReviewQ assigns the next unused ID.
@@ -39,7 +39,7 @@ pub enum FindingInput {
 /// written; or with one field error for a store refusal: an unknown ID, a stale revision, a
 /// duplicate of an active finding, a run already at `MAX_ACTIVE_FINDINGS`, or a caller that is
 /// neither the run's lead nor a verified child of it. Other store errors pass through.
-pub async fn record_finding(
+pub async fn save_finding(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
     input: FindingInput,
@@ -85,7 +85,7 @@ pub async fn record_finding(
 /// Fails with one field error for an unknown ID, a stale revision, a reopened finding that
 /// would take the run past `MAX_ACTIVE_FINDINGS`, or a caller the store cannot bind. Other
 /// store errors pass through.
-pub async fn assess_finding(
+pub async fn set_finding_outcome(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
     assessment: FindingAssessment,
@@ -95,7 +95,7 @@ pub async fn assess_finding(
         store,
         binding,
         subject,
-        RecordWrite::AssessFinding(assessment),
+        RecordWrite::SetFindingOutcome(assessment),
     )
     .await
 }
@@ -109,7 +109,7 @@ pub async fn assess_finding(
 /// field error for a store refusal: a missing or stale expected revision, removing a note that
 /// is not on file, a run already at `MAX_EXTRA_NOTES`, or a caller the store cannot bind.
 /// Other store errors pass through.
-pub async fn record_note(
+pub async fn save_section(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
     mut note: NoteWrite,
@@ -121,7 +121,7 @@ pub async fn record_note(
     if note.key.title().is_some_and(repeats_fixed_heading) {
         errors.push(FieldError::new(
             "/title",
-            "This title repeats a heading the report already has. Give the extra note a title of its own, or put the text in the matching section's note.",
+            "This title repeats a heading the report already has. Give the extra section a title of its own, or put the text in the section of that name.",
         ));
     }
     let subject = Subject::Note(note.key.clone());
@@ -150,7 +150,7 @@ pub async fn record_note(
 /// issued for another read, with a field error at `/cursor` when the ledger changed since the
 /// cursor was issued, and with a root field error for a caller the store cannot bind. Other
 /// store errors pass through.
-pub async fn review_ledger(
+pub async fn read_draft(
     store: &(impl LedgerStore + ?Sized),
     binding: CallBinding,
     read: LedgerRead,
@@ -159,9 +159,9 @@ pub async fn review_ledger(
         Ok(page) => Ok(page),
         Err(AppError::CursorExpired) => Err(AppError::InvalidFields(vec![FieldError::new(
             "/cursor",
-            "The ledger changed after this cursor was issued. Read again without cursor to start from the first page.",
+            "A finding or section was saved or changed after this cursor was issued. Read again without cursor to start from the first page.",
         )])),
-        Err(error) => Err(for_agent(store, &binding.session, Tool::ReviewLedger, error).await),
+        Err(error) => Err(for_agent(store, &binding.session, Tool::ReadDraft, error).await),
     }
 }
 
@@ -173,15 +173,15 @@ enum Subject {
 }
 
 impl Subject {
-    /// How a message names the record: `F-03`, `this finding`, `the summary note` or
-    /// `the extra note "Rollout"`.
+    /// How a message names the record: `F-03`, `this finding`, `the summary section` or
+    /// `the extra section "Rollout"`.
     fn name(&self) -> String {
         match self {
             Self::NewFinding => "this finding".to_owned(),
             Self::Finding(id) => id.to_string(),
             Self::Note(key) => match key.title() {
-                Some(title) => format!("the extra note \"{title}\""),
-                None => format!("the {} note", key.section()),
+                Some(title) => format!("the extra section \"{title}\""),
+                None => format!("the {} section", key.section()),
             },
         }
     }
@@ -213,7 +213,7 @@ fn sent_revision(write: &RecordWrite) -> Option<RecordRevision> {
         RecordWrite::ChangeFinding {
             expected_revision, ..
         } => Some(*expected_revision),
-        RecordWrite::AssessFinding(assessment) => Some(assessment.expected_revision),
+        RecordWrite::SetFindingOutcome(assessment) => Some(assessment.expected_revision),
         RecordWrite::WriteNote(note) => note.expected_revision,
     }
 }
@@ -313,11 +313,12 @@ fn refusal_error(
     sent: Option<RecordRevision>,
 ) -> FieldError {
     let name = subject.name();
+    let read = Tool::ReadDraft.as_str();
     match refusal {
         WriteRefusal::UnknownFinding => FieldError::new(
             "/id",
             format!(
-                "{} is not a finding of this review. Call review_ledger to see the IDs on file.",
+                "{} is not a finding of this review. Call {read} to see the saved IDs.",
                 capitalized(&name),
             ),
         ),
@@ -325,11 +326,11 @@ fn refusal_error(
             "/expectedRevision",
             match sent {
                 Some(sent) if sent > *current => format!(
-                    "{} is at revision {current}, and revision {sent}, which you sent, does not exist yet: send the revision that review_ledger or a tool result showed you. Read it again with review_ledger, then send your change with expectedRevision {current}.",
+                    "{} is at revision {current}, and revision {sent}, which you sent, does not exist yet: send the revision that {read} or a tool result showed you. Read it again with {read}, then send your change with expectedRevision {current}.",
                     capitalized(&name),
                 ),
                 _ => format!(
-                    "{} is at revision {current} now, and {} since the revision you sent. Read it again with review_ledger, then send your change with expectedRevision {current}.",
+                    "{} is at revision {current} now, and {} since the revision you sent. Read it again with {read}, then send your change with expectedRevision {current}.",
                     capitalized(&name),
                     changed_fields(changed),
                 ),
@@ -338,33 +339,34 @@ fn refusal_error(
         WriteRefusal::RevisionRequired { current } => FieldError::new(
             "/expectedRevision",
             format!(
-                "{} is already on file at revision {current}. Read it with review_ledger, then send expectedRevision {current} to replace it.",
+                "{} is already saved at revision {current}. Read it with {read}, then send expectedRevision {current} to replace it.",
                 capitalized(&name),
             ),
         ),
         WriteRefusal::UnknownNote => FieldError::new(
             "/body",
             format!(
-                "{} is not on file, so there is nothing to remove. Send a body to file it.",
+                "{} is not saved, so there is nothing to remove. Send a body to save it.",
                 capitalized(&name),
             ),
         ),
         WriteRefusal::DuplicateFinding { id } => FieldError::new(
             "/title",
             format!(
-                "{id} is already on file with this title at the same place. Change {id} instead: send its id and the expectedRevision that review_ledger shows."
+                "{id} is already saved with this title at the same place. Change {id} instead: send its id and the expectedRevision that {read} shows."
             ),
         ),
         WriteRefusal::TooManyFindings => FieldError::new(
             "",
             format!(
-                "This review already holds {MAX_ACTIVE_FINDINGS} active findings. Fold this into a related finding, or retire findings that no longer apply with assess_finding."
+                "This review already holds {MAX_ACTIVE_FINDINGS} active findings. Fold this into a related finding, or retire findings that no longer apply with {}.",
+                Tool::SetFindingOutcome.as_str()
             ),
         ),
         WriteRefusal::TooManyExtraNotes => FieldError::new(
             "/title",
             format!(
-                "This review already holds {MAX_EXTRA_NOTES} extra notes. Add this text to one of them or to a fixed section's note."
+                "This review already holds {MAX_EXTRA_NOTES} extra sections. Add this text to one of them or to another section."
             ),
         ),
     }

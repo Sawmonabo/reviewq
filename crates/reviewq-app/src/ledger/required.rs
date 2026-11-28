@@ -1,5 +1,6 @@
-//! The five notes every first version and full review holds, listed once for `finish_review`,
-//! `record_note`, what an open full-review pass owes and the reason an unfinished review gives.
+//! The five sections every first version and full review holds, listed once for
+//! `submit_review`, `save_section`, what an open full-review pass owes and the reason an
+//! unfinished review gives. A note is the stored text of one section.
 
 use super::NoteSection;
 
@@ -27,15 +28,15 @@ pub(super) fn missing(on_file: impl IntoIterator<Item = NoteSection>) -> Vec<Not
         .collect()
 }
 
-/// `the flow note` or `the summary, flow and changes notes`, for a sentence; `None` when
+/// `the flow section` or `the summary, flow and changes sections`, for a sentence; `None` when
 /// `missing` is empty.
 pub(super) fn named(missing: &[NoteSection]) -> Option<String> {
     let (last, rest) = missing.split_last()?;
     Some(match rest {
-        [] => format!("the {last} note"),
+        [] => format!("the {last} section"),
         _ => {
             let rest: Vec<String> = rest.iter().map(ToString::to_string).collect();
-            format!("the {} and {last} notes", rest.join(", "))
+            format!("the {} and {last} sections", rest.join(", "))
         }
     })
 }

@@ -7,6 +7,12 @@ use crate::{
     SubmissionIdDto, UtcTimestampDto, reports::ReportHashDto,
 };
 
+/// The name of the Claude plugin's tool that declares and reconciles a publication action.
+pub const TRACK_POSTING: &str = "track_posting";
+
+/// The description the model reads for `track_posting`.
+pub const TRACK_POSTING_DESCRIPTION: &str = "Records that the user's latest message explicitly asked you to post the stated GitLab comments or approval, so ReviewQ can check what gets posted. Before you post, call it with operation declare and give intent (comments, approval, both, or cancel to withdraw the request), reviewedSha, the merge request's full head SHA, and for comments and both each comment's bodySha256, the SHA-256 of its exact text, with its discussionId unless it starts a new thread. Then post through your usual GitLab tools exactly what the user asked for and nothing more. With operation reconcile, ReviewQ checks GitLab for what was posted and returns the action's state. ReviewQ itself posts nothing.";
+
 #[derive(Debug, serde::Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

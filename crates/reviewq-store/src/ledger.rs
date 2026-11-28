@@ -48,10 +48,10 @@ impl LedgerStore for SqliteStore {
     fn hold_pass(
         &self,
         binding: CallBinding,
-        reason: String,
+        question: String,
     ) -> AppFuture<'_, Option<HoldReceipt>> {
         Box::pin(async move {
-            self.write(move |tx| passes::hold(tx, &binding, &reason))
+            self.write(move |tx| passes::hold(tx, &binding, &question))
                 .await
                 .map_err(StoreError::app)
         })

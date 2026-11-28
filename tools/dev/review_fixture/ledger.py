@@ -1,8 +1,8 @@
-"""The ledger calls that produce each fixture review's report versions.
+"""The reviewing tool calls that produce each fixture review's report versions.
 
 A plan is a list of steps for one Claude lead. A `turn` step is one lead turn: the calls it
-makes, in order, the last of which may close it with `finish_review`. A `disposition` step is
-the reviewer's choice saved through the browser's route between turns. ReviewQ composes and
+makes, in order, the last of which may close it with `submit_review`. A `disposition` step is
+the user's choice saved through the browser's route between turns. ReviewQ composes and
 publishes every version; nothing here writes report text.
 """
 
@@ -18,9 +18,9 @@ def call(tool, value, agent=None):
     return step
 
 
-def finding(title, severity, blocking, section, issue, consequence, evidence, kind="observed", **extra):
-    value = {"title": title, "severity": severity, "blocking": blocking, "section": section,
-             "issue": issue, "consequence": consequence, "evidence": {"kind": kind, "text": evidence}}
+def finding(title, severity, blocking, kind, issue, consequence, evidence, basis="observed", **extra):
+    value = {"title": title, "severity": severity, "blocking": blocking, "kind": kind,
+             "issue": issue, "consequence": consequence, "evidence": {"kind": basis, "text": evidence}}
     value.update(extra)
     return value
 
@@ -46,14 +46,14 @@ CLOSING_NOTES = {
 
 
 def closing_notes(*own):
-    """The record_note calls for the notes a first version or full review needs, except the
+    """The save_section calls for the notes a first version or full review needs, except the
     sections in `own`, which the plan files itself."""
-    return [call("record_note", note(section, body)) for section, body in CLOSING_NOTES.items()
+    return [call("save_section", note(section, body)) for section, body in CLOSING_NOTES.items()
             if section not in own]
 
 
 def finish(head, verdict="request_changes", **extra):
-    return call("finish_review", {"verdict": verdict, "revision": {"sha": head}, **extra})
+    return call("submit_review", {"verdict": verdict, "revision": {"sha": head}, **extra})
 
 
 def worked(head):
@@ -61,67 +61,67 @@ def worked(head):
     review and then a second full review that changes F-01, assesses F-01, F-02 and F-03,
     settles F-03 and adds F-04. A full review must assess every finding it does not change."""
     first = [
-        call("record_finding", finding(
+        call("save_finding", finding(
             "Retry writes the same invoice twice", "P1", True, "functional",
             "The retry builds a fresh idempotency key after the first insert commits.",
             "A lost acknowledgement creates a duplicate invoice.",
             "Replaying the request after a dropped reply inserted two rows.",
             locations=[{"path": "src/invoices.rs", "line": 74}])),
-        call("record_finding", finding(
+        call("save_finding", finding(
             "`retry_key` is rebuilt on every attempt", "P2", True, "quality",
             "`retry_key` is called inside the loop, so each attempt gets a new key.",
             "The server cannot tell a retry from a new request.",
             "The unit test `retries_reuse_key` fails at the reviewed commit.",
             category="Reliability", proposedComment="Build the key once, before the loop.",
             locations=[{"path": "src/retry.rs", "line": 12}, {"path": "docs/retry`notes.md"}]), agent="agent-7"),
-        call("record_finding", finding(
+        call("save_finding", finding(
             "Two retry paths build separate keys", "P1", True, "functional",
             "The sync and async paths each build their own key.",
             "A retry on the other path writes a second invoice.",
             "Both paths call `new_key`.", locations=[{"path": "src/retry.rs", "line": 30}])),
-        call("record_note", note("title", "Retry invoice writes without duplicates")),
-        call("record_note", note("summary", "Adds a retry loop around invoice writes so a dropped acknowledgement "
+        call("save_section", note("title", "Retry invoice writes without duplicates")),
+        call("save_section", note("summary", "Adds a retry loop around invoice writes so a dropped acknowledgement "
                                             "no longer fails the request.\n\nThe retry reuses the request's idempotency key.")),
-        call("record_note", note("rationale", "The retry still creates a new key on one path, which can write a "
+        call("save_section", note("rationale", "The retry still creates a new key on one path, which can write a "
                                               "duplicate invoice.")),
-        call("record_note", note("flow", "```mermaid\nflowchart LR\n  Client --> InvoiceService --> Database\n```\n\n"
+        call("save_section", note("flow", "```mermaid\nflowchart LR\n  Client --> InvoiceService --> Database\n```\n\n"
                                          "`POST /invoices` reaches `InvoiceService::create`, which writes the row "
                                          "and returns the receipt.")),
-        call("record_note", note("changes", "| Before | After |\n| --- | --- |\n"
+        call("save_section", note("changes", "| Before | After |\n| --- | --- |\n"
                                             "| A dropped acknowledgement fails the request. | The write is retried "
                                             "with the stored key. |\n\n"
                                             "| Affected operation | What changes | Source |\n| --- | --- | --- |\n"
                                             "| `POST /invoices` | Retries the write once. | `src/retry.rs` |\n"
                                             "| `InvoiceService::create` | Builds the key before the first attempt. | "
                                             "`src/invoices.rs` |")),
-        call("record_note", note("questions", "Should a retry give up after three attempts or after a time limit?")),
-        call("record_note", note("verification", "Ran `cargo test -p invoices` at the reviewed commit. The replay "
+        call("save_section", note("questions", "Should a retry give up after three attempts or after a time limit?")),
+        call("save_section", note("verification", "Ran `cargo test -p invoices` at the reviewed commit. The replay "
                                                  "check ran against a local database only.")),
-        call("record_note", note("extra", "Ship behind the `invoice_retry` flag.\n", "Rollout plan for *v2* & `beta` #")),
-        call("record_note", note("publication", "No comments are posted yet.")),
+        call("save_section", note("extra", "Ship behind the `invoice_retry` flag.\n", "Rollout plan for *v2* & `beta` #")),
+        call("save_section", note("publication", "No comments are posted yet.")),
         finish(head),
     ]
     second = [
-        call("record_finding", {
+        call("save_finding", {
             "id": "F-01", "expectedRevision": 1,
             "proposedComment": "Reuse the key stored with the first attempt instead of building a new one.\n",
             "details": "\nThe timeline below shows the race.\n\n## Timeline\n\n1. The first insert commits.\n"
                        "2. The reply is lost and the client retries.\n\nEach <runner> keeps the body as a "
                        "Vec<u8> until the write commits.\n\n"}),
-        call("assess_finding", {"id": "F-01", "expectedRevision": 2, "outcome": "still_present",
+        call("set_finding_outcome", {"id": "F-01", "expectedRevision": 2, "outcome": "still_present",
                                 "reason": "The retry path still builds a new key.", "discussionIds": ["D9"]}),
-        call("assess_finding", {"id": "F-02", "expectedRevision": 1, "outcome": "still_present",
+        call("set_finding_outcome", {"id": "F-02", "expectedRevision": 1, "outcome": "still_present",
                                 "reason": "`retry_key` is still called inside the loop."}),
-        call("assess_finding", {"id": "F-03", "expectedRevision": 1, "outcome": "fixed",
+        call("set_finding_outcome", {"id": "F-03", "expectedRevision": 1, "outcome": "fixed",
                                 "reason": "Both paths now share one key | verified by replay.",
                                 "discussionIds": ["D7"], "checkedSha": FIXED_AT}),
-        call("record_finding", finding(
+        call("save_finding", finding(
             "Retry delay is not configurable", "P3", False, "quality",
             "The delay between attempts is a constant.", "Operators cannot slow retries during an outage.",
-            "The production retry settings were not available to check.", kind="gap",
+            "The production retry settings were not available to check.", basis="gap",
             proposedComment="Make the delay a setting.\n\n- Read it from `RETRY_DELAY_MS`.\n"
                             "- Keep 200 ms as the default.\n")),
-        call("record_note", note("threads", "The author replied on D7 that the shared key landed in the second commit.")),
+        call("save_section", note("threads", "The author replied on D7 that the shared key landed in the second commit.")),
         finish(head, fullReview=True),
     ]
     disposition = {"finding": "F-02", "blocking": False, "publication": "withheld",
@@ -132,9 +132,9 @@ def worked(head):
 def reader(head):
     """A short review with a quote and a diagram, then an update with a new verdict."""
     first = [
-        call("record_note", note("title", "Worked review")),
-        call("record_note", note("rationale", "Request changes until the parser validates an empty instruction.")),
-        call("record_finding", finding(
+        call("save_section", note("title", "Worked review")),
+        call("save_section", note("rationale", "Request changes until the parser validates an empty instruction.")),
+        call("save_finding", finding(
             "The parser accepts incomplete input", "P1", True, "functional",
             f"The parser accepts {QUOTE} before checking that input is complete.",
             "An empty instruction reaches the review step.", "A replayed empty instruction was accepted.",
@@ -144,9 +144,9 @@ def reader(head):
         finish(head),
     ]
     second = [
-        call("record_note", {**note("rationale", "Approve: the parser changes validate an empty instruction."),
+        call("save_section", {**note("rationale", "Approve: the parser changes validate an empty instruction."),
                              "expectedRevision": 1}),
-        call("assess_finding", {"id": "F-01", "expectedRevision": 1, "outcome": "fixed",
+        call("set_finding_outcome", {"id": "F-01", "expectedRevision": 1, "outcome": "fixed",
                                 "reason": "The parser now checks for an empty instruction first."}),
         finish(head, "approve"),
     ]
@@ -168,40 +168,40 @@ def closing(head, tail, calls, own=()):
     """One turn that files `calls`, the closing notes the plan does not file itself, and the
     publication note that ends in `tail`, then closes the first version."""
     notes = closing_notes(*own)
-    return [{"turn": [*calls, *notes, call("record_note", note("publication", tail)), finish(head)]}]
+    return [{"turn": [*calls, *notes, call("save_section", note("publication", tail)), finish(head)]}]
 
 
 def specimens(head):
     """One plan per reader limit. Each crosses one limit and stays inside the others."""
-    bytes_over = [call("record_finding", filler(i, 4)) for i in range(22)]
+    bytes_over = [call("save_finding", filler(i, 4)) for i in range(22)]
     # The flow note needs its Mermaid diagram and the changes note its table. Each takes the
     # place of four lines, so the note stays within its 32 KiB.
     opening = {"flow": "```mermaid\nflowchart LR\n  Report --> Reader\n```\n\n",
                "changes": "| Before | After |\n| --- | --- |\n| Short. | Long. |\n\n"}
-    lines_over = [call("record_note", note(section, opening[section] + "\n".join(["Report line."] * 2516)
+    lines_over = [call("save_section", note(section, opening[section] + "\n".join(["Report line."] * 2516)
                                            if section in opening else "\n".join(["Report line."] * 2520)))
                   for section in ("flow", "changes", "questions", "verification")]
-    line_over = [call("record_finding", finding(
+    line_over = [call("save_finding", finding(
         "Locations in long Unicode paths", "P3", False, "quality", "Every path is long.", "The line is long.",
         "The location line exceeds 16 KiB.",
         locations=[{"path": "🧪" * 200 + str(i)} for i in range(8)]))]
     edges = "\n".join(f"  N{i} --> N{i + 1}" for i in range(650))
-    edges_over = [call("record_finding", finding(
+    edges_over = [call("save_finding", finding(
         "A diagram with 650 edges", "P3", False, "quality", "The flow has many steps.", "It is hard to read.",
         "The diagram below has 650 edges.", details=f"```mermaid\nflowchart LR\n{edges}\n```"))]
     labels = ("  %% " + "diagram label " * 42 + "\n") * 55
-    characters_over = [call("record_note", note("verification", f"```mermaid\nflowchart LR\n{labels}  A --> B\n```"))]
+    characters_over = [call("save_section", note("verification", f"```mermaid\nflowchart LR\n{labels}  A --> B\n```"))]
     emphasis = " ".join(["*a*"] * 2047)
-    nodes_over = [call("record_finding", finding(
+    nodes_over = [call("save_finding", finding(
         f"Dense emphasis {i}", "P3", False, "quality", "Many inline nodes follow.", "The tree is large.",
         "Each line holds about 2,000 emphasis nodes.", details=f"{emphasis}\n{emphasis}")) for i in range(6)]
-    depth_over = [call("record_finding", finding(
+    depth_over = [call("save_finding", finding(
         "A deeply nested quote", "P3", False, "quality", "The quote nests deeply.", "The tree is deep.",
         "The quote below nests 130 levels.", details="> " * 130 + "deep"))]
     # The windowed reader needs the display index inside 512 blocks, about six per card, so the
     # windowed specimens reach their size with few long cards. `specimen-blocks` keeps 200 short
     # cards, which cross the block budget and open in the full reader.
-    blocks_over = [call("record_finding", finding(
+    blocks_over = [call("save_finding", finding(
         f"Short finding {i:03d}", "P3", False, "quality",
         f"Finding {i} reads a short paragraph about the parser's handling of one input. " * 2,
         "A reader checks that every card is reachable.", f"Observed while reading input {i}.",
@@ -209,7 +209,7 @@ def specimens(head):
     def long_cards(count):
         def prose(i, sentence):
             return " ".join(sentence.format(i=i, step=step) for step in range(1, 11))
-        return [call("record_finding", finding(
+        return [call("save_finding", finding(
             f"Windowed finding {i:02d}", "P3", False, "quality",
             prose(i, "Step {step} of input {i} passes through the tokenizer, the parser and the checker."),
             prose(i, "A reader of card {i} scrolls past step {step} and expects the next card to load."),
@@ -218,7 +218,7 @@ def specimens(head):
     # Below 64 KiB a version opens windowed only when it changes findings: a first version
     # of 12 cards stays whole, and the update that settles one card crosses 24 KiB with a change.
     changes = closing(head, "REPORT-CHANGES-TAIL", long_cards(12))
-    changes.append({"turn": [call("assess_finding", {"id": "F-01", "expectedRevision": 1, "outcome": "fixed",
+    changes.append({"turn": [call("set_finding_outcome", {"id": "F-01", "expectedRevision": 1, "outcome": "fixed",
                                                      "reason": "The first card's input is now handled."}),
                              finish(head)]})
     return {

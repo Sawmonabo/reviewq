@@ -56,7 +56,7 @@ pub(super) fn write(
     let target = match &write {
         RecordWrite::CreateFinding(_) => NEW_FINDING.to_owned(),
         RecordWrite::ChangeFinding { id, .. } => finding_target(*id),
-        RecordWrite::AssessFinding(assessment) => finding_target(assessment.id),
+        RecordWrite::SetFindingOutcome(assessment) => finding_target(assessment.id),
         RecordWrite::WriteNote(note) => note_target(&note.key),
     };
     if let Some((stored, _)) = calls::replay(db, &caller, tool, &target)? {
@@ -70,7 +70,7 @@ pub(super) fn write(
             expected_revision,
             patch,
         } => change(db, run.as_str(), id, expected_revision, *patch)?,
-        RecordWrite::AssessFinding(assessment) => assess(db, run.as_str(), assessment)?,
+        RecordWrite::SetFindingOutcome(assessment) => assess(db, run.as_str(), assessment)?,
         RecordWrite::WriteNote(note) => write_note(db, run.as_str(), note)?,
     };
     let planned = match planned {
@@ -398,7 +398,7 @@ fn patch_changes(fields: &FindingFields, patch: &FindingPatch) -> bool {
     differs(patch.title.as_ref(), &fields.title)
         || differs(patch.severity.as_ref(), &fields.severity)
         || differs(patch.blocking.as_ref(), &fields.blocking)
-        || differs(patch.section.as_ref(), &fields.section)
+        || differs(patch.kind.as_ref(), &fields.kind)
         || patch
             .category
             .as_ref()
@@ -417,7 +417,7 @@ fn apply(fields: &mut FindingFields, patch: FindingPatch) {
         title,
         severity,
         blocking,
-        section,
+        kind,
         category,
         locations,
         issue,
@@ -435,8 +435,8 @@ fn apply(fields: &mut FindingFields, patch: FindingPatch) {
     if let Some(value) = blocking {
         fields.blocking = value;
     }
-    if let Some(value) = section {
-        fields.section = value;
+    if let Some(value) = kind {
+        fields.kind = value;
     }
     if let Some(value) = category {
         fields.category = Some(value);
@@ -506,7 +506,7 @@ fn put_finding(
         .map_err(|_| AppError::Internal)?;
     db.prepare_cached(
         "INSERT INTO ledger_changes(run_id, sequence, finding, revision, provider, native_session,
-           native_turn_id, call_id, author, changed_at_ms, severity, blocking, section, title,
+           native_turn_id, call_id, author, changed_at_ms, severity, blocking, kind, title,
            category, evidence_kind, conclusion, checked_sha, outcome_reason, discussion_ids,
            locations, issue, consequence, evidence, proposed_comment, details)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,
@@ -525,7 +525,7 @@ fn put_finding(
         time,
         fields.severity.to_string(),
         fields.blocking,
-        fields.section.to_string(),
+        fields.kind.to_string(),
         fields.title,
         fields.category,
         body.evidence.kind.to_string(),

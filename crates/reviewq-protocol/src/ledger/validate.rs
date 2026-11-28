@@ -1,4 +1,4 @@
-//! The one check of a ledger tool input's shape and size. The app checks the Markdown, the
+//! The one check of a reviewing tool input's shape and size. The app checks the Markdown, the
 //! report layout and the per-run limits, and the store checks revisions and duplicates.
 
 use std::collections::BTreeSet;
@@ -10,19 +10,19 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use super::inputs::{
-    AssessFinding, FinishReview, LedgerInput, MAX_DETAILS_BYTES, MAX_NOTE_BODY_BYTES,
-    MAX_TITLE_CHARS, MAX_TOOL_INPUT_BYTES, NeedsInput, RecordFinding, RecordNote, ReviewLedger,
+    LedgerInput, MAX_DETAILS_BYTES, MAX_NOTE_BODY_BYTES, MAX_TITLE_CHARS, MAX_TOOL_INPUT_BYTES,
+    ReadDraft, SaveFinding, SaveSection, SetFindingOutcome, SubmitReview, WaitForUser,
 };
 use super::{LEDGER_TOOLS, LedgerTool};
 use crate::field_errors::{FieldError, collect_schema_errors};
 use crate::reports::MAX_FINDING_TEXT_BYTES;
 
-/// The fields a finding filed without `id` must give.
+/// The fields a finding saved without `id` must give.
 const NEW_FINDING_FIELDS: [&str; 7] = [
     "title",
     "severity",
     "blocking",
-    "section",
+    "kind",
     "issue",
     "consequence",
     "evidence",
@@ -112,15 +112,15 @@ fn check(
             errors: &mut errors,
         };
         match tool {
-            LedgerTool::RecordFinding => rules.record_finding(),
-            LedgerTool::AssessFinding => {
+            LedgerTool::SaveFinding => rules.save_finding(),
+            LedgerTool::SetFindingOutcome => {
                 rules.one_line("/reason");
             }
-            LedgerTool::RecordNote => rules.record_note(),
-            LedgerTool::ReviewLedger => rules.review_ledger(),
-            LedgerTool::FinishReview => rules.finish_review(),
-            LedgerTool::NeedsInput => {
-                rules.written("/reason");
+            LedgerTool::SaveSection => rules.save_section(),
+            LedgerTool::ReadDraft => rules.read_draft(),
+            LedgerTool::SubmitReview => rules.submit_review(),
+            LedgerTool::WaitForUser => {
+                rules.written("/question");
             }
         }
     }
@@ -137,12 +137,14 @@ fn check(
 
 fn decode(tool: LedgerTool, input: &Value) -> Result<LedgerInput, serde_json::Error> {
     Ok(match tool {
-        LedgerTool::RecordFinding => LedgerInput::RecordFinding(RecordFinding::deserialize(input)?),
-        LedgerTool::AssessFinding => LedgerInput::AssessFinding(AssessFinding::deserialize(input)?),
-        LedgerTool::RecordNote => LedgerInput::RecordNote(RecordNote::deserialize(input)?),
-        LedgerTool::ReviewLedger => LedgerInput::ReviewLedger(ReviewLedger::deserialize(input)?),
-        LedgerTool::FinishReview => LedgerInput::FinishReview(FinishReview::deserialize(input)?),
-        LedgerTool::NeedsInput => LedgerInput::NeedsInput(NeedsInput::deserialize(input)?),
+        LedgerTool::SaveFinding => LedgerInput::SaveFinding(SaveFinding::deserialize(input)?),
+        LedgerTool::SetFindingOutcome => {
+            LedgerInput::SetFindingOutcome(SetFindingOutcome::deserialize(input)?)
+        }
+        LedgerTool::SaveSection => LedgerInput::SaveSection(SaveSection::deserialize(input)?),
+        LedgerTool::ReadDraft => LedgerInput::ReadDraft(ReadDraft::deserialize(input)?),
+        LedgerTool::SubmitReview => LedgerInput::SubmitReview(SubmitReview::deserialize(input)?),
+        LedgerTool::WaitForUser => LedgerInput::WaitForUser(WaitForUser::deserialize(input)?),
     })
 }
 
@@ -154,7 +156,7 @@ struct Rules<'a> {
 }
 
 impl Rules<'_> {
-    fn record_finding(&mut self) {
+    fn save_finding(&mut self) {
         let input = self.input;
         let given = |field: &str| input.contains_key(field);
         if given("id") {
@@ -205,15 +207,15 @@ impl Rules<'_> {
         }
     }
 
-    fn record_note(&mut self) {
+    fn save_section(&mut self) {
         let extra = self.text("/section") == Some("extra");
         match (extra, self.input.contains_key("title")) {
-            (true, false) => self.refuse("/title", "Required for an extra note."),
-            (false, true) => self.refuse("/title", "Give title only for an extra note."),
+            (true, false) => self.refuse("/title", "Required for an extra section."),
+            (false, true) => self.refuse("/title", "Give title only for an extra section."),
             _ => {}
         }
         self.one_line("/title");
-        // A body of only whitespace removes the note, so it is not held to the title's shape.
+        // A body of only whitespace removes the section, so it is not held to the title's shape.
         if self.readable("/body") && self.text("/section") == Some("title") {
             let body = self.text("/body").unwrap_or_default();
             let removes = body.trim().is_empty();
@@ -222,7 +224,7 @@ impl Rules<'_> {
                 self.refuse(
                     "/body",
                     &format!(
-                        "Write the title note on one line of at most {MAX_TITLE_CHARS} characters, or leave it empty to remove it."
+                        "Write the title section on one line of at most {MAX_TITLE_CHARS} characters, or leave it empty to remove it."
                     ),
                 );
             }
@@ -230,7 +232,7 @@ impl Rules<'_> {
         self.bytes("/body", MAX_NOTE_BODY_BYTES);
     }
 
-    fn review_ledger(&mut self) {
+    fn read_draft(&mut self) {
         let listed = |field: &str| {
             self.input
                 .get(field)
@@ -245,7 +247,7 @@ impl Rules<'_> {
         }
     }
 
-    fn finish_review(&mut self) {
+    fn submit_review(&mut self) {
         if let Some(revision) = self.input.get("revision").and_then(Value::as_object) {
             match (revision.get("sha"), revision.contains_key("reason")) {
                 (Some(Value::Null), false) => {

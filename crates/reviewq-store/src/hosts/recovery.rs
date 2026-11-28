@@ -370,7 +370,7 @@ pub(crate) fn observe_failure(
     let wait = 30_000_i64.saturating_mul(1 << attempts.min(4)).min(300_000);
     // A closing call accepted in the failed turn ended its recovery eligibility.
     let closed: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM ledger_calls WHERE run_id=?1 AND tool='finish_review'
+        "SELECT EXISTS(SELECT 1 FROM ledger_calls WHERE run_id=?1 AND tool='submit_review'
            AND native_turn_id=?2)",
         params![lead.run_id().as_str(), failure.turn.as_str()],
         |row| row.get(0),

@@ -28,9 +28,7 @@ use super::{
     Composed, CoverFacts, FindingOutcome, NoteRecord, NoteSection, SnapshotFinding, VersionFacts,
     default_category,
 };
-use crate::reports::{
-    FindingBasisKind, FindingLocation, FindingSection, RevisionEvidence, Severity,
-};
+use crate::reports::{FindingBasisKind, FindingKind, FindingLocation, RevisionEvidence, Severity};
 use output::{
     Cell, Output, UtcSeconds, without_blank_lines, write_code, write_heading_text, write_link,
     write_literal,
@@ -182,11 +180,9 @@ impl Report<'_> {
                 FixedSection::Changes => self.note_section(out, section, NoteSection::Changes),
                 FixedSection::Threads => self.threads(out),
                 FixedSection::Functional => {
-                    self.findings_section(out, section, FindingSection::Functional)
+                    self.findings_section(out, section, FindingKind::Functional)
                 }
-                FixedSection::Quality => {
-                    self.findings_section(out, section, FindingSection::Quality)
-                }
+                FixedSection::Quality => self.findings_section(out, section, FindingKind::Quality),
                 FixedSection::Questions => self.note_section(out, section, NoteSection::Questions),
                 FixedSection::Verification => {
                     self.note_section(out, section, NoteSection::Verification)?;
@@ -425,12 +421,12 @@ impl Report<'_> {
         &self,
         out: &mut Output,
         section: FixedSection,
-        kind: FindingSection,
+        kind: FindingKind,
     ) -> fmt::Result {
         let start = out.open_section(section)?;
         for finding in self
             .active()
-            .filter(|finding| finding.record.fields.section == kind)
+            .filter(|finding| finding.record.fields.kind == kind)
         {
             self.card(out, finding)?;
         }
@@ -450,7 +446,7 @@ impl Report<'_> {
         write!(out, "**{}{SEPARATOR}", fields.severity)?;
         match &fields.category {
             Some(category) => write_literal(out, category)?,
-            None => out.write_str(default_category(fields.section))?,
+            None => out.write_str(default_category(fields.kind))?,
         }
         write!(
             out,

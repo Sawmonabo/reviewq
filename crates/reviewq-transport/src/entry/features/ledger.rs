@@ -43,7 +43,7 @@ pub(in crate::entry) enum LedgerResult {
     Finding(dto::FindingReceipt),
     Note(dto::NoteReceipt),
     Page(dto::LedgerPage),
-    Finish(dto::FinishReceipt),
+    Submitted(dto::SubmitReceipt),
     Held(dto::HeldReceipt),
 }
 
@@ -85,30 +85,30 @@ pub(in crate::entry) async fn call(
     let store = entry.store.as_ref();
     let endpoint = &entry.auth.endpoint;
     Ok(match input {
-        LedgerInput::RecordFinding(input) => {
-            let recorded = record::record_finding(store, binding, inputs::finding(input)?).await?;
+        LedgerInput::SaveFinding(input) => {
+            let recorded = record::save_finding(store, binding, inputs::finding(input)?).await?;
             results::receipt(recorded.receipt)?
         }
-        LedgerInput::AssessFinding(input) => {
+        LedgerInput::SetFindingOutcome(input) => {
             let recorded =
-                record::assess_finding(store, binding, inputs::assessment(input)?).await?;
+                record::set_finding_outcome(store, binding, inputs::assessment(input)?).await?;
             results::receipt(recorded.receipt)?
         }
-        LedgerInput::RecordNote(input) => {
-            let recorded = record::record_note(store, binding, inputs::note(input)?).await?;
+        LedgerInput::SaveSection(input) => {
+            let recorded = record::save_section(store, binding, inputs::note(input)?).await?;
             results::receipt(recorded.receipt)?
         }
-        LedgerInput::ReviewLedger(input) => {
+        LedgerInput::ReadDraft(input) => {
             let read = inputs::read(endpoint, input)?;
-            let page = record::review_ledger(store, binding, read).await?;
+            let page = record::read_draft(store, binding, read).await?;
             LedgerResult::Page(results::page(endpoint, page)?)
         }
-        LedgerInput::FinishReview(input) => {
-            let receipt = publish::finish_review(store, binding, inputs::finish(input)?).await?;
-            LedgerResult::Finish(results::finish(receipt)?)
+        LedgerInput::SubmitReview(input) => {
+            let receipt = publish::submit_review(store, binding, inputs::submit(input)?).await?;
+            LedgerResult::Submitted(results::submit(receipt)?)
         }
-        LedgerInput::NeedsInput(input) => {
-            let held = passes::needs_input(store, binding, input.reason).await?;
+        LedgerInput::WaitForUser(input) => {
+            let held = passes::wait_for_user(store, binding, input.question).await?;
             LedgerResult::Held(results::held(held))
         }
     })

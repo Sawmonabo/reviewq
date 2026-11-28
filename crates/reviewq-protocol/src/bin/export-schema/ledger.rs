@@ -1,17 +1,18 @@
-//! The ledger tool contract: the six input schemas, their filled example and the module the
+//! The reviewing tool contract: the six input schemas, their filled example and the module the
 //! Claude plugin loads. Every mode first proves the example against the schemas it generates.
 
 use std::error::Error;
 use std::io::{self, Write};
 
+use reviewq_protocol::actions::{TRACK_POSTING, TRACK_POSTING_DESCRIPTION};
 use reviewq_protocol::deadlines::tool_deadline;
 use reviewq_protocol::followups::NextAction;
 use reviewq_protocol::ledger::{
-    AssessFinding, ClosingVerdict, FinishReview, LEDGER_TOOLS, LedgerTool, NeedsInput, NoteSection,
-    RecordFinding, RecordNote, ReviewLedger, validate_against,
+    ClosingVerdict, LEDGER_TOOLS, LedgerTool, NoteSection, ReadDraft, SaveFinding, SaveSection,
+    SetFindingOutcome, SubmitReview, WaitForUser, validate_against,
 };
 use reviewq_protocol::reports::{
-    Assessment, FindingBasis, FindingBasisKind, FindingConclusion, FindingLocation, FindingSection,
+    Assessment, FindingBasis, FindingBasisKind, FindingConclusion, FindingKind, FindingLocation,
     ReportRevision, Severity,
 };
 use reviewq_protocol::{DiscussionIdDto, FindingIdDto, GitShaDto};
@@ -26,7 +27,7 @@ pub(super) fn export(mode: &str) -> Result<(), Box<dyn Error>> {
         .collect::<Vec<_>>();
     let examples = examples()?;
     if !examples.iter().map(|(tool, _)| *tool).eq(LEDGER_TOOLS) {
-        return Err("give one example per ledger tool, in table order".into());
+        return Err("give one example per reviewing tool, in table order".into());
     }
     for ((tool, schema), (_, example)) in schemas.iter().zip(&examples) {
         if let Err(errors) = validate_against(schema, *tool, example) {
@@ -56,11 +57,14 @@ pub(super) fn export(mode: &str) -> Result<(), Box<dyn Error>> {
             write!(output, "export const ledgerTools = ")?;
             serde_json::to_writer_pretty(&mut output, &tools)?;
             writeln!(output, ";")?;
-            write!(
-                output,
-                "export const actionWaitMs = {};",
-                plugin_wait_ms("review_action")
-            )?;
+            write!(output, "export const actionTool = ")?;
+            let action = json!({
+                "name": TRACK_POSTING,
+                "description": TRACK_POSTING_DESCRIPTION,
+                "waitMs": plugin_wait_ms(TRACK_POSTING),
+            });
+            serde_json::to_writer_pretty(&mut output, &action)?;
+            write!(output, ";")?;
         }
         _ => return Err(format!("Unknown contract export mode: {mode}").into()),
     }
@@ -76,12 +80,12 @@ fn plugin_wait_ms(name: &str) -> u128 {
 
 fn input_schema(tool: LedgerTool) -> Value {
     match tool {
-        LedgerTool::RecordFinding => root::<RecordFinding>(),
-        LedgerTool::AssessFinding => root::<AssessFinding>(),
-        LedgerTool::RecordNote => root::<RecordNote>(),
-        LedgerTool::ReviewLedger => root::<ReviewLedger>(),
-        LedgerTool::FinishReview => root::<FinishReview>(),
-        LedgerTool::NeedsInput => root::<NeedsInput>(),
+        LedgerTool::SaveFinding => root::<SaveFinding>(),
+        LedgerTool::SetFindingOutcome => root::<SetFindingOutcome>(),
+        LedgerTool::SaveSection => root::<SaveSection>(),
+        LedgerTool::ReadDraft => root::<ReadDraft>(),
+        LedgerTool::SubmitReview => root::<SubmitReview>(),
+        LedgerTool::WaitForUser => root::<WaitForUser>(),
     }
 }
 
@@ -135,13 +139,13 @@ fn by_name(entries: Vec<(LedgerTool, Value)>) -> Map<String, Value> {
 /// One valid input per tool, after the spec's worked calls.
 fn examples() -> Result<Vec<(LedgerTool, Value)>, Box<dyn Error>> {
     let finding = || FindingIdDto::new("F-01").ok_or("example finding ID");
-    let record_finding = RecordFinding {
+    let save_finding = SaveFinding {
         id: None,
         expected_revision: None,
         title: Some("Retry writes the same invoice twice".into()),
         severity: Some(Severity::P1),
         blocking: Some(true),
-        section: Some(FindingSection::Functional),
+        kind: Some(FindingKind::Functional),
         category: None,
         locations: Some(vec![FindingLocation {
             path: "src/invoices.rs".into(),
@@ -158,7 +162,7 @@ fn examples() -> Result<Vec<(LedgerTool, Value)>, Box<dyn Error>> {
         proposed_comment: None,
         details: None,
     };
-    let assess_finding = AssessFinding {
+    let set_finding_outcome = SetFindingOutcome {
         id: finding()?,
         expected_revision: 1,
         outcome: FindingConclusion::Fixed,
@@ -166,17 +170,17 @@ fn examples() -> Result<Vec<(LedgerTool, Value)>, Box<dyn Error>> {
         discussion_ids: Vec::new(),
         checked_sha: None,
     };
-    let record_note = RecordNote {
+    let save_section = SaveSection {
         section: NoteSection::Summary,
         title: None,
         body: "The MR retries invoice creation when the payment provider times out.".into(),
         expected_revision: None,
     };
-    let review_ledger = ReviewLedger {
+    let read_draft = ReadDraft {
         ids: vec![finding()?],
-        ..ReviewLedger::default()
+        ..ReadDraft::default()
     };
-    let finish_review = FinishReview {
+    let submit_review = SubmitReview {
         verdict: Some(ClosingVerdict::RequestChanges),
         revision: Some(ReportRevision {
             sha: Some(
@@ -187,11 +191,11 @@ fn examples() -> Result<Vec<(LedgerTool, Value)>, Box<dyn Error>> {
         full_review: false,
         assessments: Vec::new(),
     };
-    let needs_input = NeedsInput {
-        reason: "Should a retried invoice keep its original number?".into(),
+    let wait_for_user = WaitForUser {
+        question: "Should a retried invoice keep its original number?".into(),
     };
     // A selected-thread close from the spec, kept here so the assessment shape is exercised too.
-    let selected_thread_close = FinishReview {
+    let selected_thread_close = SubmitReview {
         verdict: None,
         revision: None,
         full_review: false,
@@ -204,30 +208,27 @@ fn examples() -> Result<Vec<(LedgerTool, Value)>, Box<dyn Error>> {
         }],
     };
     if let Err(errors) = validate_against(
-        &input_schema(LedgerTool::FinishReview),
-        LedgerTool::FinishReview,
+        &input_schema(LedgerTool::SubmitReview),
+        LedgerTool::SubmitReview,
         &serde_json::to_value(&selected_thread_close)?,
     ) {
         return Err(format!("the selected-thread example is refused: {errors:?}").into());
     }
     Ok(vec![
+        (LedgerTool::SaveFinding, serde_json::to_value(save_finding)?),
         (
-            LedgerTool::RecordFinding,
-            serde_json::to_value(record_finding)?,
+            LedgerTool::SetFindingOutcome,
+            serde_json::to_value(set_finding_outcome)?,
+        ),
+        (LedgerTool::SaveSection, serde_json::to_value(save_section)?),
+        (LedgerTool::ReadDraft, serde_json::to_value(read_draft)?),
+        (
+            LedgerTool::SubmitReview,
+            serde_json::to_value(submit_review)?,
         ),
         (
-            LedgerTool::AssessFinding,
-            serde_json::to_value(assess_finding)?,
+            LedgerTool::WaitForUser,
+            serde_json::to_value(wait_for_user)?,
         ),
-        (LedgerTool::RecordNote, serde_json::to_value(record_note)?),
-        (
-            LedgerTool::ReviewLedger,
-            serde_json::to_value(review_ledger)?,
-        ),
-        (
-            LedgerTool::FinishReview,
-            serde_json::to_value(finish_review)?,
-        ),
-        (LedgerTool::NeedsInput, serde_json::to_value(needs_input)?),
     ])
 }

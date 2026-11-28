@@ -3,20 +3,19 @@ use std::time::Duration;
 
 use reviewq_app::access::{Actor, AppError};
 use reviewq_app::followups::{NextAction, ResultKind};
-use reviewq_app::ledger::publish::{finish_review, settle_due};
+use reviewq_app::ledger::publish::{settle_due, submit_review};
 use reviewq_app::ledger::{
     CallBinding, CardSpan, ClosingCommit, ClosingRead, ClosingSnapshot, ClosingSummary, CommitKind,
     Composed, FailureRecord, FindingAssessment, FindingFields, FindingOutcome, FindingPatch,
-    FinishReceipt, FinishReview, HostSession, LedgerEntries, LedgerRead, LedgerSelection,
-    LedgerStore, NewVersion, NoteKey, NoteSection, NoteWrite, PublishCommit, PublishOutcome,
-    RecordField, RecordReceipt, RecordWrite, ReportLinks, SectionSpan, Span, VersionFacts,
-    WriteRefusal,
+    HostSession, LedgerEntries, LedgerRead, LedgerSelection, LedgerStore, NewVersion, NoteKey,
+    NoteSection, NoteWrite, PublishCommit, PublishOutcome, RecordField, RecordReceipt, RecordWrite,
+    ReportLinks, SectionSpan, Span, SubmitReceipt, SubmitReview, VersionFacts, WriteRefusal,
 };
 use reviewq_app::notifications::{InboxStore, InboxView, Kind};
 use reviewq_app::reports::{
     ArtifactStats, Assessment, Collection, ContextRequest, Coverage, Descriptor, DispositionEdit,
-    FindingBasis, FindingBasisKind, FindingConclusion, FindingDetails, FindingLocation,
-    FindingSection, ReportDeliveryState, ReportEdits, ReportMutationStore, ReportStore,
+    FindingBasis, FindingBasisKind, FindingConclusion, FindingDetails, FindingKind,
+    FindingLocation, ReportDeliveryState, ReportEdits, ReportMutationStore, ReportStore,
     RevisionEvidence, Severity, Verdict,
 };
 use reviewq_domain::identity::{GitSha, ReportHash, Revision, RunId};
@@ -289,7 +288,7 @@ fn publish_is_conditional() {
                 .map(|error| &*error.message)
                 .collect::<Vec<_>>(),
             [
-                "A full review, which includes the first version of a review, needs the rationale, flow, changes and verification notes, which are not on file yet. File each with record_note, then call finish_review again. Everything already filed is kept."
+                "A full review, which includes the first version of a review, needs the rationale, flow, changes and verification sections, which are not saved yet. Save each with save_section, then call submit_review again. Everything already saved is kept."
             ]
         );
         let needed = [
@@ -316,13 +315,13 @@ fn publish_is_conditional() {
         // review starts, also for a full review whose snapshot was read before it.
         assess(&store, "assess-1-equal", 2).await;
         let racing = closing(&store, "close-racing").await;
-        let input = FinishReview {
+        let input = SubmitReview {
             verdict: None,
             revision: None,
             full_review: false,
             assessments: Vec::new(),
         };
-        let answered = finish_review(&store, call("close-answered"), input).await;
+        let answered = submit_review(&store, call("close-answered"), input).await;
         assert_eq!(answered.unwrap().receipt, closed.receipt);
         let raced = store.commit_publish(full_review(racing)).await;
         assert_eq!(raced.unwrap(), PublishOutcome::Stale);
@@ -462,7 +461,7 @@ fn fields() -> FindingFields {
         title: "Retry writes the same invoice twice".into(),
         severity: Severity::P1,
         blocking: true,
-        section: FindingSection::Functional,
+        kind: FindingKind::Functional,
         category: None,
         body: FindingDetails {
             locations: vec![FindingLocation {
@@ -665,7 +664,7 @@ async fn assess(store: &SqliteStore, id: &str, revision: i64) {
         },
     };
     store
-        .write_record(call(id), RecordWrite::AssessFinding(assessment))
+        .write_record(call(id), RecordWrite::SetFindingOutcome(assessment))
         .await
         .unwrap()
         .unwrap();
@@ -699,15 +698,15 @@ async fn file_notes(store: &SqliteStore, sections: &[NoteSection]) {
     }
 }
 
-/// The lead's `finish_review` with `fullReview`, through the app's closing checks.
-async fn finish_full_review(store: &SqliteStore, id: &str) -> Result<FinishReceipt, AppError> {
-    let input = FinishReview {
+/// The lead's `submit_review` with `fullReview`, through the app's closing checks.
+async fn finish_full_review(store: &SqliteStore, id: &str) -> Result<SubmitReceipt, AppError> {
+    let input = SubmitReview {
         verdict: Some(Verdict::RequestChanges),
         revision: Some(RevisionEvidence::Exact(SHA.parse().unwrap())),
         full_review: true,
         assessments: Vec::new(),
     };
-    finish_review(store, call(id), input).await
+    submit_review(store, call(id), input).await
 }
 
 /// The lead sets F-02's severity, expecting `revision`.

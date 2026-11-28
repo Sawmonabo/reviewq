@@ -626,10 +626,10 @@ pub(super) fn project_severity(value: app::Severity) -> dto::Severity {
     }
 }
 
-pub(super) fn project_finding_section(value: app::FindingSection) -> dto::FindingSection {
+pub(super) fn project_finding_kind(value: app::FindingKind) -> dto::FindingKind {
     match value {
-        app::FindingSection::Functional => dto::FindingSection::Functional,
-        app::FindingSection::Quality => dto::FindingSection::Quality,
+        app::FindingKind::Functional => dto::FindingKind::Functional,
+        app::FindingKind::Quality => dto::FindingKind::Quality,
     }
 }
 

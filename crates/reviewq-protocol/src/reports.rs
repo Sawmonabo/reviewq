@@ -42,7 +42,7 @@ wire_enum!(FindingConclusion {
     Unverified,
 });
 wire_enum!(OffsetUnit { UnicodeCodepoints });
-wire_enum!(FindingSection {
+wire_enum!(FindingKind {
     Functional,
     Quality
 });
