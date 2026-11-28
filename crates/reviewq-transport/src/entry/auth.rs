@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use axum::http::{HeaderMap, header};
+use axum::http::{HeaderMap, Method, Uri, header};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reviewq_app::access::{Actor, AppError};
 use serde::de::DeserializeOwned;
@@ -19,7 +19,7 @@ pub(super) struct Auth {
     pub(super) endpoint: ServiceEndpoint,
     pub(super) origin: String,
     browser_host: String,
-    native_host: String,
+    hosts: Vec<String>,
     csrf: [u8; 32],
     nonces: Mutex<HashMap<[u8; 32], Instant>>,
 }
@@ -27,11 +27,10 @@ pub(super) struct Auth {
 impl Auth {
     pub(super) fn new(endpoint: ServiceEndpoint) -> Result<Self, AppError> {
         let browser_host = endpoint.browser().to_string();
-        let native_host = endpoint.native().to_string();
         Ok(Self {
             origin: format!("http://{browser_host}"),
             browser_host,
-            native_host,
+            hosts: endpoint.hosts(),
             endpoint,
             csrf: random()?,
             nonces: Mutex::default(),
@@ -40,11 +39,34 @@ impl Auth {
 
     pub(super) fn allowed_host(&self, headers: &HeaderMap) -> bool {
         let host = value(headers, "host");
-        (host == Some(&self.browser_host) || host == Some(&self.native_host))
+        host.is_some_and(|host| self.hosts.iter().any(|allowed| allowed == host))
             && headers.get_all(header::HOST).iter().count() == 1
             && headers.get_all(header::ORIGIN).iter().count() <= 1
             && (!headers.contains_key(header::ORIGIN)
                 || value(headers, "origin") == Some(&self.origin))
+    }
+
+    /// Where a page read that reached another of ReviewQ's accepted addresses belongs: the same
+    /// path and query on the browser's own origin, built from the endpoint, never from the
+    /// request. The browser's API answers only there, so a page opened at `localhost` or
+    /// `[::1]` moves instead of loading and failing. `None` for the browser's own address,
+    /// the API, `/mcp` and anything but `GET` or `HEAD`.
+    pub(super) fn page_elsewhere(
+        &self,
+        method: &Method,
+        uri: &Uri,
+        headers: &HeaderMap,
+    ) -> Option<String> {
+        let path = uri.path();
+        if !matches!(*method, Method::GET | Method::HEAD)
+            || path == "/mcp"
+            || path.starts_with("/api/")
+            || value(headers, "host") == Some(&self.browser_host)
+        {
+            return None;
+        }
+        let target = uri.path_and_query().map_or(path, |target| target.as_str());
+        Some(format!("{}{target}", self.origin))
     }
 
     pub(super) fn control<'a>(
@@ -171,7 +193,7 @@ mod tests {
     fn old_browser_proof_is_rejected_at_the_gate_after_restart() {
         let endpoint = ServiceEndpoint::new(
             "127.0.0.1:8766".parse().unwrap(),
-            "[::1]:8767".parse().unwrap(),
+            "[::1]:8766".parse().unwrap(),
             ServiceIdentity {
                 build_digest: String::new(),
                 executable_file: String::new(),

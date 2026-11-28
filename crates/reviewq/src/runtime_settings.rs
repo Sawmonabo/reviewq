@@ -132,27 +132,14 @@ impl Settings {
         Ok(settings)
     }
 
-    pub(crate) fn ports(
-        &self,
-        browser: Option<u16>,
-        native: Option<u16>,
-    ) -> Result<(u16, u16), Failure> {
-        let browser = browser.unwrap_or(self.port);
-        let native = match native {
-            Some(port) => port,
-            None if browser == 0 => 0,
-            None => browser
-                .checked_add(1)
-                .ok_or("browser port leaves no port for the native listener")?,
-        };
-        if (browser != 0 && browser < 1024)
-            || (native != 0 && native < 1024)
-            || (browser != 0 && browser == native)
-            || (browser != 0 && start_port(browser) == Some(native))
-        {
-            return Err("browser, native and start ports must be separate and unprivileged".into());
+    /// The port both loopback listeners use: `explicit`, a `serve --port` override, or the
+    /// saved one. 0 lets the system choose.
+    pub(crate) fn port(&self, explicit: Option<u16>) -> Result<u16, Failure> {
+        let port = explicit.unwrap_or(self.port);
+        if port != 0 && port < 1024 {
+            return Err("the port must be 1024 or higher".into());
         }
-        Ok((browser, native))
+        Ok(port)
     }
 }
 

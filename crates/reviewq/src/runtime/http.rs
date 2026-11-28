@@ -1,4 +1,5 @@
-use std::net::{IpAddr, SocketAddr};
+use std::io::ErrorKind;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -23,11 +24,57 @@ const OPEN_FILES: u64 = 65_536;
 /// 4096 by default; Tokio's own bind asks for 128.
 const ACCEPT_BACKLOG: i32 = 4096;
 
+/// IPv6 loopback takes the same port, so `localhost` reaches the service on either family.
+/// Without IPv6 loopback the service runs on IPv4 alone; a port in use there still fails,
+/// unless the system chose it for IPv4 alone: then it chooses again, a few times.
+/// `choose` is the step a port-in-use message names.
+pub(super) fn listeners(
+    port: u16,
+    choose: &str,
+) -> std::io::Result<(TcpListener, Option<TcpListener>)> {
+    let mut choices = 0;
+    loop {
+        let v4 = loopback(Ipv4Addr::LOCALHOST.into(), port, choose)?;
+        let chosen = v4.local_addr()?.port();
+        match loopback(Ipv6Addr::LOCALHOST.into(), chosen, choose) {
+            Ok(listener) => return Ok((v4, Some(listener))),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    ErrorKind::AddrNotAvailable | ErrorKind::Unsupported
+                ) || error.raw_os_error()
+                    == Some(rustix::io::Errno::AFNOSUPPORT.raw_os_error()) =>
+            {
+                return Ok((v4, None));
+            }
+            Err(error) if port == 0 && error.kind() == ErrorKind::AddrInUse && choices < 8 => {
+                choices += 1;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 /// Listens on loopback `ip` at `port`, with `ACCEPT_BACKLOG`. An IPv6 listener takes IPv6
 /// only, so it never answers for the IPv4 port. Address reuse lets a restart bind while
-/// connections closed by the previous service linger, as Tokio's own bind allows.
-pub(super) fn loopback(ip: IpAddr, port: u16) -> std::io::Result<TcpListener> {
+/// connections closed by the previous service linger, as Tokio's own bind allows. When
+/// another program holds the address, the error keeps the kind `AddrInUse` and names the
+/// address and the step: stop that program, or `choose` another port.
+pub(super) fn loopback(ip: IpAddr, port: u16, choose: &str) -> std::io::Result<TcpListener> {
     let address = SocketAddr::new(ip, port);
+    listen(address).map_err(|error| match error.kind() {
+        ErrorKind::AddrInUse => std::io::Error::new(
+            ErrorKind::AddrInUse,
+            format!(
+                "{address} is already in use, by a ReviewQ already running on this port or by another program. Stop that one, or {choose}."
+            ),
+        ),
+        _ => error,
+    })
+}
+
+fn listen(address: SocketAddr) -> std::io::Result<TcpListener> {
+    let ip = address.ip();
     let socket = Socket::new(
         Domain::for_address(address),
         Type::STREAM,

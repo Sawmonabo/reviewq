@@ -556,9 +556,10 @@ mod tests {
         Ok(())
     }
 
-    /// The MCP address changes when a start has the IPv6 listener and the next has not, or
-    /// the other way round. Setup must take its own entries at the old address for ReviewQ's
-    /// and rewrite them, in every worktree and in Claude's config, and cleanup must remove them.
+    /// Entries ReviewQ wrote at an earlier MCP address, `http://127.0.0.1:<base>/mcp` or
+    /// `http://[::1]:<base + 1>/mcp`, are still ReviewQ's. Setup must rewrite them to the
+    /// `localhost` address, in every worktree and in Claude's config, and cleanup must remove
+    /// them.
     #[tokio::test]
     async fn a_changed_mcp_address_is_rewritten_and_cleaned_up() -> Result<(), Failure> {
         let scratch = tempfile::tempdir()?;
@@ -581,8 +582,13 @@ mod tests {
             std::fs::create_dir(file.parent().ok_or("no folder")?)?;
             std::fs::write(file, original)?;
         }
-        let (ipv4, ipv6) = ("http://127.0.0.1:9/mcp", "http://[::1]:10/mcp");
-        for (url, other) in [(ipv4, ipv6), (ipv6, ipv4), (ipv4, ipv6)] {
+        let forms = [
+            "http://127.0.0.1:9/mcp",
+            "http://[::1]:10/mcp",
+            "http://localhost:9/mcp",
+        ];
+        let current = forms[2];
+        for url in forms {
             let checkout = git::discover(Some(&repo)).await?;
             let lock = files::hold(&profile, &checkout.common)?;
             let selected = Some(claude.clone());
@@ -598,8 +604,9 @@ mod tests {
             changes.finish()?;
             for file in configs.iter().chain([&claude]) {
                 let text = std::fs::read_to_string(file)?;
+                let others = forms.iter().filter(|other| **other != url);
                 assert!(
-                    text.contains(url) && !text.contains(other),
+                    text.contains(url) && others.clone().all(|other| !text.contains(other)),
                     "{}",
                     file.display()
                 );
@@ -610,11 +617,11 @@ mod tests {
         assert!(!std::fs::read_to_string(&configs[1])?.ends_with('\n'));
         // Once the Claude entry is changed by hand, setup that no longer selects that config
         // leaves it alone and finishes, rather than stopping every checkout's setup on it.
-        let edited = std::fs::read_to_string(&claude)?.replace(ipv4, "http://127.0.0.1:1/mcp");
+        let edited = std::fs::read_to_string(&claude)?.replace(current, "http://127.0.0.1:1/mcp");
         std::fs::write(&claude, &edited)?;
         let checkout = git::discover(Some(&repo)).await?;
         let lock = files::hold(&profile, &checkout.common)?;
-        let mut changes = prepare(&profile, checkout, ipv4, None, lock, SETUP_AGAIN).await?;
+        let mut changes = prepare(&profile, checkout, current, None, lock, SETUP_AGAIN).await?;
         changes
             .plan
             .apply(&changes.inventory, &changes.checkout, None)

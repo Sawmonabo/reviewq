@@ -77,10 +77,8 @@ struct Server {
 }
 
 pub(super) fn mount(entry: Arc<Entry>) -> Router<Arc<Entry>> {
-    let browser = entry.auth.endpoint.browser();
-    let native = entry.auth.endpoint.native();
     let config = StreamableHttpServerConfig::default()
-        .with_allowed_hosts([browser.to_string(), native.to_string()])
+        .with_allowed_hosts(entry.auth.endpoint.hosts())
         .enforce_origin_validation()
         .with_legacy_session_mode(false)
         .with_json_response(true)

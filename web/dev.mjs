@@ -15,19 +15,14 @@ const { values } = parseArgs({
     validation: { type: "boolean" },
     "read-only": { type: "boolean" },
     "backend-port": { type: "string" },
-    "native-port": { type: "string" },
   },
 });
 if (values.installed && values.profile)
   throw new Error("Choose the installed service or a separate development profile.");
-if (
-  !values.profile &&
-  (values.validation || values["read-only"] || values["backend-port"] || values["native-port"])
-)
+if (!values.profile && (values.validation || values["read-only"] || values["backend-port"]))
   throw new Error("Backend options require --profile /absolute/dev/profile.");
 const webPort = port(process.env.REVIEWQ_WEB_PORT ?? "5173");
 const backendPort = port(values["backend-port"] ?? "0");
-const nativePort = port(values["native-port"] ?? "0");
 
 // Bind loopback once. Probing a wildcard port first can reserve it on WSL.
 const http = createServer();
@@ -74,7 +69,6 @@ try {
     backend = await createDevBackend(resolve(import.meta.dirname, ".."), {
       profile: values.profile,
       backendPort,
-      nativePort,
       validation: values.validation,
     });
     if (stopping) await backend.close();

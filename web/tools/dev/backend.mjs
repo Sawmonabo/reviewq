@@ -108,15 +108,7 @@ export async function createDevBackend(root, options) {
     const flags = options.validation
       ? ["serve", "--validation", "--runtime-root", profile]
       : ["--profile", profile, "serve"];
-    const running = command(binary, [
-      ...flags,
-      "--web",
-      web,
-      "--port",
-      String(browserPort),
-      "--native-port",
-      String(options.nativePort),
-    ]);
+    const running = command(binary, [...flags, "--web", web, "--port", String(browserPort)]);
     server = { ...running, binary };
     const current = server;
     try {

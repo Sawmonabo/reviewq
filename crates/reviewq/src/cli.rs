@@ -140,14 +140,12 @@ enum Checkout {
 
 #[derive(Args)]
 pub(crate) struct Serve {
-    #[arg(long, hide = true, conflicts_with_all = ["web", "port", "native_port", "validation"])]
+    #[arg(long, hide = true, conflicts_with_all = ["web", "port", "validation"])]
     pub(crate) managed: bool,
     #[arg(long, value_name = "DIR")]
     pub(crate) web: Option<PathBuf>,
     #[arg(long)]
     pub(crate) port: Option<u16>,
-    #[arg(long)]
-    pub(crate) native_port: Option<u16>,
     #[arg(long, requires = "validation")]
     pub(crate) gitlab: Option<String>,
     #[arg(long = "project", requires = "gitlab")]

@@ -97,7 +97,7 @@ class DevService:
             self.projects = projects
         command = [self.binary, "serve", "--validation", "--runtime-root", self.profile,
                    "--web", self.root / "web", "--gitlab", self.origin,
-                   "--claude-home", self.claude, "--port", "0", "--native-port", "0"]
+                   "--claude-home", self.claude, "--port", "0"]
         for project in self.projects:
             command += ["--project", str(project)]
         log = (self.root / "service.log").open("ab")

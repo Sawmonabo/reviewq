@@ -503,6 +503,20 @@ async fn guard(State(entry): State<Arc<Entry>>, request: Request, next: Next) ->
     if !entry.auth.allowed_host(request.headers()) {
         return ApiError::from(AppError::Forbidden).into_response();
     }
+    if let Some(target) =
+        entry
+            .auth
+            .page_elsewhere(request.method(), request.uri(), request.headers())
+    {
+        return match HeaderValue::try_from(target) {
+            Ok(location) => (
+                axum::http::StatusCode::TEMPORARY_REDIRECT,
+                [(header::LOCATION, location)],
+            )
+                .into_response(),
+            Err(_) => ApiError::from(AppError::Forbidden).into_response(),
+        };
+    }
     let private = request.uri().path().starts_with("/api/") || request.uri().path() == "/mcp";
     let mut response = next.run(request).await;
     let headers = response.headers_mut();

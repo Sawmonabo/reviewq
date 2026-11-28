@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{Read, Write};
-use std::net::{Ipv4Addr, Ipv6Addr};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
@@ -71,7 +70,7 @@ pub(crate) fn profile(override_path: Option<PathBuf>) -> Result<PathBuf, Failure
 pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failure> {
     http::raise_open_files();
     let settings = runtime_settings::Settings::load(&profile, options.validation)?;
-    let (browser_port, native_port) = settings.ports(options.port, options.native_port)?;
+    let port = settings.port(options.port)?;
     let web = match options.web.as_ref() {
         Some(path) => path.clone(),
         None if options.validation => {
@@ -106,19 +105,14 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         }
         None
     };
-    let v4 = http::loopback(Ipv4Addr::LOCALHOST.into(), browser_port)?;
-    let v6 = match http::loopback(Ipv6Addr::LOCALHOST.into(), native_port) {
-        Ok(listener) => Some(listener),
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported
-            ) || error.raw_os_error() == Some(rustix::io::Errno::AFNOSUPPORT.raw_os_error()) =>
-        {
-            None
-        }
-        Err(error) => return Err(error.into()),
+    let choose = match options.port {
+        Some(_) => "choose another with `--port`".to_owned(),
+        None => format!(
+            "set another `port` in {}",
+            runtime_settings::config_path(&profile, options.validation).display()
+        ),
     };
+    let (v4, v6) = http::listeners(port, &choose)?;
     let browser = v4.local_addr()?;
     let native = v6
         .as_ref()

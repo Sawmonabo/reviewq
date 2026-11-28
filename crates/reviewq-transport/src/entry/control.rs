@@ -74,7 +74,10 @@ impl ServiceEndpoint {
         native: SocketAddr,
         identity: ServiceIdentity,
     ) -> Result<Self, AppError> {
-        if !browser.ip().is_loopback() || !native.ip().is_loopback() {
+        if !browser.ip().is_loopback()
+            || !native.ip().is_loopback()
+            || browser.port() != native.port()
+        {
             return Err(AppError::InvalidRequest);
         }
         Ok(Self {
@@ -94,11 +97,24 @@ impl ServiceEndpoint {
     pub fn native(&self) -> SocketAddr {
         self.native
     }
-    /// The MCP address agents get: `http://[::1]:<native port>/mcp` while the IPv6 loopback
-    /// listener is up, otherwise the IPv4 browser listener's, which `native` then is. Both
-    /// listeners serve `/mcp`, so a session that loaded the other address keeps working.
+    /// The MCP address both agent hosts get, `http://localhost:<port>/mcp`, decided only here.
+    /// Proxy settings commonly leave `localhost` direct, as they do `127.0.0.1`, and both
+    /// loopback listeners share the port. Claude Code opens both families at once; Codex uses
+    /// what the machine's `localhost` resolves to, IPv4 alone where the hosts file names only
+    /// `127.0.0.1`.
     pub fn mcp_url(&self) -> String {
-        format!("http://{}/mcp", self.native)
+        format!("http://localhost:{}/mcp", self.browser.port())
+    }
+    /// The `Host` values a request may carry: either listener's address, or `localhost` with
+    /// their port. A DNS-rebinding page sends its own host name, never these.
+    pub fn hosts(&self) -> Vec<String> {
+        let mut hosts = vec![
+            self.browser.to_string(),
+            self.native.to_string(),
+            format!("localhost:{}", self.browser.port()),
+        ];
+        hosts.dedup();
+        hosts
     }
     pub fn instance(&self) -> &str {
         &self.instance
