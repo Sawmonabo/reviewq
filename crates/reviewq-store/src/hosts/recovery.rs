@@ -6,6 +6,7 @@ use reviewq_app::hosts::recovery::{
     PreparedRecovery, RecoveryStore,
 };
 use reviewq_domain::identity::{NativeTurnId, Revision, RunId, SessionKey};
+use reviewq_domain::ledger::Tool;
 use reviewq_domain::session::{HostProvider, LeadTarget};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
@@ -386,9 +387,13 @@ pub(crate) fn observe_failure(
     )?;
     let wait = 30_000_i64.saturating_mul(1 << attempts.min(4)).min(300_000);
     // A closing call accepted in the failed turn ended its recovery eligibility.
+    // The name is written into the SQL, not bound, so SQLite uses `ledger_call_closing`.
     let closed: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM ledger_calls WHERE run_id=?1 AND tool='submit_review'
-           AND native_turn_id=?2)",
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM ledger_calls WHERE run_id=?1 AND tool='{}'
+               AND native_turn_id=?2)",
+            Tool::SubmitReview.as_str()
+        ),
         params![lead.run_id().as_str(), failure.turn.as_str()],
         |row| row.get(0),
     )?;

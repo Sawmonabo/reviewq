@@ -319,10 +319,12 @@ fn findings(
         .query_map(params![run, since], |row| row.get(0))?
         .collect::<Result<_, _>>()?;
     let called: HashSet<i64> = db
-        .prepare_cached(
+        .prepare_cached(&format!(
             "SELECT json_extract(result, '$.id') FROM ledger_calls
-             WHERE run_id=?1 AND tool IN ('save_finding','set_finding_outcome') AND ordinal>?2",
-        )?
+             WHERE run_id=?1 AND tool IN ('{}','{}') AND ordinal>?2",
+            Tool::SaveFinding.as_str(),
+            Tool::SetFindingOutcome.as_str()
+        ))?
         .query_map(params![run, touched.after_call], |row| row.get(0))?
         .collect::<Result<_, _>>()?;
     let sql = format!(

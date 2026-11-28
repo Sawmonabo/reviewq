@@ -200,6 +200,7 @@ pub(super) fn failure(error: AppError) -> (StatusCode, Failure) {
             StatusCode::PRECONDITION_FAILED,
             ErrorCode::PreconditionFailed,
         ),
+        AppError::OutdatedTool => (StatusCode::PRECONDITION_FAILED, ErrorCode::OutdatedTool),
         AppError::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, ErrorCode::PayloadTooLarge),
         AppError::RangeNotSatisfiable => (
             StatusCode::RANGE_NOT_SATISFIABLE,

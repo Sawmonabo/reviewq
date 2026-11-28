@@ -86,6 +86,7 @@ export type ErrorCode =
   | "idempotency_conflict"
   | "cursor_expired"
   | "precondition_failed"
+  | "outdated_tool"
   | "payload_too_large"
   | "range_not_satisfiable"
   | "busy"

@@ -272,7 +272,7 @@ pub enum ClosingVerdict {
 }
 
 /// Pauses the review until the user replies to a question that must be answered before the
-/// review can finish. It publishes nothing.
+/// review can be submitted. It publishes nothing.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

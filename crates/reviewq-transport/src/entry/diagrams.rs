@@ -9,12 +9,13 @@ use axum::extract::State;
 use axum::http::{HeaderMap, header};
 use axum::response::Response;
 use reviewq_app::access::{Actor, AppError};
+/// The key of a drawing made ahead, owned with the diagram source it digests.
+pub(super) use reviewq_app::reports::drawing_digest as digest;
 use reviewq_app::reports::{DRAWING_RECIPE, DrawingRenderer, ReportReference, mermaid_sources};
 use reviewq_domain::identity::{ReportHash, RunId};
 use reviewq_protocol::PageCursorDto;
 use reviewq_protocol::reports::{DocumentDisplay, DrawingHint, ReportHashDto};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 
 use super::error::ApiPath as Path;
@@ -368,8 +369,4 @@ async fn authorized(
         }
     }
     Ok(())
-}
-
-pub(super) fn digest(source: &str) -> ReportHash {
-    ReportHash::from_sha256(Sha256::digest(source.as_bytes()).into())
 }

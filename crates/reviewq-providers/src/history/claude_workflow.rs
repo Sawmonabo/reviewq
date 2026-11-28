@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicBool;
 use reviewq_app::access::AppError;
 use reviewq_app::history::{HistorySession, VisibleKind};
 use reviewq_domain::identity::NativeInputId;
+use reviewq_domain::ledger::TRACK_POSTING;
 use reviewq_domain::session::HostProvider;
 use serde::Deserialize;
 use serde_json::Value;
@@ -13,9 +14,7 @@ use super::{file, locator, records};
 
 const SCAN_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_ROW: u64 = 8 * 1024 * 1024;
-/// The name Claude records for a call of ReviewQ's publication action tool.
-const ACTION_TOOL: &str = "mcp__reviewq__track_posting";
-/// What every ReviewQ plugin tool's recorded name starts with.
+/// What every ReviewQ plugin tool's recorded name starts with, before the tool's name.
 const REVIEWQ_TOOL: &str = "mcp__reviewq__";
 
 /// Why a row naming the call refuses it, when it does.
@@ -27,11 +26,12 @@ enum Refusal {
     OutdatedTool,
 }
 
-/// The refusal for a call recorded under `name`, or `None` for the action tool itself.
+/// The refusal for a call recorded under `name`, or `None` for the action tool itself,
+/// `TRACK_POSTING` after `REVIEWQ_TOOL`.
 fn named(name: &Value) -> Option<Refusal> {
-    match name.as_str() {
-        Some(ACTION_TOOL) => None,
-        Some(name) if name.starts_with(REVIEWQ_TOOL) => Some(Refusal::OutdatedTool),
+    match name.as_str().map(|name| name.strip_prefix(REVIEWQ_TOOL)) {
+        Some(Some(TRACK_POSTING)) => None,
+        Some(Some(_)) => Some(Refusal::OutdatedTool),
         _ => Some(Refusal::Conflict),
     }
 }
@@ -83,7 +83,7 @@ pub(crate) struct ClaudeOpening {
 /// `task-notification` one, and its text is one `<task-notification>` element. A queued slash
 /// command is no input either: its queue entry holds no text. A call recorded under another
 /// ReviewQ tool's name came from a plugin loaded before the current tools and fails with
-/// `PreconditionFailed`, which the plugin's client answers by asking for a reload.
+/// `OutdatedTool`, which the plugin's client answers by asking for a reload.
 pub(crate) fn claude_workflow_opening(
     session: &HistorySession,
     call_id: &str,
@@ -150,7 +150,7 @@ fn scan(source: &Source, call_id: &str, cancelled: &AtomicBool) -> Result<Claude
             };
             match refused {
                 Some(Refusal::Conflict) => return Err(AppError::Conflict),
-                Some(Refusal::OutdatedTool) => return Err(AppError::PreconditionFailed),
+                Some(Refusal::OutdatedTool) => return Err(AppError::OutdatedTool),
                 None => {}
             }
             if row.kind != "assistant"
@@ -288,7 +288,7 @@ mod tests {
         // A plugin loaded before the current tools calls the action tool by its old name.
         assert!(matches!(
             scan(&source, "toolu_old", &cancelled),
-            Err(AppError::PreconditionFailed)
+            Err(AppError::OutdatedTool)
         ));
         // A background task's notice handed to the running turn, and a slash command the user
         // queued, are no input.

@@ -3,10 +3,12 @@ use reviewq_app::hosts::recovery::{PreparedRecovery, RecoveryAuthorization, Reco
 use reviewq_app::hosts::{
     DeliveryClaim, DeliveryOutcome, DeliveryWork, MessageBody, MessagePurpose,
 };
+use reviewq_app::ledger::readback::{PRIVATE_WORK, append_rule};
 use reviewq_app::workflow::{
     WorkflowAdmission, WorkflowBinding, WorkflowRequirement, WorkflowRequirements,
 };
 use reviewq_domain::identity::{MrIdentity, ReportHash, SubmissionId};
+use reviewq_domain::ledger::Tool;
 use reviewq_domain::session::LeadTarget;
 use rusqlite::{Connection, params};
 use uuid::Uuid;
@@ -86,6 +88,11 @@ pub(super) fn reserve(tx: &mut WriteTx<'_>, input: PreparedRecovery) -> Result<(
     if !eligible {
         return Err(AppError::StaleRevision.into());
     }
+    let mut prompt = format!(
+        "Resume the interrupted private ReviewQ review using the previously established scope. Continue the unfinished analysis. {PRIVATE_WORK} Close the review with {} once it is complete.",
+        Tool::SubmitReview.as_str(),
+    );
+    append_rule(&mut prompt);
     let submission: SubmissionId = parse(&Uuid::new_v4().to_string())?;
     db.execute(
         "UPDATE recovery_episodes SET state='queued',revision=revision+1,reason=NULL,due_at_ms=NULL,
@@ -101,9 +108,7 @@ pub(super) fn reserve(tx: &mut WriteTx<'_>, input: PreparedRecovery) -> Result<(
         WorkflowAdmission {
             target: lead.clone(),
             submission,
-            body: MessageBody::new(
-                "Resume the interrupted private ReviewQ review using the previously established scope. Continue the unfinished analysis and finish the review. Preserve unrelated findings and user decisions. Do not publish or edit notes, approve, merge, resolve discussions, or change Jira without a new explicit user request.",
-            )?,
+            body: MessageBody::new(&prompt)?,
             binding: WorkflowBinding::Recovery(authorization),
             settings: candidate.settings,
             head: candidate.head,

@@ -1,6 +1,25 @@
+import type { Element } from "hast";
 import type Mermaid from "mermaid";
 
 let engine: Promise<typeof Mermaid> | undefined;
+
+// The source a code block hands Mermaid, or undefined when the block is not a Mermaid
+// diagram: the text of a `pre` whose code has the `language-mermaid` class. The syntax tree
+// drops the block's last line ending and the HTML step adds "\n", while every other line
+// ending stays as written, "\r" included. `diagram_source` in
+// crates/reviewq-app/src/reports/drawings.rs writes the same text for the drawings ReviewQ
+// makes ahead, which this page finds by its SHA-256.
+export function diagramSource(node: Element | undefined) {
+  const child = node?.children[0];
+  if (
+    child?.type !== "element" ||
+    child.tagName !== "code" ||
+    !Array.isArray(child.properties.className) ||
+    !child.properties.className.includes("language-mermaid")
+  )
+    return;
+  return child.children.map((item) => (item.type === "text" ? item.value : "")).join("");
+}
 
 export function eligibleDiagram(source: string) {
   return (

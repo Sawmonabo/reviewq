@@ -13,15 +13,20 @@ use super::{
 use crate::StoreError;
 use crate::refresh::read_sync;
 
-/// A review one of whose runs published a finding titled with `:search`, in any version, so a
+/// A review one of whose runs published a finding titled with the search: one of the reviews
+/// in `?4`, the JSON array `FINDING_REVIEWS` read.
+const FINDING_SEARCH: &str = "r.review_id IN (SELECT value FROM json_each(?4))";
+
+/// Every review one of whose runs published a finding titled with `?1`, in any version, so a
 /// finding a later version retired or retitled is found by the title a version showed. Only
 /// `report_findings` rows count: they are what a submitted version shows, while an agent's
-/// unsubmitted records stay in the ledger tables.
-const FINDING_SEARCH: &str = "(:search<>'' AND EXISTS (SELECT 1 FROM runs u
-      JOIN report_findings p ON p.run_id=u.run_id
-      WHERE u.review_id=r.review_id AND instr(reviewq_fold(p.title),:search)>0))";
+/// unsubmitted records stay in the ledger tables. Each review's titles are read until the
+/// first match, once per search: the count and the page both reuse the result.
+const FINDING_REVIEWS: &str = "SELECT r.review_id FROM reviews r WHERE EXISTS (SELECT 1
+      FROM runs u JOIN report_findings p ON p.run_id=u.run_id
+      WHERE u.review_id=r.review_id AND instr(reviewq_fold(p.title),?1)>0)";
 
-/// The finding `FINDING_SEARCH` matched for each review of `?1`, a JSON array of review IDs:
+/// The finding `FINDING_REVIEWS` matched for each review of `?1`, a JSON array of review IDs:
 /// the newest version that showed a matching title first, then the lowest finding ID, and
 /// whether that version is its run's current one.
 const FINDING_MATCHES: &str =
@@ -67,19 +72,30 @@ pub(super) fn reviews(
         ManagementFilter::Waiting => "f.stage_reason LIKE 'waiting/%'",
         ManagementFilter::AgentQuestions => "r.state='open' AND f.has_questions=1",
     };
+    // Reviews outside the actor's scope only narrow the scoped selection below.
+    let found: Vec<String> = if search.is_empty() {
+        Vec::new()
+    } else {
+        let mut statement = tx.prepare_cached(FINDING_REVIEWS)?;
+        let reviews = statement.query_map([&search], |row| row.get(0))?;
+        reviews.collect::<Result<_, _>>()?
+    };
+    let found = serde_json::to_string(&found).map_err(|_| AppError::Internal)?;
     // `MR_SEARCH` names `:search` after `?1` and `?2`, so SQLite numbers it 3.
     let selected =
         format!("{SCOPE_PREDICATE} AND ({source}) AND ({MR_SEARCH} OR {FINDING_SEARCH})");
     let total_sql = format!("SELECT count(*) {CACHED_ITEM_FROM} WHERE {selected}");
-    let total: i64 = tx.query_row(&total_sql, params![scope_kind, scope_id, search], |row| {
-        row.get(0)
-    })?;
+    let total: i64 = tx.query_row(
+        &total_sql,
+        params![scope_kind, scope_id, search, found],
+        |row| row.get(0),
+    )?;
     let page_sql = format!(
         "SELECT {ITEM_COLUMNS} {CACHED_ITEM_FROM}
-        WHERE {selected} ORDER BY CASE WHEN f.run_id IS NULL THEN r.updated_at_ms ELSE f.last_activity END DESC,r.review_id LIMIT ?4 OFFSET ?5"
+        WHERE {selected} ORDER BY CASE WHEN f.run_id IS NULL THEN r.updated_at_ms ELSE f.last_activity END DESC,r.review_id LIMIT ?5 OFFSET ?6"
     );
     let mut prepare = tx.prepare_cached(&page_sql)?;
-    let mut rows = prepare.query(params![scope_kind, scope_id, search, limit, offset])?;
+    let mut rows = prepare.query(params![scope_kind, scope_id, search, found, limit, offset])?;
     let mut items = Vec::new();
     while let Some(row) = rows.next()? {
         items.push(queue_item(row)?);

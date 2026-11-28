@@ -87,60 +87,83 @@ fn stand_alone_fields() {
     }
 }
 
+/// The text of a fixture body: a string, or a list of strings and `{"repeat", "times"}` pieces.
+fn body(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(pieces) => pieces
+            .iter()
+            .map(|piece| match piece {
+                serde_json::Value::String(text) => text.clone(),
+                piece => piece["repeat"]
+                    .as_str()
+                    .expect("a repeated piece's text")
+                    .repeat(piece["times"].as_u64().expect("a repeat count") as usize),
+            })
+            .collect(),
+        other => panic!("a body is a string or a list of pieces, not {other}"),
+    }
+}
+
+/// The shared cases of `fixtures/markdown/drawn-sections.json`, which the page's browser test
+/// reads too: each heading is read as the page shows it, and each section is accepted exactly
+/// when the page draws what it needs, with the diagram text the page hands Mermaid.
 #[test]
-fn flow_and_changes_hold_what_the_page_draws() {
-    let refused = |line, kind| Err(FieldProblem { line, kind });
-    let before_after =
-        "| Before | After |\n| --- | --- |\n| Reads input unchecked. | Checks it first. |\n";
+fn drawn_sections_agree_with_the_page() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../fixtures/markdown/drawn-sections.json"
+    ))
+    .expect("the fixture is JSON");
     let operations = "| Affected operation | What changes | Source |\n| --- | --- | --- |\n| `Parser::read` | Checks first. | `src/parser.rs` |\n";
-    let cases = [
-        (
-            "a diagram inside a list item",
-            MarkdownField::Flow,
-            "The request path:\n\n- Client side:\n\n  ```mermaid\n  flowchart LR\n    A --> B\n  ```\n".to_owned(),
-            Ok(()),
-        ),
-        (
-            "a fence indented as code",
-            MarkdownField::Flow,
-            "The request path:\n\n    ```mermaid\n    flowchart LR\n      A --> B\n    ```\n".to_owned(),
-            refused(3, ProblemKind::IndentedFence),
-        ),
-        (
-            "only diagrams the page shows as source",
-            MarkdownField::Flow,
-            "```mermaid\nflowchart LR\n  A --> B\n  click A \"https://example.com\"\n```\n\n```mermaid\n%%{init: {}}%%\nflowchart LR\n  A --> B\n```\n".to_owned(),
-            refused(1, ProblemKind::NotDrawn(Undrawable::Link)),
-        ),
-        (
-            "one drawable diagram after one the page shows as source",
-            MarkdownField::Flow,
-            format!(
-                "```mermaid\nflowchart LR\n{}```\n\n```mermaid\nflowchart LR\n  A --> B\n```\n",
-                "  A --> B\n".repeat(501)
-            ),
-            Ok(()),
-        ),
-        (
-            "Before and After, then the operations",
-            MarkdownField::Changes,
-            format!("{before_after}\n{operations}"),
-            Ok(()),
-        ),
-        (
-            "a lone table of another shape",
-            MarkdownField::Changes,
-            "| Area | Change |\n| --- | --- |\n| Parser | Checks first. |\n".to_owned(),
-            refused(1, ProblemKind::NoBeforeAfter),
-        ),
-        (
-            "Before and After without the operations",
-            MarkdownField::Changes,
-            before_after.to_owned(),
-            refused(1, ProblemKind::NoOperations),
-        ),
-    ];
-    for (case, field, text, expected) in cases {
-        assert_eq!(check_field(field, &text), expected, "{case}");
+    for case in fixture["headings"].as_array().expect("heading cases") {
+        let name = case["case"].as_str().expect("a case name");
+        let shown = case["shown"].as_str().expect("the shown text");
+        let table = format!(
+            "| {} | After |\n| --- | --- |\n| Reads input unchecked. | Checks it first. |\n",
+            case["cell"].as_str().expect("a cell")
+        );
+        let tables = content::top_level_tables(&table);
+        assert_eq!(tables[0].headings[0], shown, "{name}");
+        let checked = check_field(MarkdownField::Changes, &format!("{table}\n{operations}"));
+        assert_eq!(checked.is_ok(), shown == "before", "{name}: {checked:?}");
+    }
+    for case in fixture["sections"].as_array().expect("section cases") {
+        let name = case["case"].as_str().expect("a case name");
+        let text = body(&case["body"]);
+        let field = match case["section"].as_str() {
+            Some("flow") => MarkdownField::Flow,
+            Some("changes") => MarkdownField::Changes,
+            other => panic!("{name}: no section {other:?}"),
+        };
+        let checked = check_field(field, &text);
+        let expected = if case["drawn"] == true {
+            Ok(())
+        } else {
+            let refusal = &case["refusal"];
+            Err((
+                refusal["line"].as_u64(),
+                refusal["kind"].as_str().map(str::to_owned),
+            ))
+        };
+        let found = checked.map_err(|problem| {
+            (
+                Some(problem.line as u64),
+                Some(format!("{:?}", problem.kind)),
+            )
+        });
+        assert_eq!(found, expected, "{name}");
+        if let Some(diagrams) = case["diagrams"].as_array() {
+            let diagrams: Vec<String> = diagrams.iter().map(body).collect();
+            let sources = crate::reports::mermaid_sources(&text);
+            assert_eq!(sources, diagrams, "{name}");
+            if let Some(digests) = case["digests"].as_array() {
+                let found: Vec<String> = sources
+                    .iter()
+                    .map(|source| crate::reports::drawing_digest(source).as_str().to_owned())
+                    .collect();
+                let digests: Vec<&str> = digests.iter().filter_map(|hex| hex.as_str()).collect();
+                assert_eq!(found, digests, "{name}");
+            }
+        }
     }
 }

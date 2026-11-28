@@ -1,8 +1,8 @@
 # Desktop notifications and browser alert preferences
 
-**Implementation plan.** A reviewer should recognize the ticket, the MR and the event in a glance. Clicking a browser-delivered alert should bring the reviewer to its exact inbox entry in an existing tab. Browser permission has one home under **Settings → App → Notifications**. The installed behavior is described in [Operations](../../specs/operations.md).
+**Implementation plan.** The user should recognize the ticket, the MR and the event in a glance. Clicking a browser-delivered alert should bring the user to its exact inbox entry in an existing tab. Browser permission has one home under **Settings → App → Notifications**. The installed behavior is described in [Operations](../../specs/operations.md).
 
-## What a reviewer sees
+## What the user sees
 
 Use two text fields. The title is `<ticket> · MR !<iid> · <event>`. Use the first linked ticket in the inbox’s stable order when several apply. The inbox retains its current bounded list of linked tickets. With no ticket, use a recognizable repository name, e.g. **platform-web · MR !42 · Findings ready**. If two scoped projects would have the same displayed identity, include the distinguishing project path and, for identical paths on different instances, the GitLab host. Navigation always uses the opaque occurrence ID. Keep the MR number and event readable when shortening a long project name.
 

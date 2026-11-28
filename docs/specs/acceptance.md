@@ -1,6 +1,6 @@
 # ReviewQ acceptance
 
-A reviewer should be able to open a review while its native agent is working, read a file without losing their place, give the correct lead feedback and verify what reached that conversation. Exercise the public browser, CLI and native MCP connections using the same production service and the [worked review set](../plans/01-foundation/fixtures.md#worked-review-set). The identifiers below name operator workflows, not a quota for automated tests.
+A user should be able to open a review while its native agent is working, read a file without losing their place, give the correct lead feedback and verify what reached that conversation. Exercise the public browser, CLI and native MCP connections using the same production service and the [worked review set](../plans/01-foundation/fixtures.md#worked-review-set). The identifiers below name operator workflows, not a quota for automated tests.
 
 ## Workflows
 

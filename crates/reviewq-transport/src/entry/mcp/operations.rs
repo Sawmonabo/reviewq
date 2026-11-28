@@ -114,22 +114,7 @@ pub(super) async fn get(entry: &Entry, actor: Actor, args: GetReview) -> Result<
     } else {
         None
     };
-    let selected = match session {
-        Some(session) => {
-            let run = entry
-                .store
-                .run_for_session(actor.clone(), review.clone(), session.clone())
-                .await?;
-            Some((run, session))
-        }
-        None => entry
-            .store
-            .resolve_selection(actor.clone(), review.clone(), None)
-            .await?
-            .value
-            .lead()
-            .map(|target| (target.run_id().clone(), target.session_key().clone())),
-    };
+    let selected = selection(entry, &actor, review.clone(), session).await?;
     let question_id = args.question_id.map(|id| id.as_str().to_owned());
     let (report, questions, action, sessions, recovery, delivery) = if let Some((run, session)) =
         &selected
@@ -317,23 +302,35 @@ pub(super) fn alternatives(urls: Vec<String>) -> Value {
     json!({"state":"ambiguous", "choices": urls})
 }
 
+/// The longest page of at most `len` items whose result fits a tool result: `page(count)`
+/// projects the first `count`, which is halved until the result fits.
+pub(super) fn fit(
+    len: usize,
+    page: impl Fn(usize) -> Result<Value, AppError>,
+) -> Result<Value, AppError> {
+    let mut count = len;
+    loop {
+        let value = page(count)?;
+        match super::bounded_result(&value) {
+            Ok(_) => return Ok(value),
+            Err(AppError::PayloadTooLarge) if count > 1 => count /= 2,
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// An offset page through `fit`: a shortened page continues after its last item.
 fn fit_page(
     items: &[Value],
     offset: u32,
     total: u64,
     project: impl Fn(&[Value], Option<u32>) -> Value,
 ) -> Result<Value, AppError> {
-    let mut count = items.len();
-    loop {
+    fit(items.len(), |count| {
         let next = offset.checked_add(count as u32);
         let next = next.filter(|position| u64::from(*position) < total);
-        let page = project(&items[..count], next);
-        match super::bounded_result(&page) {
-            Ok(_) => return Ok(page),
-            Err(AppError::PayloadTooLarge) if count > 1 => count /= 2,
-            Err(error) => return Err(error),
-        }
-    }
+        Ok(project(&items[..count], next))
+    })
 }
 
 pub(super) async fn transcript(
@@ -349,13 +346,7 @@ pub(super) async fn transcript(
         target_session,
         args.session_key.as_ref().map(|key| key.as_str()),
     )?;
-    let (run, session) = select(
-        entry,
-        &actor,
-        review,
-        session.as_ref().map(|id| id.as_str()),
-    )
-    .await?;
+    let (run, session) = select(entry, &actor, review, session).await?;
     match args.read {
         TranscriptRead::Page {
             cursor,
@@ -462,7 +453,7 @@ pub(super) async fn send(
         return send_result(entry, actor, receipt).await;
     }
     let (run, session) = if let Some(session) = session {
-        select(entry, &actor, review.clone(), Some(session.as_str())).await?
+        select(entry, &actor, review.clone(), Some(session)).await?
     } else {
         let choices = entry
             .store
@@ -516,27 +507,40 @@ async fn send_result(
     }))
 }
 
+/// The run a call on review `id` reads: the run of `session`, or the lead's, which a review
+/// with no registered lead lacks.
+async fn selection(
+    entry: &Entry,
+    actor: &Actor,
+    id: ReviewId,
+    session: Option<SessionKey>,
+) -> Result<Option<(RunId, SessionKey)>, AppError> {
+    if let Some(session) = session {
+        let run = entry
+            .store
+            .run_for_session(actor.clone(), id, session.clone())
+            .await?;
+        return Ok(Some((run, session)));
+    }
+    Ok(entry
+        .store
+        .resolve_selection(actor.clone(), id, None)
+        .await?
+        .value
+        .lead()
+        .map(|lead| (lead.run_id().clone(), lead.session_key().clone())))
+}
+
+/// `selection`, for a call that needs a run.
 pub(super) async fn select(
     entry: &Entry,
     actor: &Actor,
     id: ReviewId,
-    session: Option<&str>,
+    session: Option<SessionKey>,
 ) -> Result<(RunId, SessionKey), AppError> {
-    if let Some(session) = session {
-        let session: SessionKey = parse(session)?;
-        let run = entry
-            .store
-            .run_for_session(actor.clone(), id.clone(), session.clone())
-            .await?;
-        return Ok((run, session));
-    }
-    let selected = entry
-        .store
-        .resolve_selection(actor.clone(), id.clone(), None)
+    selection(entry, actor, id, session)
         .await?
-        .value;
-    let lead = selected.lead().ok_or(AppError::NotFound)?;
-    Ok((lead.run_id().clone(), lead.session_key().clone()))
+        .ok_or(AppError::NotFound)
 }
 
 pub(super) fn dashboard(entry: &Entry, review: &ReviewId, run: Option<&RunId>) -> String {

@@ -1,6 +1,6 @@
 # FOLLOW · Monitor published threads and run private selected checks
 
-**Start after QUEUE, ACTION and REPORT.** Extend the existing registered lead with a private follow-up when another person updates a monitored GitLab discussion, or the reviewer explicitly requests a check. Keep the original finding identities, exact prior evidence and user dispositions. Use the [selected-thread contract](../../specs/review-workflow.md#selected-thread-scheduling), [native delivery](../02-sessions/hosts.md), [report acceptance](reports.md), [queue and Settings](../../specs/queue-and-settings.md) and [public entry points](../02-sessions/entrypoints.md).
+**Start after QUEUE, ACTION and REPORT.** Extend the existing registered lead with a private follow-up when another person updates a monitored GitLab discussion, or the user explicitly requests a check. Keep the original finding identities, exact prior evidence and user dispositions. Use the [selected-thread contract](../../specs/review-workflow.md#selected-thread-scheduling), [native delivery](../02-sessions/hosts.md), [report acceptance](reports.md), [queue and Settings](../../specs/queue-and-settings.md) and [public entry points](../02-sessions/entrypoints.md).
 
 ## Deliverables and calls
 

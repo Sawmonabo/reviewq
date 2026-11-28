@@ -72,6 +72,8 @@ pub enum ErrorCode {
     IdempotencyConflict,
     CursorExpired,
     PreconditionFailed,
+    // A call from a host session that still holds the tools of an earlier ReviewQ plugin.
+    OutdatedTool,
     PayloadTooLarge,
     RangeNotSatisfiable,
     Busy,

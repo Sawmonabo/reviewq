@@ -19,6 +19,51 @@ use super::hook::{Answer, GateHost, INPUT_LIMIT, forward};
 use super::{Failure, bounded, bridge_as, client, client_with_timeout, read_input, read_within};
 use crate::runtime;
 
+/// The tool names the hosts register (`reviewq-protocol`) are the names ReviewQ records in
+/// `ledger_calls`, names in prompts and finds in a Claude transcript (`reviewq-domain`). The
+/// two crates may not import each other, so the build fails here when they differ: every
+/// reviewing tool has one domain tool by the same name, the two sets are the same size, and
+/// the publication action tool has one name.
+const _: () = {
+    use reviewq_domain::ledger::Tool;
+    use reviewq_protocol::ledger::LEDGER_TOOLS;
+
+    const fn same(left: &str, right: &str) -> bool {
+        let (left, right) = (left.as_bytes(), right.as_bytes());
+        if left.len() != right.len() {
+            return false;
+        }
+        let mut index = 0;
+        while index < left.len() {
+            if left[index] != right[index] {
+                return false;
+            }
+            index += 1;
+        }
+        true
+    }
+
+    const fn recorded(tool: LedgerTool) -> Tool {
+        match tool {
+            LedgerTool::SaveFinding => Tool::SaveFinding,
+            LedgerTool::SetFindingOutcome => Tool::SetFindingOutcome,
+            LedgerTool::SaveSection => Tool::SaveSection,
+            LedgerTool::ReadDraft => Tool::ReadDraft,
+            LedgerTool::SubmitReview => Tool::SubmitReview,
+            LedgerTool::WaitForUser => Tool::WaitForUser,
+        }
+    }
+
+    let mut index = 0;
+    while index < LEDGER_TOOLS.len() {
+        let tool = LEDGER_TOOLS[index];
+        assert!(same(tool.name(), recorded(tool).as_str()));
+        index += 1;
+    }
+    assert!(LEDGER_TOOLS.len() == Tool::ALL.len());
+    assert!(same(TRACK_POSTING, reviewq_domain::ledger::TRACK_POSTING));
+};
+
 /// Room for the call's other fields, each ID at most 512 bytes, around a tool input of the
 /// largest size. A call above it carries an input above `MAX_TOOL_INPUT_BYTES` as compact JSON.
 const LEDGER_CALL_LIMIT: usize = MAX_TOOL_INPUT_BYTES + 4096;
@@ -224,7 +269,7 @@ fn action_refusal(declare: bool, reply: &[u8]) -> String {
         }
         // The call came from a ReviewQ tool by a name other than the current one: this session
         // still holds the tools of an earlier plugin.
-        (Ok(ErrorCode::PreconditionFailed), _) => UNKNOWN_TOOL_CLAUDE,
+        (Ok(ErrorCode::OutdatedTool), _) => UNKNOWN_TOOL_CLAUDE,
         (Ok(ErrorCode::Forbidden), _) => {
             "ReviewQ takes a publication action only in a turn that the user's latest instruction started, typed in this conversation or sent from ReviewQ. This turn did not start that way, so nothing was recorded. Ask the user for the instruction."
         }

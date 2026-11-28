@@ -1,6 +1,6 @@
 # QUEUEUI · Discover work, follow runs and act on notifications
 
-**Start after SHELL and FOLLOW.** Use the confirmed route and selected run with the [worked and busy fixtures](../01-foundation/fixtures.md). Live qualification consumes [source discovery](../03-workspace/sources.md), the [queue projection](../03-workspace/queue.md), native launch/registration and follow-up operations. **Outcome** is a reviewer who can discover an MR, launch selected reviews, find past work and acknowledge precisely the inbox updates they saw. [Queue and settings contract](../../specs/queue-and-settings.md) · [Browser experience](../../specs/browser-experience.md)
+**Start after SHELL and FOLLOW.** Use the confirmed route and selected run with the [worked and busy fixtures](../01-foundation/fixtures.md). Live qualification consumes [source discovery](../03-workspace/sources.md), the [queue projection](../03-workspace/queue.md), native launch/registration and follow-up operations. **Outcome** is a user who can discover an MR, launch selected reviews, find past work and acknowledge precisely the inbox updates they saw. [Queue and settings contract](../../specs/queue-and-settings.md) · [Browser experience](../../specs/browser-experience.md)
 
 ## Surface ownership
 

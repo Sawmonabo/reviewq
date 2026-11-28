@@ -2,10 +2,11 @@
 
 use satteri_pulldown_cmark::{CodeBlockKind, Event, Tag, TagEnd};
 
+use super::shown::ShownText;
 use super::{FieldProblem, Parse, ProblemKind, line_of};
-use crate::reports::{diagram_source, is_mermaid, undrawable};
+use crate::reports::{diagram_source, is_mermaid, js_space, undrawable};
 
-/// The headings of the table of affected operations, as compared: trimmed and lowercased.
+/// The headings of the table of affected operations, as compared (`Table::headings`).
 const OPERATION_HEADINGS: [&str; 3] = ["affected operation", "what changes", "source"];
 
 /// `Ok` when `text` holds a Mermaid diagram the page draws: a fenced code block at any depth,
@@ -72,11 +73,12 @@ fn reads_as_mermaid_fence(line: &str) -> bool {
     line.len() - info.len() >= 3 && info.trim_start().split([' ', '\t']).next() == Some("mermaid")
 }
 
-/// One top-level table: its header cells as compared, trimmed and lowercased, and whether it has
-/// a body row.
+/// One top-level table: its header cells as compared, and whether it has a body row.
 #[derive(Default)]
-struct Table {
-    headings: Vec<String>,
+pub(super) struct Table {
+    /// Each header cell's text as the page shows it (`ShownText`), without the white space
+    /// JavaScript's `trim()` removes, and lowercased, as `reportTable` compares it.
+    pub(super) headings: Vec<String>,
     body: bool,
 }
 
@@ -115,17 +117,18 @@ pub(super) fn tables(text: &str) -> Result<(), FieldProblem> {
     })
 }
 
-/// Every top-level table of `text`, in order. A heading's text is what the page compares: its
-/// text, code and raw HTML, which the report shows as written, but not an image's description,
-/// which the page keeps out of the text.
-fn top_level_tables(text: &str) -> Vec<Table> {
+/// Every top-level table of `text`, in order.
+pub(super) fn top_level_tables(text: &str) -> Vec<Table> {
     let mut tables = Vec::new();
     let mut depth = 0_usize;
     let mut in_table = false;
     let mut in_head = false;
-    // How many images are open around the current event.
-    let mut images = 0_usize;
+    // The header cell being read.
+    let mut cell: Option<ShownText> = None;
     for (event, _) in Parse::new(text).events() {
+        if let Some(cell) = cell.as_mut() {
+            cell.push(&event);
+        }
         match &event {
             Event::Start(tag) => {
                 match tag {
@@ -137,13 +140,7 @@ fn top_level_tables(text: &str) -> Vec<Table> {
                     Tag::TableRow if in_table && !in_head => {
                         tables.last_mut().into_iter().for_each(|t| t.body = true);
                     }
-                    Tag::TableCell if in_head => {
-                        tables
-                            .last_mut()
-                            .into_iter()
-                            .for_each(|t| t.headings.push(String::new()));
-                    }
-                    Tag::Image { .. } => images += 1,
+                    Tag::TableCell if in_head => cell = Some(ShownText::default()),
                     _ => {}
                 }
                 depth += 1;
@@ -152,22 +149,14 @@ fn top_level_tables(text: &str) -> Vec<Table> {
                 depth = depth.saturating_sub(1);
                 match tag {
                     TagEnd::TableHead => in_head = false,
-                    TagEnd::Image => images = images.saturating_sub(1),
                     TagEnd::Table if depth == 0 => in_table = false,
-                    TagEnd::TableCell if in_head => {
-                        if let Some(heading) = tables.last_mut().and_then(|t| t.headings.last_mut())
-                        {
-                            *heading = heading.trim().to_lowercase();
+                    TagEnd::TableCell => {
+                        if let (Some(shown), Some(table)) = (cell.take(), tables.last_mut()) {
+                            let heading = shown.as_str().trim_matches(js_space).to_lowercase();
+                            table.headings.push(heading);
                         }
                     }
                     _ => {}
-                }
-            }
-            Event::Text(value) | Event::Code(value) | Event::InlineHtml(value)
-                if in_head && images == 0 =>
-            {
-                if let Some(heading) = tables.last_mut().and_then(|t| t.headings.last_mut()) {
-                    heading.push_str(value);
                 }
             }
             _ => {}

@@ -1,5 +1,6 @@
 use reviewq_domain::identity::ReportHash;
 use satteri_pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
+use sha2::{Digest, Sha256};
 
 use super::REPORT_MARKDOWN;
 use crate::access::{AppError, AppFuture};
@@ -74,14 +75,25 @@ pub fn mermaid_sources(markdown: &str) -> Vec<String> {
     drawings
 }
 
-/// A Mermaid block's text as the page hands it to Mermaid: Windows line endings as `\n`, and
-/// one line ending at the end.
+/// A Mermaid block's text as the page hands it to Mermaid, byte for byte: the block's text
+/// with its last line ending, `\r\n`, `\n` or `\r`, written as `\n`, or `\n` added when it
+/// has none. The page's syntax tree drops the last line ending and the HTML step adds `\n`,
+/// while every other line ending stays as written, `\r` included. So the page's tests count
+/// these characters, and the page looks up a drawing made ahead by the SHA-256 of these
+/// bytes. Mermaid reads `\r\n` and `\r` as `\n`, so a drawing does not depend on them.
 pub(crate) fn diagram_source(text: &str) -> String {
-    let mut source = text.replace("\r\n", "\n");
-    if !source.ends_with('\n') {
-        source.push('\n');
-    }
-    source
+    let body = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix(['\n', '\r']))
+        .unwrap_or(text);
+    format!("{body}\n")
+}
+
+/// The key a drawing made ahead is stored and looked up by: the SHA-256 of a diagram's source
+/// (`diagram_source`) as UTF-8, written in lowercase hex. The page's `digestDrawing` computes
+/// the same key from the source it hands to Mermaid.
+pub fn drawing_digest(source: &str) -> ReportHash {
+    ReportHash::from_sha256(Sha256::digest(source.as_bytes()).into())
 }
 
 /// Why the page shows a Mermaid source as text instead of drawing it.
@@ -171,8 +183,9 @@ fn arrows(units: &[u16]) -> usize {
     count
 }
 
-/// Whether `character` is white space to JavaScript's `\s`.
-fn js_space(character: char) -> bool {
+/// Whether `character` is white space to JavaScript's `\s`, which is also what JavaScript's
+/// `trim()` removes.
+pub(crate) fn js_space(character: char) -> bool {
     matches!(
         character,
         '\t' | '\n' | '\u{0b}' | '\u{0c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'

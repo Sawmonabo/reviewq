@@ -107,6 +107,9 @@ macro_rules! labelled {
         }
 
         impl $name {
+            /// Every value, in declaration order.
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+
             /// The label stored in SQLite and used on the wire.
             pub const fn as_str(self) -> &'static str {
                 match self {
@@ -199,6 +202,18 @@ labelled!(
         WaitForUser => "wait_for_user",
     }
 );
+
+impl Tool {
+    /// Whether an accepted call of this tool is stored with its result as a ledger call, so a
+    /// repeat of the call returns it unchanged. A `read_draft` call changes nothing and is not.
+    pub const fn is_recorded(self) -> bool {
+        !matches!(self, Self::ReadDraft)
+    }
+}
+
+/// The tool that declares and reconciles a publication action, which ReviewQ registers beside
+/// the reviewing tools. Its calls are not ledger calls.
+pub const TRACK_POSTING: &str = "track_posting";
 
 labelled!(
     /// Who made a ledger call, as the store attributed it.

@@ -13,8 +13,10 @@ use satteri_pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 use super::NoteSection;
 use super::layout::{COVER_LABELS, CardLabel, CountsLine};
 use crate::reports::{REPORT_MARKDOWN, Undrawable};
+use shown::ShownText;
 
 mod content;
+mod shown;
 #[cfg(test)]
 mod tests;
 
@@ -447,10 +449,10 @@ impl<'a> Parse<'a> {
 
 enum BlockKind {
     Paragraph {
-        /// The text of the strong emphasis the paragraph begins with, if it begins with one.
+        /// The text of the strong emphasis the paragraph begins with, if it begins with one,
+        /// as the page shows it (`ShownText`).
         bold: Option<String>,
-        /// The paragraph's text as the reader shows it: its text, code and raw HTML, with a
-        /// line break at each soft or hard break.
+        /// The paragraph's text as the page shows it (`ShownText`).
         text: String,
     },
     Heading,
@@ -475,24 +477,12 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
     let mut depth = 0_usize;
     let mut paragraph_opened = false;
     // The text of a top-level paragraph's leading strong emphasis while it is read.
-    let mut bold: Option<String> = None;
-    // Whether a top-level paragraph is being read.
-    let mut in_paragraph = false;
+    let mut bold: Option<ShownText> = None;
+    // The text of the top-level paragraph being read.
+    let mut paragraph: Option<ShownText> = None;
     for (event, range) in parse.events() {
-        if in_paragraph
-            && let Some(Block {
-                kind: BlockKind::Paragraph { text, .. },
-                ..
-            }) = blocks.last_mut()
-        {
-            match &event {
-                Event::Text(value)
-                | Event::Code(value)
-                | Event::Html(value)
-                | Event::InlineHtml(value) => text.push_str(value),
-                Event::SoftBreak | Event::HardBreak => text.push('\n'),
-                _ => {}
-            }
+        for shown in [paragraph.as_mut(), bold.as_mut()].into_iter().flatten() {
+            shown.push(&event);
         }
         if footnote.is_none()
             && matches!(
@@ -503,7 +493,7 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
             footnote = Some(range.start);
         }
         if std::mem::take(&mut paragraph_opened) && matches!(event, Event::Start(Tag::Strong)) {
-            bold = Some(String::new());
+            bold = Some(ShownText::default());
         }
         match event {
             Event::Start(tag) => {
@@ -511,7 +501,7 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
                     let kind = match tag {
                         Tag::Paragraph => {
                             paragraph_opened = true;
-                            in_paragraph = true;
+                            paragraph = Some(ShownText::default());
                             BlockKind::Paragraph {
                                 bold: None,
                                 text: String::new(),
@@ -533,23 +523,23 @@ fn top_level_blocks(parse: Parse<'_>) -> (Vec<Block>, Option<usize>) {
             }
             Event::End(_) => {
                 depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    in_paragraph = false;
-                }
-                // The leading strong opened inside the paragraph, at depth 1, and ends here.
-                if depth == 1
-                    && let Some(text) = bold.take()
+                // The paragraph, or the leading strong opened inside it at depth 1, ends here.
+                let ended = match depth {
+                    0 => paragraph.take().map(|shown| (false, shown)),
+                    1 => bold.take().map(|shown| (true, shown)),
+                    _ => None,
+                };
+                if let Some((strong, shown)) = ended
                     && let Some(Block {
-                        kind: BlockKind::Paragraph { bold, .. },
+                        kind: BlockKind::Paragraph { bold, text },
                         ..
                     }) = blocks.last_mut()
                 {
-                    *bold = Some(text);
-                }
-            }
-            Event::Text(text) | Event::Code(text) if bold.is_some() => {
-                if let Some(bold) = bold.as_mut() {
-                    bold.push_str(&text);
+                    if strong {
+                        *bold = Some(shown.into_string());
+                    } else {
+                        *text = shown.into_string();
+                    }
                 }
             }
             // A leaf block such as a thematic break.

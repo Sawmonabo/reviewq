@@ -51,8 +51,14 @@ const MAX_READ_BACK_BYTES: usize = 8_000;
 /// Longest finding title in a read-back line, in Unicode scalar values, ellipsis included.
 const MAX_TITLE_CHARS: usize = 80;
 
+/// What a prompt ReviewQ sends on its own to continue a review, a resumed review or a
+/// selected-thread check, says about the work around it. It forbids only writes outside
+/// ReviewQ, so it never reads as a reason not to close with `submit_review`, which publishes
+/// the report in ReviewQ and posts nothing to GitLab.
+pub const PRIVATE_WORK: &str = "Preserve unrelated findings, questions, qualifications and user dispositions. Do not post or edit GitLab notes, approve, merge, resolve discussions, or change Jira.";
+
 /// Ends `text` with the rule, after a blank line when `text` holds anything.
-pub(crate) fn append_rule(text: &mut String) {
+pub fn append_rule(text: &mut String) {
     if !text.is_empty() {
         text.push_str("\n\n");
     }

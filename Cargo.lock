@@ -1978,6 +1978,7 @@ dependencies = [
  "reviewq-domain",
  "satteri-pulldown-cmark",
  "scraper",
+ "serde_json",
  "sha2",
  "tokio",
  "unicode-normalization",

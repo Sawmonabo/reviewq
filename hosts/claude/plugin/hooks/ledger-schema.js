@@ -537,7 +537,7 @@ export const ledgerTools = [
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,
-      "description": "Pauses the review until the user replies to a question that must be answered before the review can finish. It publishes nothing.",
+      "description": "Pauses the review until the user replies to a question that must be answered before the review can be submitted. It publishes nothing.",
       "properties": {
         "question": {
           "description": "The question, and what the review waits on. Ask it in your reply as well: the user is told only that the review needs input.",

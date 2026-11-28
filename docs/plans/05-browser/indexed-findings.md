@@ -76,7 +76,7 @@ The table describes the intended complete read contract. Extend the versioned re
 
 Reject wrong-run receipts, stale or mismatched cursors and out-of-range coordinates. Validate receipt, digest, index version and current navigation generation after decoding each result. Cancel obsolete reads on run/version changes, close and unmount. A revision announcement leaves the selected receipt and any quote draft in place. Only visible, correctly identified content may trigger the existing viewed acknowledgement. The whole-source download stays an authenticated streaming attachment.
 
-For example, opening a bookmark halfway through a report should read the stored index and the source chunks containing that section. React receives the section with its presentation context and nearby content, then prepares the next batch while the reviewer reads. Opening an ordinary small report may finish in one batch. Neither case needs an extra request just to locate the first visible paragraph.
+For example, opening a bookmark halfway through a report should read the stored index and the source chunks containing that section. React receives the section with its presentation context and nearby content, then prepares the next batch while the user reads. Opening an ordinary small report may finish in one batch. Neither case needs an extra request just to locate the first visible paragraph.
 
 ## Scrolling and one unusually large block
 

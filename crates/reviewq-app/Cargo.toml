@@ -18,5 +18,8 @@ unicode-segmentation = "1.13.3"
 url = "2"
 reviewq-domain = { path = "../reviewq-domain" }
 
+[dev-dependencies]
+serde_json = "1.0.154"
+
 [lints]
 workspace = true

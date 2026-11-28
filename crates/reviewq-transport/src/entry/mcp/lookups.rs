@@ -15,7 +15,7 @@ use reviewq_protocol::reports::FindingKind;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use super::operations::{ResolvedReview, alternatives, resolve, select};
+use super::operations::{ResolvedReview, alternatives, fit, resolve, select};
 use crate::entry::Entry;
 use crate::entry::features::reports::{
     project_basis, project_conclusion, project_finding_kind, project_location, project_severity,
@@ -55,13 +55,7 @@ pub(super) async fn findings(
         args.session_key.as_ref().map(|key| key.as_str()),
     )?;
     // The run `get_review` would return a report for: the session's, or the lead's.
-    let (run, session) = select(
-        entry,
-        &actor,
-        review,
-        session.as_ref().map(|id| id.as_str()),
-    )
-    .await?;
+    let (run, session) = select(entry, &actor, review, session).await?;
     let limit = page_limit(args.limit, DEFAULT_FINDINGS)?;
     let state = args.state.unwrap_or(FindingState::All);
     let selection = FindingSelection {
@@ -110,7 +104,21 @@ pub(super) async fn findings(
         )
         .await?
         .value;
-    let report = context.report.ok_or(AppError::NotFound)?;
+    let page = |report: Value, findings: Vec<&Value>, next: Option<String>| {
+        json!({
+            "runId": run.as_str(),
+            "sessionKey": session.as_str(),
+            "report": report,
+            "findings": findings,
+            "nextCursor": next,
+        })
+    };
+    // A run with nothing published has no findings, which is not an error: `get_review` reads
+    // its summary as `report: null` too. A receipt the call names that does not exist was
+    // refused by the read.
+    let Some(report) = context.report else {
+        return Ok(page(Value::Null, Vec::new(), None));
+    };
     let mut items = Vec::with_capacity(context.items.len());
     for item in context.items {
         let key = item.key();
@@ -130,14 +138,9 @@ pub(super) async fn findings(
             },
         )
     };
+    let version = json!({"receiptId": report.receipt_id.as_str(), "sha256": report.hash.as_str()});
     fit_items(&items, context.next.is_some(), cursor, |findings, next| {
-        json!({
-            "runId": run.as_str(),
-            "sessionKey": session.as_str(),
-            "report": {"receiptId": report.receipt_id.as_str(), "sha256": report.hash.as_str()},
-            "findings": findings,
-            "nextCursor": next,
-        })
+        page(version.clone(), findings, next)
     })
 }
 
@@ -281,27 +284,21 @@ fn page_limit(limit: Option<u16>, default: u16) -> Result<u16, AppError> {
         .ok_or(AppError::InvalidRequest)
 }
 
-/// Projects the longest prefix of `items` whose result fits a tool result, halving it until
-/// it does. A shortened page continues after its last item, so the continuation is always
-/// the position of the last item returned. Each item is `(value, position)`.
+/// A cursor page through `fit`: a shortened page continues after its last item, so the
+/// continuation is always the position of the last item returned. Each item is
+/// `(value, position)`.
 fn fit_items<P>(
     items: &[(Value, P)],
     more: bool,
     cursor: impl Fn(&P) -> Result<String, AppError>,
     project: impl Fn(Vec<&Value>, Option<String>) -> Value,
 ) -> Result<Value, AppError> {
-    let mut count = items.len();
-    loop {
+    fit(items.len(), |count| {
         let kept = &items[..count];
         let next = match kept.last() {
             Some((_, position)) if more || count < items.len() => Some(cursor(position)?),
             _ => None,
         };
-        let page = project(kept.iter().map(|(value, _)| value).collect(), next);
-        match super::bounded_result(&page) {
-            Ok(_) => return Ok(page),
-            Err(AppError::PayloadTooLarge) if count > 1 => count /= 2,
-            Err(error) => return Err(error),
-        }
-    }
+        Ok(project(kept.iter().map(|(value, _)| value).collect(), next))
+    })
 }

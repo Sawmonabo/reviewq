@@ -6,7 +6,7 @@ use reviewq_domain::session::LeadTarget;
 
 use crate::access::{AppError, AppFuture};
 use crate::hosts::MessageBody;
-use crate::ledger::readback::append_rule;
+use crate::ledger::readback::{PRIVATE_WORK, append_rule};
 use crate::queue::MergeRequestState;
 use crate::reports::ReportReference;
 use crate::sources::ReviewSourceReader;
@@ -157,15 +157,14 @@ async fn prepare(
     let mut prompt = format!(
         concat!(
             "Privately reassess selected ReviewQ discussions for {} !{} at source SHA {}. Batch {}. ",
-            "Read each identified discussion and the current code. ",
-            "Preserve unrelated findings, questions, qualifications and user dispositions. ",
-            "Do not post or edit GitLab notes, approve, merge, resolve discussions, or change Jira. ",
+            "Read each identified discussion and the current code. {} ",
             "Close this check with {} and one assessment per listed discussion, each covering that discussion's finding IDs."
         ),
         source.review.project_path,
         source.review.identity.iid(),
         source.review.head_sha,
         check.batch_id,
+        PRIVATE_WORK,
         Tool::SubmitReview.as_str(),
     );
     if let Some(base) = &check.base {

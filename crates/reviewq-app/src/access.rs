@@ -104,6 +104,9 @@ pub enum AppError {
     IdempotencyConflict,
     CursorExpired,
     PreconditionFailed,
+    /// A call the host's transcript records under another ReviewQ tool's name: the session
+    /// still holds the tools of a plugin loaded before the current ones.
+    OutdatedTool,
     PayloadTooLarge,
     RangeNotSatisfiable,
     Busy,
@@ -130,6 +133,7 @@ impl Display for AppError {
             Self::IdempotencyConflict => "submission ID already used for different input",
             Self::CursorExpired => "cursor expired",
             Self::PreconditionFailed => "resource precondition failed",
+            Self::OutdatedTool => "the session holds an earlier version of ReviewQ's tools",
             Self::PayloadTooLarge => "payload exceeds its limit",
             Self::RangeNotSatisfiable => "requested range is unavailable",
             Self::Busy => "service is busy",

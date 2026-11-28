@@ -19,7 +19,8 @@ use reviewq_app::reports::{
 };
 use reviewq_domain::identity::{GitSha, ReportHash, Revision, RunId};
 use reviewq_domain::ledger::{
-    FailureKind, FindingId, PassKind, PassState, RecordRevision, Settlement, VersionKind, settle,
+    FailureKind, FindingId, PassKind, PassState, RecordRevision, Settlement, Tool, VersionKind,
+    settle,
 };
 use reviewq_domain::session::AbsolutePath;
 use sha2::{Digest, Sha256};
@@ -30,6 +31,35 @@ mod companion;
 mod managing;
 
 const SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+/// The schema writes the tool names the domain records as literals, in the `ledger_calls`
+/// check and the closing-call index, so they are compared here: the check lists exactly the
+/// recorded tools, and the index selects `submit_review`.
+#[test]
+fn ledger_schema_names_the_recorded_tools() {
+    let schema = include_str!("../schema/ledger.sql");
+    let opening = "tool TEXT NOT NULL CHECK (tool IN (";
+    let start = schema.find(opening).expect("the tool check") + opening.len();
+    let end = start
+        + schema[start..]
+            .find("))")
+            .expect("the end of the tool check");
+    let listed: Vec<&str> = schema[start..end]
+        .split(',')
+        .map(|name| name.trim().trim_matches('\''))
+        .collect();
+    let recorded: Vec<&str> = Tool::ALL
+        .iter()
+        .filter(|tool| tool.is_recorded())
+        .map(|tool| tool.as_str())
+        .collect();
+    assert_eq!(listed, recorded);
+    let closing = format!(
+        "ON ledger_calls(run_id, native_turn_id) WHERE tool = '{}';",
+        Tool::SubmitReview.as_str()
+    );
+    assert!(schema.contains(&closing), "{closing}");
+}
 
 #[test]
 fn ledger_writes_are_idempotent() {

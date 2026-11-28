@@ -28,6 +28,7 @@ function validate498(
     data === "idempotency_conflict" ||
     data === "cursor_expired" ||
     data === "precondition_failed" ||
+    data === "outdated_tool" ||
     data === "payload_too_large" ||
     data === "range_not_satisfiable" ||
     data === "busy" ||

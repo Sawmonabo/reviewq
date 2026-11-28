@@ -114,11 +114,13 @@ pub(super) fn last_closing(
     db: &Connection,
     run: &str,
 ) -> Result<Option<(String, i64, i64)>, StoreError> {
+    // The name is written into the SQL, not bound, so SQLite uses `ledger_call_closing`.
     Ok(db
-        .prepare_cached(
+        .prepare_cached(&format!(
             "SELECT result, sequence, ordinal FROM ledger_calls
-             WHERE run_id=?1 AND tool='submit_review' ORDER BY ordinal DESC LIMIT 1",
-        )?
+             WHERE run_id=?1 AND tool='{}' ORDER BY ordinal DESC LIMIT 1",
+            Tool::SubmitReview.as_str()
+        ))?
         .query_row([run], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
         .optional()?)
 }

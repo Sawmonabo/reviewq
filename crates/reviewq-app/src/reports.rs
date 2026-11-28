@@ -12,9 +12,10 @@ pub use display::{
     build_display_index, build_report_display_index,
 };
 pub use drawings::{
-    DRAWING_RECIPE, DrawingOutput, DrawingRenderer, MAX_DRAWING_BYTES, mermaid_sources,
+    DRAWING_RECIPE, DrawingOutput, DrawingRenderer, MAX_DRAWING_BYTES, drawing_digest,
+    mermaid_sources,
 };
-pub(crate) use drawings::{Undrawable, diagram_source, is_mermaid, undrawable};
+pub(crate) use drawings::{Undrawable, diagram_source, is_mermaid, js_space, undrawable};
 
 pub use revision::{FindingEdit, ReportEdits};
 

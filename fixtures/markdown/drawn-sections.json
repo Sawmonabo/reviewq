@@ -1,0 +1,336 @@
+{
+  "about": [
+    "Report sections that ReviewQ checks when they are saved (crates/reviewq-app/src/ledger/markdown/content.rs) and the report page draws (reportTable in web/src/features/review/report/report-structure.ts, eligibleDiagram and diagramSource in web/src/components/markdown/mermaid.ts). Both sides read this file: drawn_sections_agree_with_the_page in crates/reviewq-app/src/ledger/markdown/tests.rs and web/tests/browser/drawn-sections.spec.ts.",
+    "headings: a Before and After table whose first header cell is cell. shown is that heading's text as the page compares it: trimmed as JavaScript trims and lowercased. The page draws the table as cards exactly when shown is before.",
+    "sections: drawn says whether the page draws what the section needs: a Mermaid diagram for flow, a Before and After table followed by the operations table for changes. diagrams lists, in order, the exact text the page hands Mermaid for each block it draws. digests, where given, lists the lowercase-hex SHA-256 of each, the key by which ReviewQ stores a drawing made ahead and the page looks it up. refusal is the Rust check's refusal, by line and kind.",
+    "A body is a string or a list of pieces, where {\"repeat\": text, \"times\": n} stands for text written n times."
+  ],
+  "headings": [
+    {
+      "case": "a plain heading",
+      "cell": "Before",
+      "shown": "before"
+    },
+    {
+      "case": "bold capitals",
+      "cell": "**BEFORE**",
+      "shown": "before"
+    },
+    {
+      "case": "code",
+      "cell": "`Before`",
+      "shown": "before"
+    },
+    {
+      "case": "a link",
+      "cell": "[Before](https://example.com)",
+      "shown": "before"
+    },
+    {
+      "case": "an image with no alt text after the word",
+      "cell": "Before ![](diagram.png)",
+      "shown": "before attachment"
+    },
+    {
+      "case": "an image with no alt text inside a link, before the word",
+      "cell": "[![](diagram.png)Before](https://example.com)",
+      "shown": "attachmentbefore"
+    },
+    {
+      "case": "an image whose alt text is the word",
+      "cell": "![Before](diagram.png)",
+      "shown": "before"
+    },
+    {
+      "case": "a trailing next-line character, U+0085, which JavaScript does not trim",
+      "cell": "Before\u0085",
+      "shown": "before\u0085"
+    },
+    {
+      "case": "a leading byte-order mark, which JavaScript trims",
+      "cell": "&#xFEFF;Before",
+      "shown": "before"
+    },
+    {
+      "case": "a trailing <br>",
+      "cell": "Before<br>",
+      "shown": "before"
+    },
+    {
+      "case": "a trailing <br/>",
+      "cell": "Before<br/>",
+      "shown": "before"
+    },
+    {
+      "case": "a trailing <br />",
+      "cell": "Before<br />",
+      "shown": "before"
+    },
+    {
+      "case": "a trailing <br >",
+      "cell": "Before<br >",
+      "shown": "before"
+    },
+    {
+      "case": "a <BR> in capitals, which stays text",
+      "cell": "Before<BR>",
+      "shown": "before<br>"
+    },
+    {
+      "case": "a <br> inside the word",
+      "cell": "Be<br>fore",
+      "shown": "be\nfore"
+    },
+    {
+      "case": "other raw HTML, which stays text",
+      "cell": "<b>Before</b>",
+      "shown": "<b>before</b>"
+    }
+  ],
+  "sections": [
+    {
+      "case": "Before and After, then the operations",
+      "section": "changes",
+      "body": "| Before | After |\n| --- | --- |\n| Reads input unchecked. | Checks it first. |\n\n| Affected operation | What changes | Source |\n| --- | --- | --- |\n| `Parser::read` | Checks first. | `src/parser.rs` |\n",
+      "drawn": true
+    },
+    {
+      "case": "a lone table of another shape",
+      "section": "changes",
+      "body": "| Area | Change |\n| --- | --- |\n| Parser | Checks first. |\n",
+      "drawn": false,
+      "refusal": {
+        "line": 1,
+        "kind": "NoBeforeAfter"
+      }
+    },
+    {
+      "case": "Before and After without the operations",
+      "section": "changes",
+      "body": "| Before | After |\n| --- | --- |\n| Reads input unchecked. | Checks it first. |\n",
+      "drawn": false,
+      "refusal": {
+        "line": 1,
+        "kind": "NoOperations"
+      }
+    },
+    {
+      "case": "the operations before Before and After",
+      "section": "changes",
+      "body": "| Affected operation | What changes | Source |\n| --- | --- | --- |\n| `Parser::read` | Checks first. | `src/parser.rs` |\n\n| Before | After |\n| --- | --- |\n| Reads input unchecked. | Checks it first. |\n",
+      "drawn": false,
+      "refusal": {
+        "line": 1,
+        "kind": "NoOperations"
+      }
+    },
+    {
+      "case": "Before and After with no row under it",
+      "section": "changes",
+      "body": "| Before | After |\n| --- | --- |\n\n| Affected operation | What changes | Source |\n| --- | --- | --- |\n| `Parser::read` | Checks first. | `src/parser.rs` |\n",
+      "drawn": false,
+      "refusal": {
+        "line": 1,
+        "kind": "NoBeforeAfter"
+      }
+    },
+    {
+      "case": "Before and After inside a list item",
+      "section": "changes",
+      "body": "- The change:\n\n  | Before | After |\n  | --- | --- |\n  | Reads input unchecked. | Checks it first. |\n\n| Affected operation | What changes | Source |\n| --- | --- | --- |\n| `Parser::read` | Checks first. | `src/parser.rs` |\n",
+      "drawn": false,
+      "refusal": {
+        "line": 1,
+        "kind": "NoBeforeAfter"
+      }
+    },
+    {
+      "case": "Before and After inside a quote",
+      "section": "changes",
+      "body": "> | Before | After |\n> | --- | --- |\n> | Reads input unchecked. | Checks it first. |\n\n| Affected operation | What changes | Source |\n| --- | --- | --- |\n| `Parser::read` | Checks first. | `src/parser.rs` |\n",
+      "drawn": false,
+      "refusal": {
+        "line": 1,
+        "kind": "NoBeforeAfter"
+      }
+    },
+    {
+      "case": "operation headings with a <br> and a byte-order mark",
+      "section": "changes",
+      "body": "| BEFORE<br/> | after |\n| --- | --- |\n| Reads input unchecked. | Checks it first. |\n\n| Affected operation<br> | What changes | &#xFEFF;Source |\n| --- | --- | --- |\n| `Parser::read` | Checks first. | `src/parser.rs` |\n",
+      "drawn": true
+    },
+    {
+      "case": "no diagram",
+      "section": "flow",
+      "body": "The request goes straight to the parser.\n",
+      "drawn": false,
+      "refusal": {
+        "line": 1,
+        "kind": "NoDiagram"
+      },
+      "diagrams": []
+    },
+    {
+      "case": "a diagram at the top level",
+      "section": "flow",
+      "body": "The request path:\n\n```mermaid\nflowchart LR\n  A --> B\n```\n",
+      "drawn": true,
+      "diagrams": [
+        "flowchart LR\n  A --> B\n"
+      ]
+    },
+    {
+      "case": "a diagram inside a list item",
+      "section": "flow",
+      "body": "The request path:\n\n- Client side:\n\n  ```mermaid\n  flowchart LR\n    A --> B\n  ```\n",
+      "drawn": true,
+      "diagrams": [
+        "flowchart LR\n  A --> B\n"
+      ]
+    },
+    {
+      "case": "a diagram inside a quote",
+      "section": "flow",
+      "body": "> ```mermaid\n> flowchart LR\n>   A --> B\n> ```\n",
+      "drawn": true,
+      "diagrams": [
+        "flowchart LR\n  A --> B\n"
+      ]
+    },
+    {
+      "case": "a tilde fence with a word after mermaid",
+      "section": "flow",
+      "body": "~~~mermaid request path\nflowchart LR\n  A --> B\n~~~\n",
+      "drawn": true,
+      "diagrams": [
+        "flowchart LR\n  A --> B\n"
+      ]
+    },
+    {
+      "case": "a fence indented as code",
+      "section": "flow",
+      "body": "The request path:\n\n    ```mermaid\n    flowchart LR\n      A --> B\n    ```\n",
+      "drawn": false,
+      "refusal": {
+        "line": 3,
+        "kind": "IndentedFence"
+      },
+      "diagrams": []
+    },
+    {
+      "case": "a directive",
+      "section": "flow",
+      "body": "```mermaid\n%%{init: {}}%%\nflowchart LR\n  A --> B\n```\n",
+      "drawn": false,
+      "refusal": {
+        "line": 1,
+        "kind": "NotDrawn(Header)"
+      },
+      "diagrams": []
+    },
+    {
+      "case": "a click action with a link",
+      "section": "flow",
+      "body": "```mermaid\nflowchart LR\n  A --> B\n  click A \"https://example.com\"\n```\n",
+      "drawn": false,
+      "refusal": {
+        "line": 1,
+        "kind": "NotDrawn(Link)"
+      },
+      "diagrams": []
+    },
+    {
+      "case": "500 arrows",
+      "section": "flow",
+      "body": [
+        "```mermaid\nflowchart LR\n",
+        {
+          "repeat": "  A --> B\n",
+          "times": 500
+        },
+        "```\n"
+      ],
+      "drawn": true,
+      "diagrams": [
+        [
+          "flowchart LR\n",
+          {
+            "repeat": "  A --> B\n",
+            "times": 500
+          }
+        ]
+      ]
+    },
+    {
+      "case": "501 arrows, then a diagram the page draws",
+      "section": "flow",
+      "body": [
+        "```mermaid\nflowchart LR\n",
+        {
+          "repeat": "  A --> B\n",
+          "times": 501
+        },
+        "```\n\n```mermaid\nflowchart LR\n  A --> B\n```\n"
+      ],
+      "drawn": true,
+      "diagrams": [
+        "flowchart LR\n  A --> B\n"
+      ]
+    },
+    {
+      "case": "Windows line endings",
+      "section": "flow",
+      "body": "```mermaid\r\nflowchart LR\r\n  A --> B\r\n```\r\n",
+      "drawn": true,
+      "diagrams": [
+        "flowchart LR\r\n  A --> B\n"
+      ],
+      "digests": [
+        "508517c57fdf9aedec0c69dbcc838cf59309afd385ce4eda522cc4e404177a09"
+      ]
+    },
+    {
+      "case": "Windows line endings in a list item, with a blank last line",
+      "section": "flow",
+      "body": "- Path:\r\n\r\n  ```mermaid\r\n  flowchart LR\r\n    A --> B\r\n\r\n  ```\r\n",
+      "drawn": true,
+      "diagrams": [
+        "flowchart LR\r\n  A --> B\r\n\n"
+      ],
+      "digests": [
+        "75dda2de15b456b6870846cf8c7f1a2aa547d5c361ea56f9560e34a4d44c7c3e"
+      ]
+    },
+    {
+      "case": "carriage returns alone as line endings",
+      "section": "flow",
+      "body": "```mermaid\rflowchart LR\r  A --> B\r```\r",
+      "drawn": true,
+      "diagrams": [
+        "flowchart LR\r  A --> B\n"
+      ],
+      "digests": [
+        "b6ca6f972092dfdcaa3390b1409c5128852b0e0423f0e47c3132d2780121f0fc"
+      ]
+    },
+    {
+      "case": "Windows line endings that carry a diagram past 30,000 characters",
+      "section": "flow",
+      "body": [
+        "```mermaid\r\nflowchart LR\r\n",
+        {
+          "repeat": "  A\r\n",
+          "times": 7000
+        },
+        "```\r\n"
+      ],
+      "drawn": false,
+      "refusal": {
+        "line": 1,
+        "kind": "NotDrawn(TooLong)"
+      },
+      "diagrams": []
+    }
+  ]
+}

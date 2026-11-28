@@ -7,6 +7,7 @@ import type { Element, Root } from "hast";
 import type { DocumentDisplay } from "../../api/generated/contracts/common";
 import { DiagramCacheContext, DiagramDisplayContext } from "./diagram-cache";
 import { prepareLiveMarkdown, type LiveMarkdown } from "./live/blocks";
+import { diagramSource } from "./mermaid";
 import MermaidDiagram from "./MermaidDiagram";
 import { parseMarkdown } from "./parse-markdown";
 import "./markdown.css";
@@ -120,14 +121,8 @@ function CodeBlock({
 }) {
   const provisional = useContext(ProvisionalMarkdown);
   const scope = useContext(DiagramCacheContext)?.scope ?? "";
-  const child = node?.children[0];
-  if (
-    child?.type === "element" &&
-    child.tagName === "code" &&
-    Array.isArray(child.properties.className) &&
-    child.properties.className.includes("language-mermaid")
-  ) {
-    const source = child.children.map((item) => (item.type === "text" ? item.value : "")).join("");
+  const source = diagramSource(node);
+  if (source !== undefined) {
     return (
       <MermaidDiagram
         key={JSON.stringify([scope, node?.position?.start.offset])}
