@@ -80,43 +80,80 @@ impl Paths {
         ensure_dir(parent(&self.unit)?, false)
     }
 
+    /// The installation lock's file. It outlives every installation; only an uninstall that
+    /// deletes the data deletes it, last of all and while holding it.
+    pub(super) fn lock_path(&self) -> PathBuf {
+        self.state.join("install.lock")
+    }
+
     /// Holds the installation lock, waiting while an install, uninstall, start or stop has it.
     pub(crate) fn lock(&self) -> Result<File, Failure> {
-        let file = self.lock_file()?;
-        file.lock()?;
-        Ok(file)
+        loop {
+            let file = self.lock_file()?;
+            file.lock()?;
+            if let Some(file) = self.still_named(file)? {
+                return Ok(file);
+            }
+        }
     }
 
     /// Holds the installation lock without waiting, or returns `None` while another
     /// install, uninstall, start or stop has it.
     pub(crate) fn try_lock(&self) -> Result<Option<File>, Failure> {
-        let file = self.lock_file()?;
-        match file.try_lock() {
-            Ok(()) => Ok(Some(file)),
-            Err(TryLockError::WouldBlock) => Ok(None),
-            Err(TryLockError::Error(error)) => Err(error.into()),
+        loop {
+            let file = self.lock_file()?;
+            match file.try_lock() {
+                Ok(()) => {
+                    if let Some(file) = self.still_named(file)? {
+                        return Ok(Some(file));
+                    }
+                }
+                Err(TryLockError::WouldBlock) => return Ok(None),
+                Err(TryLockError::Error(error)) => return Err(error.into()),
+            }
         }
     }
 
     fn lock_file(&self) -> Result<File, Failure> {
-        ensure_dir(&self.state, true)?;
-        let path = self.state.join("install.lock");
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
-            .open(&path)?;
-        private(&file, &path)?;
-        Ok(file)
+        loop {
+            ensure_dir(&self.state, true)?;
+            match OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .mode(0o600)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .open(self.lock_path())
+            {
+                // The uninstall that deleted the lock's file removed its folder in between.
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                opened => return Ok(opened?),
+            }
+        }
+    }
+
+    /// The locked `file` when it is still the lock file at its path, or `None` when an
+    /// uninstall deleted that file while this process waited for it: the caller then locks
+    /// the file there now. Checked before `private`, which refuses a deleted file.
+    fn still_named(&self, file: File) -> Result<Option<File>, Failure> {
+        let path = self.lock_path();
+        let held = file.metadata()?;
+        match path.symlink_metadata() {
+            Ok(named) if named.dev() == held.dev() && named.ino() == held.ino() => {
+                private(&file, &path)?;
+                Ok(Some(file))
+            }
+            Ok(_) => Ok(None),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 
     /// Returns once no install, uninstall or start holds the installation lock. Creates
     /// nothing; a missing or unreadable lock file counts as free.
     pub(crate) async fn wait_unlocked(&self) {
-        let path = self.state.join("install.lock");
+        let path = self.lock_path();
         loop {
             let held = OpenOptions::new()
                 .read(true)
@@ -271,4 +308,41 @@ pub(super) fn link(path: &Path, target: &Path, replace: bool) -> Result<(), Fail
         )?;
     }
     sync(directory)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Failure, Paths};
+
+    #[test]
+    fn a_waiter_relocks_once_an_uninstall_deletes_the_lock_file() -> Result<(), Failure> {
+        let home = tempfile::tempdir()?;
+        let home = home.path().canonicalize()?;
+        let paths = Paths {
+            profile: home.join("profile"),
+            config_home: home.join("config"),
+            state_home: home.join("state"),
+            config: home.join("config/reviewq"),
+            state: home.join("state/reviewq"),
+            launcher: home.join("bin/reviewq"),
+            unit: home.join("config/systemd/user/reviewq.service"),
+            start_socket: home.join("config/systemd/user/reviewq-start.socket"),
+            start_door: home.join("config/systemd/user/reviewq-start@.service"),
+            codex_home: home.join("codex"),
+            claude_home: home.join("claude"),
+            claude_home_is_explicit: false,
+            home,
+        };
+        let uninstall = paths.lock()?;
+        // A waiter opened the file before the uninstall deleted it, and locks it once released.
+        let waiter = paths.lock_file()?;
+        std::fs::remove_file(paths.lock_path())?;
+        drop(uninstall);
+        waiter.try_lock()?;
+        assert!(paths.still_named(waiter)?.is_none());
+        // It locks the new file instead, so the next process waits rather than sharing it.
+        let _held = paths.lock()?;
+        assert!(paths.try_lock()?.is_none());
+        Ok(())
+    }
 }

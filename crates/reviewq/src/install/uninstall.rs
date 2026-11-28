@@ -1,7 +1,8 @@
 //! Uninstalling ReviewQ: the checks made before anything changes, shared by the CLI and the
 //! dashboard; the transient job the dashboard hands the work to, since the service cannot
 //! remove itself; the removal; with `--delete-data`, deleting the owned data once everything
-//! else is gone; and, last, the Windows notification identity.
+//! else is gone; then the Windows notification identity; and, last of a data deletion that
+//! removed the record, the installation lock's file.
 
 use std::ffi::OsString;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -135,7 +136,7 @@ struct Left {
 /// so in one desktop notification, as it does for a failure.
 pub(crate) async fn uninstall(options: Options) -> Result<(), Failure> {
     let mut paths = Paths::resolve()?;
-    let _lock = paths.lock()?;
+    let lock = paths.lock()?;
     let job = options.expect_store.is_some();
     // A data deletion that stopped part way is finished even when not asked again.
     let delete_data = options.delete_data || load(&paths).is_ok_and(|record| record.deleting_data);
@@ -156,6 +157,11 @@ pub(crate) async fn uninstall(options: Options) -> Result<(), Failure> {
             left.extend(more);
         }
         Err(error) => return failed(&paths, delete_data, error, job).await,
+    }
+    // Last of all, so nothing that waited for the lock runs while this uninstall still works.
+    // `reviewq install` finishes an uninstall under a lock it keeps, so only this deletes it.
+    if delete_data && !paths::exists(&journal(&paths))? {
+        left.extend(report(data::Folders::installed(&paths).delete_lock(lock)));
     }
     if left.is_empty() {
         return Ok(());

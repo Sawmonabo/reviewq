@@ -43,7 +43,8 @@ const CONFIG: &[Name] = &[Name::Exact("runtime.json")];
 /// The install record, in the state folder. A deletion removes it last, so one that stops
 /// part way still finds the store it was deleting.
 const RECORD: &str = "install.json";
-/// `$XDG_STATE_HOME/reviewq`. `install.lock` stays: it outlives every installation.
+/// `$XDG_STATE_HOME/reviewq`. The installation lock's file is not listed: only the uninstall
+/// that holds it deletes it, after everything else.
 const STATE: &[Name] = &[Name::Exact(RECORD), Name::Exact("codex-hooks.json")];
 /// Interrupted atomic writes and link swaps, in any of the three folders.
 const TEMPORARY: &[Name] = &[
@@ -57,6 +58,8 @@ pub(crate) struct Folders {
     data: PathBuf,
     config: PathBuf,
     state: Option<PathBuf>,
+    /// The installation lock's file, in the state folder.
+    lock: Option<PathBuf>,
 }
 
 /// What a deletion removed and what it left, each kept entry with the reason.
@@ -75,6 +78,8 @@ pub(crate) enum Kept {
     NotEmpty,
     Unreadable,
     NotRemoved,
+    /// A ReviewQ folder that holds entries ReviewQ does not own.
+    HoldsOthers,
 }
 
 impl Kept {
@@ -87,6 +92,7 @@ impl Kept {
             Self::NotEmpty => "it is not empty",
             Self::Unreadable => "it cannot be read",
             Self::NotRemoved => "it could not be removed",
+            Self::HoldsOthers => "it holds files that are not ReviewQ's",
         }
     }
 
@@ -113,6 +119,7 @@ impl Folders {
             data: paths.profile.clone(),
             config: paths.config.clone(),
             state: Some(paths.state.clone()),
+            lock: Some(paths.lock_path()),
         }
     }
 
@@ -123,6 +130,7 @@ impl Folders {
             data: profile.to_path_buf(),
             config: profile.to_path_buf(),
             state: None,
+            lock: None,
         }
     }
 
@@ -151,6 +159,16 @@ impl Folders {
         self.state.as_ref().map(|state| state.join(RECORD))
     }
 
+    /// The names ReviewQ owns directly in `root`.
+    fn names(&self, root: &Path) -> Vec<Name> {
+        self.lists()
+            .into_iter()
+            .filter(|(folder, _)| *folder == root)
+            .flat_map(|(_, names)| names.iter().copied())
+            .chain(TEMPORARY.iter().copied())
+            .collect()
+    }
+
     /// The owned entries present now, each with how it is removed, and the folders passed
     /// over, each with the reason: a folder that is a link or another user's is not read.
     fn present(&self) -> Result<(Vec<(PathBuf, Name)>, Deletion), std::io::Error> {
@@ -167,13 +185,7 @@ impl Folders {
                 Err(error) if error.kind() == ErrorKind::NotFound => continue,
                 Err(error) => return Err(error),
             }
-            let names = self
-                .lists()
-                .into_iter()
-                .filter(|(folder, _)| *folder == root)
-                .flat_map(|(_, names)| names.iter().copied())
-                .chain(TEMPORARY.iter().copied())
-                .collect::<Vec<_>>();
+            let names = self.names(root);
             let entries = match fs::read_dir(root) {
                 Ok(entries) => entries,
                 Err(error) if error.kind() == ErrorKind::NotFound => continue,
@@ -229,14 +241,17 @@ impl Folders {
     }
 
     /// Deletes the owned data, the install record last unless `keep_record`, then each
-    /// ReviewQ folder left empty.
+    /// ReviewQ folder left empty. A folder that still holds entries ReviewQ does not own is
+    /// kept with that reason; one that holds only owned entries, already reported, the install
+    /// record or the installation lock's file, is not.
     pub(crate) fn delete(&self, keep_record: bool) -> Result<Deletion, std::io::Error> {
         let mut deletion = self.walk(true, keep_record)?.deletion;
-        self.remove_empty_roots(&mut deletion);
+        self.remove_empty_roots(&mut deletion, true);
         Ok(deletion)
     }
 
-    /// Deletes the install record a deletion kept, then each ReviewQ folder left empty.
+    /// Deletes the install record a deletion kept, then each ReviewQ folder left empty. The
+    /// deletion already reported the folders it kept.
     pub(crate) fn delete_record(&self) -> Deletion {
         let mut walk = Walk {
             remove: true,
@@ -248,11 +263,33 @@ impl Folders {
         {
             walk.deletion.deleted.push(record);
         }
-        self.remove_empty_roots(&mut walk.deletion);
+        self.remove_empty_roots(&mut walk.deletion, false);
         walk.deletion
     }
 
-    fn remove_empty_roots(&self, deletion: &mut Deletion) {
+    /// Deletes the installation lock's file while `lock` still holds it, then the state
+    /// folder when that leaves it empty, and releases the lock. Only the last act of an
+    /// uninstall that deleted everything else does this: a process that was waiting for the
+    /// lock then finds the file gone and locks a new one.
+    pub(crate) fn delete_lock(&self, lock: fs::File) -> Deletion {
+        let mut walk = Walk {
+            remove: true,
+            ..Walk::default()
+        };
+        if let Some(path) = &self.lock
+            && path.symlink_metadata().is_ok()
+            && walk.tree(path)
+        {
+            walk.deletion.deleted.push(path.clone());
+        }
+        self.remove_empty_roots(&mut walk.deletion, false);
+        drop(lock);
+        walk.deletion
+    }
+
+    /// Removes each ReviewQ folder left empty. With `report`, keeps each one that holds an
+    /// entry ReviewQ does not own, with that reason.
+    fn remove_empty_roots(&self, deletion: &mut Deletion, report: bool) {
         for root in self.roots() {
             // A folder that is a link or another user's stays, as its entries would.
             if root
@@ -261,10 +298,23 @@ impl Folders {
             {
                 continue;
             }
-            if fs::read_dir(root).is_ok_and(|mut entries| entries.next().is_none())
-                && fs::remove_dir(root).is_ok()
-            {
+            let Ok(entries) = fs::read_dir(root) else {
+                continue;
+            };
+            let names = self.names(root);
+            let (mut empty, mut others) = (true, false);
+            for entry in entries.flatten() {
+                empty = false;
+                others |= self.lock.as_ref() != Some(&entry.path())
+                    && !entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| names.iter().any(|rule| rule.matches(name)));
+            }
+            if empty && fs::remove_dir(root).is_ok() {
                 deletion.deleted.push(root.to_path_buf());
+            } else if report && others {
+                deletion.kept.push((root.to_path_buf(), Kept::HoldsOthers));
             }
         }
     }
@@ -417,6 +467,7 @@ mod tests {
             data: data.clone(),
             config: config.clone(),
             state: Some(state.clone()),
+            lock: Some(state.join("install.lock")),
         };
         assert_eq!(folders.size(), Some(5 * owned.len() as u64));
         let deletion = folders.delete(false).unwrap();
@@ -435,6 +486,21 @@ mod tests {
         }
         assert!(data.join("diagram-jobs").symlink_metadata().is_ok());
         assert!(data.join("checkout-grants/link").symlink_metadata().is_ok());
-        assert_eq!(deletion.kept.len(), 3);
+        // Three links, and the data folder for the files that are not ReviewQ's. The state
+        // folder, holding only the lock's file, needs no line.
+        let left = deletion
+            .kept
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            left,
+            [
+                config,
+                data.join("checkout-grants/link"),
+                data.join("diagram-jobs"),
+                data.clone(),
+            ]
+        );
     }
 }

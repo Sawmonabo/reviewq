@@ -347,11 +347,11 @@
         <div class="notice" role="alert" data-show="unreached" hidden>
           <span data-window="app"
             >Couldn’t start it. If you uninstalled it, remove this app: right&#8209;click its icon
-            and choose Uninstall. Otherwise, its logs show why it can’t start:</span
+            and choose Uninstall. Otherwise, start it from a terminal:</span
           >
-          <span data-window="tab">Couldn’t start it. Its logs show why:</span>
+          <span data-window="tab">Couldn’t start it. Start it from a terminal:</span>
           <span class="actions"
-            ><code>reviewq logs</code><button type="button" data-copy>Copy</button></span
+            ><code>reviewq start</code><button type="button" data-copy>Copy</button></span
           >
         </div>
         <div class="notice" role="alert" data-show="nostart" hidden>
@@ -410,6 +410,11 @@
           );
         }
 
+        function enter() {
+          if (location.pathname === "/stopped.html") location.replace("/");
+          else location.reload();
+        }
+
         async function start() {
           show("starting");
           // systemd ignores a start made while ReviewQ still counts as running, just before a
@@ -423,20 +428,28 @@
               void request().then((sent) => (reached ||= sent));
             }
             if (await running()) {
-              if (location.pathname === "/stopped.html") location.replace("/");
-              else location.reload();
+              enter();
               return;
             }
             await new Promise((resolve) => setTimeout(resolve, 500));
           }
-          show(reached ? "nostart" : "unreached");
+          const failed = reached ? "nostart" : "unreached";
+          show(failed);
+          // Keep watching, so a start from a terminal opens the dashboard. Start takes over.
+          while (document.documentElement.dataset.state === failed) {
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+            if (await running()) {
+              enter();
+              return;
+            }
+          }
         }
 
         show(document.documentElement.dataset.door === "on" ? "idle" : "off");
         startButton.addEventListener("click", () => void start());
         for (const button of copyButtons)
           button.addEventListener("click", () =>
-            navigator.clipboard.writeText("reviewq logs").then(
+            navigator.clipboard.writeText(button.previousElementSibling.textContent).then(
               () => (button.textContent = "Copied"),
               () => {},
             ),

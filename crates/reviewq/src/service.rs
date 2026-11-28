@@ -232,7 +232,10 @@ async fn ensure_running(paths: &Paths, record: &install::Release) -> Result<(), 
         eprintln!("ReviewQ's Start button may not work: {error}");
     }
     if !state().await?.1 {
-        switch("start").await?;
+        // The user manager logs why a start failed, and `reviewq logs` shows it.
+        switch("start")
+            .await
+            .map_err(|_| "The ReviewQ service did not start. Inspect reviewq logs.")?;
     }
     ready(
         paths,

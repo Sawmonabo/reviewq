@@ -1,5 +1,7 @@
 [Unit]
 Description=ReviewQ
+# No start limit: it counts the user's own starts too, and RestartSec= already spaces restarts.
+StartLimitIntervalSec=0
 
 [Service]
 Type=exec
