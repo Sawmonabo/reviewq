@@ -120,13 +120,17 @@ impl SystemControl for System {
             };
             let started = install::uninstall::start_job(paths, delete_data).await;
             drop(lock);
-            Ok(match started {
-                Ok(()) => Ok(UninstallStarted {
+            match started {
+                Ok(()) => Ok(Ok(UninstallStarted {
                     delete_data,
                     data_folder: self.data_folder.clone(),
-                }),
-                Err(reason) => Err(SystemRefusal::Blocked(reason.to_string())),
-            })
+                })),
+                // Only a refusal's sentence reaches the page; anything else is logged.
+                Err(error) => match error.downcast::<install::Refusal>() {
+                    Ok(refusal) => Ok(Err(SystemRefusal::Blocked(refusal.0))),
+                    Err(error) => Err(failed(error)),
+                },
+            }
         })
     }
 }

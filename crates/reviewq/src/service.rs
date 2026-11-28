@@ -93,7 +93,9 @@ pub(crate) async fn unit_location(paths: &Paths) -> Result<(), Failure> {
         let (success, location) =
             systemctl(&["show", unit, "--property=FragmentPath", "--value"], true).await?;
         if success && !location.is_empty() && Path::new(&location) != path {
-            return Err(format!("Preserved the unrelated unit at {location}").into());
+            return Err(install::refused(format!(
+                "Preserved the unrelated unit at {location}"
+            )));
         }
     }
     Ok(())

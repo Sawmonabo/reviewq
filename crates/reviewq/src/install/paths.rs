@@ -174,7 +174,10 @@ pub(super) fn parent(path: &Path) -> Result<&Path, Failure> {
 }
 
 pub(super) fn conflict(path: &Path) -> Failure {
-    format!("Preserved a conflicting entry at {}", path.display()).into()
+    super::refused(format!(
+        "Preserved a conflicting entry at {}",
+        path.display()
+    ))
 }
 
 pub(super) fn sync(path: &Path) -> Result<(), Failure> {

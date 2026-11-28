@@ -40,8 +40,11 @@ const DATA: &[Name] = &[
 ];
 /// `$XDG_CONFIG_HOME/reviewq`.
 const CONFIG: &[Name] = &[Name::Exact("runtime.json")];
+/// The install record, in the state folder. A deletion removes it last, so one that stops
+/// part way still finds the store it was deleting.
+const RECORD: &str = "install.json";
 /// `$XDG_STATE_HOME/reviewq`. `install.lock` stays: it outlives every installation.
-const STATE: &[Name] = &[Name::Exact("install.json"), Name::Exact("codex-hooks.json")];
+const STATE: &[Name] = &[Name::Exact(RECORD), Name::Exact("codex-hooks.json")];
 /// Interrupted atomic writes and link swaps, in any of the three folders.
 const TEMPORARY: &[Name] = &[
     Name::Prefix(".reviewq-write."),
@@ -104,10 +107,22 @@ impl Folders {
         roots
     }
 
-    /// The owned entries present now, each with how it is removed.
-    fn present(&self) -> Result<Vec<(PathBuf, Name)>, std::io::Error> {
+    /// The owned entries present now, each with how it is removed, and the folders passed
+    /// over, each with the reason: a folder that is a link or another user's is not read.
+    fn present(&self) -> Result<(Vec<(PathBuf, Name)>, Deletion), std::io::Error> {
         let mut found = Vec::new();
+        let mut passed = Deletion::default();
         for root in self.roots() {
+            match root.symlink_metadata() {
+                Ok(metadata) => {
+                    if let Some(reason) = refusal(&metadata) {
+                        passed.kept.push((root.to_path_buf(), reason));
+                        continue;
+                    }
+                }
+                Err(error) if error.kind() == ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            }
             let names = self
                 .lists()
                 .into_iter()
@@ -132,22 +147,32 @@ impl Folders {
             }
         }
         found.sort_by(|left, right| left.0.cmp(&right.0));
-        Ok(found)
+        // The record goes last.
+        if let Some(state) = &self.state {
+            let record = state.join(RECORD);
+            found.sort_by_key(|(path, _)| *path == record);
+        }
+        Ok((found, passed))
     }
 
     /// The total size of the owned data, counting files only and never following a link.
     pub(crate) fn size(&self) -> Option<u64> {
         let mut total = 0_u64;
-        for (path, _) in self.present().ok()? {
+        for (path, _) in self.present().ok()?.0 {
             total = total.checked_add(tree_size(&path).ok()?)?;
         }
         Some(total)
     }
 
-    /// Deletes the owned data, then each ReviewQ folder left empty.
-    pub(crate) fn delete(&self) -> Result<Deletion, std::io::Error> {
-        let mut deletion = Deletion::default();
-        for (path, rule) in self.present()? {
+    /// Deletes the owned data, the install record last unless `keep_record`, then each
+    /// ReviewQ folder left empty.
+    pub(crate) fn delete(&self, keep_record: bool) -> Result<Deletion, std::io::Error> {
+        let (found, mut deletion) = self.present()?;
+        let record = self.state.as_ref().map(|state| state.join(RECORD));
+        for (path, rule) in found {
+            if keep_record && Some(&path) == record.as_ref() {
+                continue;
+            }
             let removed = match rule {
                 Name::EmptyFolder(_) => remove_empty(&path, &mut deletion),
                 Name::Exact(_) | Name::Prefix(_) => remove_tree(&path, &mut deletion),
@@ -157,6 +182,9 @@ impl Folders {
             }
         }
         for root in self.roots() {
+            if deletion.kept.iter().any(|(kept, _)| kept == root) {
+                continue;
+            }
             if fs::read_dir(root).is_ok_and(|mut entries| entries.next().is_none())
                 && fs::remove_dir(root).is_ok()
             {
@@ -285,9 +313,17 @@ mod tests {
         let config = home.path().join(".config/reviewq");
         let state = home.path().join(".local/state/reviewq");
         let outside = home.path().join("outside");
-        for folder in [&data, &config, &state, &outside] {
+        // A linked config folder, as a dotfiles setup makes it, is passed over.
+        let linked_config = outside.join("config");
+        for folder in [
+            &data,
+            &state,
+            &linked_config,
+            home.path().join(".config").as_path(),
+        ] {
             fs::create_dir_all(folder).unwrap();
         }
+        symlink(&linked_config, &config).unwrap();
         let owned = [
             data.join("reviewq.sqlite3"),
             data.join("reviewq.sqlite3-wal"),
@@ -298,7 +334,6 @@ mod tests {
             data.join("diagram-cache/one.svg"),
             data.join("checkout-grants/grant.lock"),
             data.join(".reviewq-write.x1"),
-            config.join("runtime.json"),
             state.join("install.json"),
             state.join("codex-hooks.json"),
         ];
@@ -312,6 +347,7 @@ mod tests {
             data.join("browser-sessions.json"),
             state.join("install.lock"),
             outside.join("target.json"),
+            linked_config.join("runtime.json"),
         ];
         for file in &kept {
             fs::write(file, b"kept").unwrap();
@@ -330,7 +366,7 @@ mod tests {
             state: Some(state.clone()),
         };
         assert_eq!(folders.size(), Some(5 * owned.len() as u64));
-        let deletion = folders.delete().unwrap();
+        let deletion = folders.delete(false).unwrap();
 
         for file in &owned {
             assert!(
@@ -340,12 +376,12 @@ mod tests {
             );
         }
         assert!(!data.join("releases").exists());
-        assert!(!config.exists());
+        assert!(config.symlink_metadata().unwrap().file_type().is_symlink());
         for file in &kept {
             assert_eq!(fs::read(file).unwrap(), b"kept");
         }
         assert!(data.join("diagram-jobs").symlink_metadata().is_ok());
         assert!(data.join("checkout-grants/link").symlink_metadata().is_ok());
-        assert_eq!(deletion.kept.len(), 2);
+        assert_eq!(deletion.kept.len(), 3);
     }
 }

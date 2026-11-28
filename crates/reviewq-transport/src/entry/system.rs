@@ -37,11 +37,23 @@ async fn facts(
 ) -> Result<Json<dto::SystemFactsResponse>, ApiError> {
     let actor = entry.auth.browser_actor(&headers, false)?;
     let system = port(&entry)?;
-    let active = entry.active_source().await?;
-    let (facts, sync) = tokio::try_join!(
-        system.facts(),
-        entry.store.refresh_sync(actor, active.revision)
-    )?;
+    // A source that cannot load, such as one with a broken saved token, leaves only the
+    // last refresh unknown, so Quit and Uninstall stay on the page.
+    let sync = async {
+        let active = entry.active_source().await.ok()?;
+        entry.store.refresh_sync(actor, active.revision).await.ok()
+    };
+    let (facts, sync) = tokio::join!(system.facts(), sync);
+    let facts = facts?;
+    let (last_refresh_at, cursor) = match sync {
+        Some(sync) => (
+            sync.value
+                .last_success_at_ms
+                .and_then(UtcTimestampDto::from_unix_milliseconds),
+            sync.cursor,
+        ),
+        None => (None, *entry.commits.borrow()),
+    };
     let data = dto::SystemFacts {
         version: env!("CARGO_PKG_VERSION").into(),
         mode: match system.mode() {
@@ -52,13 +64,10 @@ async fn facts(
         address: entry.auth.origin.clone(),
         data_folder: facts.data_folder,
         data_bytes: facts.data_bytes.map(count).transpose()?,
-        last_refresh_at: sync
-            .value
-            .last_success_at_ms
-            .and_then(UtcTimestampDto::from_unix_milliseconds),
+        last_refresh_at,
         start_at_login: facts.start_at_login,
     };
-    Ok(Json(success(data, sync.cursor)?))
+    Ok(Json(success(data, cursor)?))
 }
 
 async fn quit(State(entry): State<Arc<Entry>>, headers: HeaderMap) -> Result<Response, ApiError> {

@@ -29,6 +29,23 @@ pub(crate) use start_socket::repair as repair_start_socket;
 
 pub(crate) type Failure = Box<dyn std::error::Error + Send + Sync>;
 
+/// A failure the person can act on, whose text says what to do, such as a conflicting entry
+/// or an interrupted activation. Every other `Failure` is internal.
+#[derive(Debug)]
+pub(crate) struct Refusal(pub(crate) String);
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        output.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Refusal {}
+
+pub(crate) fn refused(message: impl Into<String>) -> Failure {
+    Box::new(Refusal(message.into()))
+}
+
 pub(crate) fn verify_bundle(path: &Path) -> Result<(), Failure> {
     let bundle = Bundle::read(path)?;
     println!("{} {}", bundle.manifest.version, bundle.id);
@@ -89,6 +106,14 @@ struct Inventory {
     removing: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     removal_stage: Option<String>,
+    /// Set once an uninstall with `--delete-data` has removed ReviewQ, until the data is
+    /// gone. `store_id` names the store being deleted, and the record is deleted last.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    deleting_data: bool,
+    /// The Windows notification identity an uninstall has yet to remove. The next uninstall
+    /// removes it and the next install adopts it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    windows_left: Option<windows::Registration>,
 }
 
 fn journal(paths: &Paths) -> PathBuf {
@@ -154,11 +179,18 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     let bundle = Bundle::read(bundle_path)?;
     let paths = Paths::resolve()?;
     let _lock = paths.lock()?;
-    let settings = runtime_settings::Settings::load(&paths.profile, false)?;
     let mut inventory = load(&paths)?;
-    if inventory.removing {
-        return Err("Finish the interrupted uninstall before installing a release.".into());
+    if inventory.removing || inventory.deleting_data {
+        uninstall::finish(&paths).await?;
+        inventory = load(&paths)?;
     }
+    let settings = runtime_settings::Settings::load(&paths.profile, false)?;
+    // A Windows identity an uninstall could not remove is this installation's to reuse.
+    let previous_windows = inventory
+        .active
+        .as_ref()
+        .and_then(|release| release.windows.clone())
+        .or_else(|| inventory.windows_left.clone());
     service::manager().await?;
     service::unit_location(&paths).await?;
     let unit = service::unit(
@@ -198,7 +230,13 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
                 .or(inventory
                     .active
                     .as_ref()
-                    .and_then(|release| release.windows.as_ref())),
+                    .and_then(|release| release.windows.as_ref()))
+                // A left identity is adopted only where Windows can still be reached; it
+                // otherwise stays recorded for the next uninstall.
+                .or(inventory
+                    .windows_left
+                    .as_ref()
+                    .filter(|_| reviewq_providers::WindowsDesktop::available())),
         )?,
     };
     if let Some(host) = &next.claude {
@@ -220,9 +258,7 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
             start_socket::check(&paths)?;
             bridge::check(&paths, old.is_some())?;
             if let Some(windows) = &next.windows {
-                windows
-                    .preflight(old.and_then(|release| release.windows.as_ref()))
-                    .await?;
+                windows.preflight(previous_windows.as_ref()).await?;
             }
             files::check_new_skill(old, &next)?;
             claude::preflight(&paths, old, &next, false).await?;
@@ -279,7 +315,15 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     retention.record(&paths)?;
     files::stage(&paths, &bundle, &pending.staging, &retention)?;
     let result = async {
-        let identity = activate(&paths, old, &next, &unit, pending.store_id.as_deref()).await?;
+        let identity = activate(
+            &paths,
+            old,
+            previous_windows.as_ref(),
+            &next,
+            &unit,
+            pending.store_id.as_deref(),
+        )
+        .await?;
         authorize_recovery(&paths, &next, &identity, &mut inventory).await
     }
     .await;
@@ -310,6 +354,9 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     inventory.active = Some(next.clone());
     inventory.store_id = Some(identity.store_id.clone());
     inventory.pending = None;
+    if next.windows.is_some() {
+        inventory.windows_left = None;
+    }
     paths::write_json(&journal(&paths), &inventory)?;
     let active =
         service::ready(&paths, &next.binary, next.store, StartupCheck::Operational).await?;
@@ -446,6 +493,7 @@ async fn authorize_recovery(
 async fn activate(
     paths: &Paths,
     old: Option<&Release>,
+    previous_windows: Option<&windows::Registration>,
     next: &Release,
     unit: &[u8],
     store_id: Option<&str>,
@@ -463,9 +511,7 @@ async fn activate(
     claude::activate(paths, old, next).await?;
     if let Some(windows) = &next.windows {
         let release = paths.profile.join("releases").join(&next.id);
-        windows
-            .set(&release, old.and_then(|release| release.windows.as_ref()))
-            .await?;
+        windows.set(&release, previous_windows).await?;
     }
     service::reload().await?;
     service::unit_location(paths).await?;
