@@ -1,0 +1,209 @@
+/* The control sits on the right of the section heading's first line and adds no height. */
+[data-report-block]:has(> .finding-picker-trigger) {
+  position: relative;
+}
+[data-report-block]:has(> .finding-picker-trigger) .report-authored h2:first-of-type {
+  padding-inline-end: 112px;
+}
+.finding-picker-trigger {
+  position: absolute;
+  top: 7px;
+  inset-inline-end: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 10px 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.2;
+  user-select: none;
+}
+/* Drawn text: not part of the report's text, its selection, copy or Find. */
+.finding-picker-trigger::before {
+  content: attr(data-label);
+}
+.finding-picker-trigger > svg {
+  opacity: 0.7;
+}
+.finding-picker-trigger:is(:hover, [aria-expanded="true"]) {
+  border-color: var(--strong-line);
+  background: var(--raised);
+}
+
+/* Anchored below the control's end edge, like the queue filters, or above it when that side has
+   more room, and never taller than that side. */
+.finding-picker {
+  position: fixed;
+  inset: auto;
+  margin: 6px 0;
+  position-area: block-end span-inline-start;
+  position-try-fallbacks: flip-block;
+  position-try-order: most-block-size;
+  max-height: calc(100% - 12px);
+  justify-self: end;
+  align-self: start;
+  flex-direction: column;
+  width: var(--finding-picker-width, 430px);
+  max-width: calc(100vw - 16px);
+  padding: 0;
+  border: 1px solid var(--popup-border);
+  border-radius: 12px;
+  background: var(--popup-bg);
+  color: var(--text);
+  box-shadow: 0 18px 50px #0000008c;
+  overflow: hidden;
+}
+.finding-picker:popover-open {
+  display: flex;
+}
+@supports not (position-area: block-end span-inline-start) {
+  .finding-picker {
+    inset: 20% 0 auto;
+    margin-inline: auto;
+  }
+}
+.finding-picker-filter > input {
+  width: 100%;
+  min-height: 0;
+  padding: 11px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  font-size: 13px;
+}
+.finding-picker-filter > input::placeholder {
+  color: var(--muted);
+}
+.finding-picker-filter > input:focus-visible {
+  outline: none;
+  border-bottom-color: var(--focus);
+}
+.finding-picker-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: min(52vh, 420px);
+  padding: 4px;
+  overflow: auto;
+  outline: none;
+}
+.finding-picker-caption {
+  padding: 8px 10px 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+.finding-picker-row {
+  display: grid;
+  grid-template-columns: 3px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px 7px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  outline: none;
+}
+.finding-picker-row[data-focused] {
+  background: var(--selected);
+}
+.finding-picker-row[data-focus-visible] {
+  box-shadow: inset 0 0 0 1px var(--focus);
+}
+.finding-picker-bar {
+  align-self: stretch;
+  border-radius: 2px;
+  background: var(--amber);
+}
+.finding-picker-row[data-blocking="true"] > .finding-picker-bar {
+  background: var(--rose);
+}
+.finding-picker-row > code {
+  min-width: 34px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.finding-picker-text {
+  min-width: 0;
+}
+.finding-picker-text > strong,
+.finding-picker-text > small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.finding-picker-text > strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.finding-picker-text > small {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.finding-picker-severity {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--selected);
+  color: var(--link);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.7;
+}
+.finding-picker-row[data-focused] > .finding-picker-severity {
+  background: var(--popup-bg);
+}
+.finding-picker-state {
+  margin: 0;
+  padding: 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.finding-picker-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.finding-picker-keys kbd {
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+/* The card a jump lands on holds focus without a lasting outline, and outlines briefly. */
+.report-finding[tabindex="-1"]:focus {
+  outline: none;
+}
+.report-finding[data-arrival] {
+  animation: finding-arrival 1.3s ease-out;
+}
+@keyframes finding-arrival {
+  /* The ring is drawn inside, so a card landed at the panel's top edge shows all of it. */
+  0% {
+    box-shadow:
+      inset 0 0 0 2px var(--link),
+      0 0 0 6px color-mix(in srgb, var(--link) 22%, transparent);
+  }
+  100% {
+    box-shadow:
+      inset 0 0 0 2px transparent,
+      0 0 0 6px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .report-finding[data-arrival] {
+    animation: none;
+  }
+}

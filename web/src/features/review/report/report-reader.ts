@@ -12,7 +12,7 @@ import type {
 import { parseMarkdown } from "../../../components/markdown/parse-markdown";
 import { parseSettledMarkdown, tableCost } from "../../../components/markdown/settled";
 import { groupReportItems, reportBlocks } from "./report-presentation";
-import type { GroupPosition, PreparedGroup } from "./report-presentation";
+import type { FindingSummary, GroupPosition, PreparedGroup } from "./report-presentation";
 import { isThreadSection, reportText, startsReportBody } from "./report-structure";
 import type { AcceptedFindingChange } from "./report-structure";
 
@@ -26,6 +26,10 @@ type Group = GroupPosition & {
 export type ReaderDocument = {
   readonly groups: readonly GroupPosition[];
   readonly prepared: (index: number) => PreparedGroup | undefined;
+  // The card a finding group holds, once the reader has read it.
+  readonly finding: (index: number) => FindingSummary | undefined;
+  // Reads the cards of finding groups a windowed reader has not read yet.
+  readonly readFindings?: (indexes: readonly number[], signal: AbortSignal) => Promise<void>;
   readonly byteAt?: (index: number) => number | undefined;
   readonly prepare?: (
     indexes: readonly number[],
@@ -64,6 +68,7 @@ export function wholeDocument(
       const block = groups[index];
       return block ? { block, source: slice, drawings: display?.drawings } : undefined;
     },
+    finding: (index) => groups[index]?.finding,
   };
 }
 
@@ -103,6 +108,8 @@ export function indexedDocument(
   const raw = new Map<number, DisplayBlock>();
   const prepared = new Map<number, PreparedGroup>();
   const retainedCost = new Map<number, number>();
+  // Each card's summary outlives its prepared group, so the findings list never reads it again.
+  const findings = new Map<number, FindingSummary>();
   let previousPins = new Set<number>();
 
   function receive(blocks: readonly DisplayBlock[], destination: number) {
@@ -171,6 +178,7 @@ export function indexedDocument(
       drawings: drawings.size ? [...drawings.values()] : undefined,
     });
     retainedCost.set(index, sourceBytes + (provision ? extra : 0));
+    if (block.finding) findings.set(index, summary(block.finding));
     for (let i = group.first; i <= group.last; i++) raw.delete(i);
     return true;
   }
@@ -300,12 +308,65 @@ export function indexedDocument(
     }
   }
 
+  // Reads only each card's heading, card line and first field, several cards to a window, and
+  // leaves the prepared groups and their byte ledger as they are.
+  async function readFindings(indexes: readonly number[], signal: AbortSignal) {
+    const cards = indexes.filter((index) => groups[index]?.findingId && !findings.has(index));
+    const lead = (index: number) => {
+      const group = groups[index]!;
+      return { first: group.first, last: Math.min(group.first + 2, group.last) };
+    };
+    for (let start = 0; start < cards.length;) {
+      const first = lead(cards[start]!).first;
+      let last = lead(cards[start]!).last;
+      let end = start + 1;
+      for (; end < cards.length; end++) {
+        const next = lead(cards[end]!).last;
+        if (next - first >= 32 || spans[next]!.byteEnd - spans[first]!.byteStart > RANGE_BYTES)
+          break;
+        last = next;
+      }
+      const { data } = await reportWindow(runId, report, signal, {
+        byteOffset: spans[first]!.byteStart,
+        byteEnd: spans[last]!.byteEnd,
+      });
+      signal.throwIfAborted();
+      const result = data.result;
+      if (
+        result.state !== "ready" ||
+        result.totalBlocks !== spans.length ||
+        result.blocks.length !== last - first + 1 ||
+        result.blocks.some((block, i) => block.byteStart !== spans[first + i]!.byteStart)
+      )
+        throw new Error("The report's findings are unavailable.");
+      for (const index of cards.slice(start, end)) {
+        const card = lead(index);
+        const text = result.blocks
+          .slice(card.first - first, card.last - first + 1)
+          .map((block) => block.markdown)
+          .join("");
+        const tree = parseMarkdown(text, base, reportMarkdown);
+        const finding = tree && reportBlocks(tree, text, changes, { previousThreads: false })[0];
+        if (!finding?.finding || finding.findingId !== groups[index]!.findingId)
+          throw new Error("The report's findings changed.");
+        findings.set(index, summary(finding.finding));
+      }
+      start = end;
+    }
+  }
+
   return {
     groups,
     prepared: (index) => prepared.get(index),
+    finding: (index) => findings.get(index),
+    readFindings,
     byteAt: (index) => spans[groups[index]!.first]!.byteStart,
     prepare,
   };
+}
+
+function summary({ id, title, severity, category, blocking, location }: FindingSummary) {
+  return { id, title, severity, category, blocking, ...(location && { location }) };
 }
 
 function planGroups(layout: DisplayLayout, base: string | undefined) {

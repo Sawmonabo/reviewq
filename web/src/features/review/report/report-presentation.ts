@@ -4,14 +4,19 @@ import { breakLongNames, reportStructure, reportText as text } from "./report-st
 import type { AcceptedFindingChange } from "./report-structure";
 
 type Field = { readonly label: string; readonly nodes: readonly RootContent[] };
-type AuthoredFinding = {
-  readonly id: string;
-  readonly severity: string;
-  readonly category: string;
-  readonly blocking: boolean;
+type AuthoredFinding = FindingSummary & {
   readonly change?: AcceptedFindingChange;
   readonly header: readonly RootContent[];
   readonly fields: readonly Field[];
+};
+// What a card says about itself in its heading, its card line and its first location.
+export type FindingSummary = {
+  readonly id: string;
+  readonly title: string;
+  readonly severity: string;
+  readonly category: string;
+  readonly blocking: boolean;
+  readonly location?: string;
 };
 export type ReportBlock = GroupPosition & {
   readonly end: number;
@@ -304,13 +309,26 @@ function authoredFinding(
     }
   }
 
+  const location = firstLocation(fields.find((field) => field.label === "Location")?.nodes);
   return {
     id,
+    title: name.slice(match[0].length).trim(),
+    ...(location && { location }),
     ...(change ? { change } : {}),
     ...card,
     header: authored(lead),
     fields: fields.map(({ label, nodes }) => ({ label, nodes: authored(nodes) })),
   };
+}
+
+// The first entry of `**Location:** [a.rs:4](…), [b.rs](…)`: its first link or code span, or the
+// text before the first comma when the locations are plain text.
+function firstLocation(nodes: readonly RootContent[] | undefined) {
+  const [paragraph] = nodes ?? [];
+  if (paragraph?.type !== "element") return;
+  const first = paragraph.children.find((node) => node.type === "element" || text(node).trim());
+  const label = first?.type === "element" ? text(first) : text(paragraph).split(", ")[0];
+  return label?.trim() || undefined;
 }
 
 function cardMetadata(node: RootContent | undefined) {

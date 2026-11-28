@@ -340,8 +340,12 @@ function breakNames(node: ElementContent): ElementContent[] {
 function nameBreaks(text: string) {
   const breaks: number[] = [];
   for (const run of text.matchAll(/\S{24,}/gu))
-    for (const mark of run[0].matchAll(/[/_.:]+(?![/_.:]|$)/g))
-      breaks.push(run.index + mark.index + mark[0].length);
+    // A whole separator run, skipped when it ends the name. A lookahead for that end would
+    // backtrack through the run at every start and take quadratic time.
+    for (const mark of run[0].matchAll(/[/_.:]+/g)) {
+      const end = mark.index + mark[0].length;
+      if (end < run[0].length) breaks.push(run.index + end);
+    }
   return breaks;
 }
 

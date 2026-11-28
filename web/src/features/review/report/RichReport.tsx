@@ -1,6 +1,6 @@
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { AnimationEvent, ReactNode } from "react";
 import type { RootContent } from "hast";
 import type { ReportSummary } from "../../../api/generated/contracts/reports";
 import { DiagramDisplayContext } from "../../../components/markdown/diagram-cache";
@@ -15,6 +15,7 @@ import {
 } from "./report-presentation";
 import type { GroupPosition, PreparedGroup, ReportBlock } from "./report-presentation";
 import { outcomeLabels } from "./report-structure";
+import { FindingPicker } from "./finding-picker/FindingPicker";
 import type { ReaderDocument } from "./report-reader";
 import { ThreadFoldScope, ThreadTableBody } from "./ThreadTableBody";
 import { useReportPreparation } from "./useReportPreparation";
@@ -94,6 +95,16 @@ export function RichReport({
   const sections = blocks.flatMap((block, index) =>
     block.name && !block.findingId ? [{ index, label: block.name }] : [],
   );
+  const cards = useMemo(
+    () => blocks.flatMap((block, index) => (block.findingId ? [index] : [])),
+    [blocks],
+  );
+  // The picker sits on the heading of the section that holds the first card.
+  const pickerAt =
+    cards.length > 1 ? sections.filter(({ index }) => index < cards[0]!).at(-1)?.index : undefined;
+  // The card a picker jump is bound for. Once drawn it takes focus, so the keyboard carries on
+  // from it, and outlines briefly.
+  const [landing, setLanding] = useState<{ readonly key: string; readonly flash: boolean }>();
   const usesVirtual = Boolean(reader.prepare) || blocks.length > 17;
   const restoreIndex =
     !restored && saved?.offset !== undefined
@@ -291,6 +302,7 @@ export function RichReport({
     const cancel = () => {
       window.clearTimeout(hoverTimer.current);
       setNavigation(undefined);
+      setLanding(undefined);
     };
     for (const name of ["wheel", "touchmove", "pointerdown", "keydown"])
       scroll.addEventListener(name, cancel, { signal: events.signal, passive: true });
@@ -372,15 +384,33 @@ export function RichReport({
     }
   }
 
+  function jumpToFinding(index: number) {
+    const key = keys[index];
+    if (key === undefined) return;
+    setLanding({ key, flash: !matchMedia("(prefers-reduced-motion: reduce)").matches });
+    jump(index);
+  }
+
   function renderBlock(block: ReportBlock, index: number) {
     const finding = block.finding;
     const change = finding?.change;
     const outcome = change ? outcomeLabels[change.conclusion] : undefined;
+    const landed = landing !== undefined && landing.key === keys[index];
     const card = finding && (
       <article
         className="report-authored report-finding"
         data-blocking={finding.blocking}
         aria-label={finding.id}
+        {...(landed && {
+          ref: takeFocus,
+          tabIndex: -1,
+          "data-arrival": landing.flash || undefined,
+          onAnimationEnd: (event: AnimationEvent) => {
+            if (event.target === event.currentTarget)
+              setLanding((current) => current && { ...current, flash: false });
+          },
+          onBlur: () => setLanding(undefined),
+        })}
       >
         <header className="report-finding-header">
           <div className="report-finding-kicker">
@@ -417,6 +447,15 @@ export function RichReport({
     );
     return (
       <>
+        {index === pickerAt && (
+          <FindingPicker
+            reader={reader}
+            cards={cards}
+            busy={stage && !destinationReady && cards.includes(destination ?? -1)}
+            boundary={scroll}
+            onJump={jumpToFinding}
+          />
+        )}
         {card ?? (
           <div className="report-authored">
             <AuthoredContent nodes={block.nodes} />
@@ -429,6 +468,7 @@ export function RichReport({
                 type="button"
                 className="quiet-button"
                 key={target}
+                data-report-jump=""
                 onPointerMove={(event) => {
                   if (event.pointerType !== "touch" && (event.movementX || event.movementY))
                     hint(target, "hover", false);
@@ -567,6 +607,10 @@ const AuthoredContent = memo(function AuthoredContent({
   return <MarkdownTree tree={{ type: "root", children: [...nodes] }} components={authored} />;
 });
 const authored = { tbody: ThreadTableBody };
+
+function takeFocus(card: HTMLElement | null) {
+  card?.focus({ preventScroll: true });
+}
 
 // A group is known by its source offset.
 function blockKey(group: GroupPosition) {

@@ -79,7 +79,7 @@ export function finishReading(element: Element | null, signal: AbortSignal) {
     const selection = getSelection();
     return (
       (host.contains(document.activeElement) &&
-        !document.activeElement?.matches(".report-section-nav button[aria-busy=true]")) ||
+        !document.activeElement?.matches('[data-report-jump][aria-busy="true"]')) ||
       Boolean(
         selection?.rangeCount &&
         !selection.isCollapsed &&
