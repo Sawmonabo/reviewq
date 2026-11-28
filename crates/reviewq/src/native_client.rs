@@ -1,5 +1,5 @@
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use reqwest::Client;
@@ -121,6 +121,7 @@ pub(crate) async fn claude(
     session_id: String,
     target: Option<String>,
     proof_stdin: bool,
+    transcript: Option<PathBuf>,
 ) -> Result<(), Failure> {
     let native: NativeSessionId = session_id.parse()?;
     let proof = if proof_stdin {
@@ -142,6 +143,7 @@ pub(crate) async fn claude(
         "sessionId": native.as_str(),
         "cwd": cwd,
         "profile": home,
+        "transcript": transcript,
         "target": target,
     }))?;
     let (linked, pending_launch, message, rule) = if target.is_some() {

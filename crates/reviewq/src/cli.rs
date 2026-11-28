@@ -104,6 +104,9 @@ enum Internal {
         /// Read the plugin's companion proof from standard input as `{"proof": ...}`.
         #[arg(long)]
         proof_stdin: bool,
+        /// The file Claude Code keeps the conversation in, which it may not have written yet.
+        #[arg(long, requires = "target")]
+        transcript: Option<PathBuf>,
     },
 }
 
@@ -294,12 +297,14 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
             session_id,
             target,
             proof_stdin,
+            transcript,
         })) => {
             native_client::claude(
                 &runtime::profile(options.profile)?,
                 session_id,
                 target,
                 proof_stdin,
+                transcript,
             )
             .await
         }
