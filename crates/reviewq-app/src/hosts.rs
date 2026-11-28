@@ -209,8 +209,10 @@ pub enum LiveHooks {
     /// The host holds the conversation, and it does not run them even after a reload.
     NotRunning,
     /// The host cannot show it: it does not hold the conversation, cannot be reached or
-    /// cannot list one conversation's hooks.
-    Unconfirmed,
+    /// cannot list one conversation's hooks. `predates_trust` when the conversation was
+    /// created before ReviewQ last wrote the host's trust in its hooks, so it may have loaded
+    /// them untrusted; false whenever either time is unknown.
+    Unconfirmed { predates_trust: bool },
 }
 
 /// What asking a host to trust ReviewQ's own hooks found.

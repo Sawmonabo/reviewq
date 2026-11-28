@@ -17,16 +17,17 @@ use tokio::io::AsyncReadExt;
 use tokio::net::UnixStream;
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{Instant, sleep_until, timeout};
+use tokio::time::{Instant, sleep_until, timeout, timeout_at};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 use tokio_tungstenite::{WebSocketStream, client_async_with_config};
 
 mod reach;
+mod served;
 
 pub(super) use reach::Reach;
 use reach::Sightings;
+pub(super) use served::{Reply, Served};
 
-use super::hook_reload::{scope_probe, scopes_by_thread};
 use super::live::Live;
 use super::questions::Questions;
 
@@ -43,18 +44,7 @@ pub(super) struct Connection {
     questions: Arc<Mutex<Questions>>,
     pub(super) live: Arc<Live>,
     reach: Arc<Mutex<Reach>>,
-    served: Arc<Mutex<Option<Served>>>,
-}
-
-/// What the daemon this connection holds said of itself when it connected, which reading a
-/// conversation's hooks from it needs.
-#[derive(Clone)]
-pub(super) struct Served {
-    /// `hooks.json` in the daemon's Codex home, named as the daemon names its hooks.
-    pub(super) hooks_file: PathBuf,
-    /// Whether this daemon lists one conversation's hooks, as its answer to
-    /// `hook_reload::scope_probe` on this session showed.
-    pub(super) thread_scoped: bool,
+    served: Arc<Mutex<Option<Arc<Served>>>>,
 }
 
 enum CommandRequest {
@@ -70,11 +60,11 @@ struct Rpc {
     method: &'static str,
     params: Value,
     guard: Option<Effect>,
-    reply: oneshot::Sender<Result<Value, CallError>>,
+    reply: oneshot::Sender<Result<Reply, CallError>>,
 }
 
 struct Pending {
-    reply: oneshot::Sender<Result<Value, CallError>>,
+    reply: oneshot::Sender<Result<Reply, CallError>>,
     deadline: Instant,
 }
 
@@ -192,8 +182,8 @@ impl Connection {
         self.reach.lock().map_or(Reach::Unknown, |reach| *reach)
     }
 
-    /// The daemon the latest connection reached, while that connection holds.
-    pub(super) fn served(&self) -> Option<Served> {
+    /// The daemon session the connection holds now, if any.
+    pub(super) fn served(&self) -> Option<Arc<Served>> {
         self.served.lock().ok().and_then(|served| served.clone())
     }
 
@@ -209,19 +199,28 @@ impl Connection {
             .list(thread, request))
     }
 
-    pub(super) async fn answer(
+    /// Holds a place in the command queue for one answer, waiting while a burst fills it, up
+    /// to the answer's deadline. Taken before the answer is reserved, so a queue that stays
+    /// full refuses the answer as `Busy` with nothing reserved and nothing to settle.
+    pub(super) async fn answer_slot(&self) -> Result<AnswerSlot<'_>, AppError> {
+        let deadline = Instant::now() + DEADLINE + DEADLINE;
+        match timeout_at(deadline, self.sender.reserve()).await {
+            Ok(Ok(permit)) => Ok(AnswerSlot { permit, deadline }),
+            Ok(Err(_)) => Err(AppError::Unavailable),
+            Err(_) => Err(AppError::Busy),
+        }
+    }
+
+    /// Sends one request and returns its raw reply frame with the daemon session that
+    /// answered it, for a caller that reads the error itself or needs that session.
+    pub(super) async fn request(
         &self,
-        answer: QuestionAnswer,
-        form: QuestionForm,
-    ) -> Result<QuestionForm, AnswerError> {
-        let (reply, result) = oneshot::channel();
-        self.sender
-            .try_send(CommandRequest::Answer(answer, form, reply))
-            .map_err(|_| AnswerError::BeforeSend)?;
-        timeout(DEADLINE + DEADLINE, result)
+        method: &'static str,
+        params: Value,
+    ) -> Result<Reply, AppError> {
+        self.round_trip(method, params, None)
             .await
-            .map_err(|_| AnswerError::Uncertain)?
-            .map_err(|_| AnswerError::Uncertain)?
+            .map_err(CallError::app)
     }
 
     pub(super) async fn read<T: DeserializeOwned>(
@@ -286,24 +285,60 @@ impl Connection {
         params: Value,
         guard: Option<Effect>,
     ) -> Result<Value, CallError> {
+        let (frame, _) = self.round_trip(method, params, guard).await?;
+        rpc_result(frame).map_err(CallError::Remote)
+    }
+
+    /// Queues one request, waiting for room while a burst fills the queue, and returns its
+    /// reply. One deadline bounds both waits: one that ends before the request was queued
+    /// leaves nothing sent, `BeforeSend`, and one that ends after leaves it `Uncertain`.
+    async fn round_trip(
+        &self,
+        method: &'static str,
+        params: Value,
+        guard: Option<Effect>,
+    ) -> Result<Reply, CallError> {
+        let deadline = Instant::now() + DEADLINE + DEADLINE;
         let (reply, receive) = oneshot::channel();
-        self.sender
-            .try_send(CommandRequest::Rpc(Rpc {
-                method,
-                params,
-                guard,
-                reply,
-            }))
-            .map_err(|error| {
-                CallError::BeforeSend(match error {
-                    mpsc::error::TrySendError::Full(_) => AppError::Busy,
-                    mpsc::error::TrySendError::Closed(_) => AppError::Unavailable,
-                })
-            })?;
-        timeout(DEADLINE + DEADLINE, receive)
+        let request = CommandRequest::Rpc(Rpc {
+            method,
+            params,
+            guard,
+            reply,
+        });
+        match timeout_at(deadline, self.sender.send(request)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => return Err(CallError::BeforeSend(AppError::Unavailable)),
+            Err(_) => return Err(CallError::BeforeSend(AppError::Busy)),
+        }
+        timeout_at(deadline, receive)
             .await
             .map_err(|_| CallError::Uncertain)?
             .map_err(|_| CallError::Uncertain)?
+    }
+}
+
+/// A place held in a connection's command queue for one answer, until its deadline.
+pub(super) struct AnswerSlot<'a> {
+    permit: mpsc::Permit<'a, CommandRequest>,
+    deadline: Instant,
+}
+
+impl AnswerSlot<'_> {
+    /// Sends `answer` in the place held and waits, until the slot's deadline, for whether
+    /// the daemon took it.
+    pub(super) async fn answer(
+        self,
+        answer: QuestionAnswer,
+        form: QuestionForm,
+    ) -> Result<QuestionForm, AnswerError> {
+        let (reply, result) = oneshot::channel();
+        self.permit
+            .send(CommandRequest::Answer(answer, form, reply));
+        timeout_at(self.deadline, result)
+            .await
+            .map_err(|_| AnswerError::Uncertain)?
+            .map_err(|_| AnswerError::Uncertain)?
     }
 }
 
@@ -314,7 +349,7 @@ impl Daemon {
         questions: Arc<Mutex<Questions>>,
         live: Arc<Live>,
         reach: Arc<Mutex<Reach>>,
-        served: Arc<Mutex<Option<Served>>>,
+        served: Arc<Mutex<Option<Arc<Served>>>>,
     ) {
         let mut id = 1_u64;
         let mut sightings = Sightings::new();
@@ -331,23 +366,7 @@ impl Daemon {
             }
             let connected = timeout(DEADLINE, async {
                 let (stream, bound) = self.open().await?;
-                let socket = match self.handshake(stream).await {
-                    Ok((mut socket, home)) => {
-                        let (method, params) = scope_probe();
-                        let reply = exchange(&mut socket, 2, method, params).await;
-                        let thread_scoped = reply.is_ok_and(|reply| scopes_by_thread(&reply));
-                        let hooks_file = home.join("hooks.json");
-                        Ok((
-                            socket,
-                            Served {
-                                hooks_file,
-                                thread_scoped,
-                            },
-                        ))
-                    }
-                    Err(error) => Err(error),
-                };
-                Ok((socket, bound))
+                Ok::<_, AppError>((self.handshake(stream).await, bound))
             })
             .await;
             let (reached, connected) = match connected {
@@ -361,14 +380,15 @@ impl Daemon {
             if let Ok(mut current) = reach.lock() {
                 *current = reached;
             }
-            let Ok((mut socket, daemon)) = connected else {
+            let Ok((mut socket, home)) = connected else {
                 let _ = request
                     .reply
                     .send(Err(CallError::BeforeSend(AppError::Unavailable)));
                 continue;
             };
+            let session = Arc::new(Served::new(home.join("hooks.json")));
             if let Ok(mut current) = served.lock() {
-                *current = Some(daemon);
+                *current = Some(session.clone());
             }
             multiplex(
                 &mut socket,
@@ -376,6 +396,7 @@ impl Daemon {
                 &mut commands,
                 &questions,
                 &live,
+                &session,
                 &mut id,
             )
             .await;
@@ -508,6 +529,17 @@ impl Daemon {
     }
 }
 
+/// The user whose Codex daemon ReviewQ may talk to for the Codex home `profile`, a real
+/// path: its owner, and only for a folder no other user can write to. The one rule for both
+/// ways ReviewQ talks to a daemon, the service's connection and a single request.
+pub(super) fn home_owner(profile: &Path) -> Result<u32, AppError> {
+    let metadata = std::fs::metadata(profile).map_err(|_| AppError::Unavailable)?;
+    if !metadata.is_dir() || metadata.mode() & 0o022 != 0 {
+        return Err(AppError::Forbidden);
+    }
+    Ok(metadata.uid())
+}
+
 /// Sends one request to the running daemon of the Codex home `profile`, a real path, on a
 /// session of its own, and returns the reply. For a caller with no `Connection`, such as the
 /// installer. Discovery starts no daemon, so with none running this fails at once.
@@ -517,9 +549,7 @@ pub(super) async fn request_once(
     method: &str,
     params: Value,
 ) -> Result<Value, AppError> {
-    let owner = std::fs::metadata(profile)
-        .map_err(|_| AppError::Unavailable)?
-        .uid();
+    let owner = home_owner(profile)?;
     let daemon = Daemon {
         executable: executable.into(),
         profile: profile.into(),
@@ -540,6 +570,7 @@ async fn multiplex(
     commands: &mut mpsc::Receiver<CommandRequest>,
     questions: &Mutex<Questions>,
     live: &Live,
+    session: &Arc<Served>,
     id: &mut u64,
 ) {
     let mut pending = HashMap::new();
@@ -608,7 +639,7 @@ async fn multiplex(
                     Ok(Some(frame)) => {
                         if let Some(id) = frame.get("id").and_then(Value::as_u64)
                             && let Some(active) = pending.remove(&id) {
-                            let _ = active.reply.send(rpc_result(frame).map_err(CallError::Remote));
+                            let _ = active.reply.send(Ok((frame, session.clone())));
                         }
                     }
                     Ok(None) => (),

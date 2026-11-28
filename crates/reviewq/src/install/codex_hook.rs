@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +63,11 @@ struct Registration {
     command: String,
     added: json::Added,
     applied: bool,
+    /// When ReviewQ last wrote Codex's trust in its hooks, in milliseconds since the Unix
+    /// epoch, at or before the write. Only a real approval writes it; a record without it,
+    /// as an earlier build wrote, leaves that time unknown until the next one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    trusted_at: Option<u64>,
 }
 
 /// What `reconcile` did with the Codex hooks.
@@ -181,6 +187,7 @@ pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<Reconciled, Fa
                         command: command.clone(),
                         added: json::Added::Matcher,
                         applied: true,
+                        trusted_at: None,
                     }));
                     paths::write_json(&sidecar, &owned)?;
                     owned.len() - 1
@@ -201,6 +208,49 @@ pub(super) fn reconcile(paths: &Paths, has_codex: bool) -> Result<Reconciled, Fa
         },
         None => Reconciled::Done,
     })
+}
+
+/// Records that ReviewQ wrote Codex's trust in its hooks no earlier than `at`, for every
+/// entry it owns. The caller holds the installation lock.
+pub(super) fn note_trusted(paths: &Paths, at: SystemTime) -> Result<(), Failure> {
+    let sidecar = paths.state.join(OWNERSHIP);
+    let Some(mut owned) = paths::read_json::<Vec<Registration>>(&sidecar)? else {
+        return Ok(());
+    };
+    let millis = at.duration_since(UNIX_EPOCH)?.as_millis();
+    for hook in &mut owned {
+        hook.trusted_at = Some(u64::try_from(millis)?);
+    }
+    paths::write_json(&sidecar, &owned)
+}
+
+/// When ReviewQ last wrote Codex's trust in its hooks, when the record says: the latest time
+/// it holds. `None` when it holds none or cannot be read.
+fn trusted_at(paths: &Paths) -> Option<SystemTime> {
+    let owned = paths::read_json::<Vec<Registration>>(&paths.state.join(OWNERSHIP)).ok()??;
+    let millis = owned.iter().filter_map(|hook| hook.trusted_at).max()?;
+    UNIX_EPOCH.checked_add(Duration::from_millis(millis))
+}
+
+/// The service's reader and writer of the trust time. The service holds no installation
+/// lock, so it records only while no install, uninstall, start or stop holds it; one that
+/// does approves the hooks and records the time itself.
+pub(crate) fn trust_record(
+    paths: Paths,
+) -> (
+    impl Fn() -> Option<SystemTime> + Send + Sync + 'static,
+    impl Fn(SystemTime) + Send + Sync + 'static,
+) {
+    let reader = paths.clone();
+    let read = move || trusted_at(&reader);
+    let note = move |at| {
+        if let Ok(Some(_lock)) = paths.try_lock() {
+            // A time that could not be written stays as it was, which can only keep a
+            // notice away.
+            let _ = note_trusted(&paths, at);
+        }
+    };
+    (read, note)
 }
 
 /// The installed launcher running `internal codex-hook` for the installed profile. `|| :`
@@ -270,6 +320,7 @@ impl Registration {
             command: command.to_owned(),
             added,
             applied: false,
+            trusted_at: None,
         }))
     }
 
@@ -373,8 +424,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             [(Event::Stop, true), (Event::SessionStart, true)]
         );
+        // The trust time an approval records survives a reconcile that changes nothing.
+        assert_eq!(trusted_at(&paths), None);
+        let approved = UNIX_EPOCH + Duration::from_millis(1_795_852_133_147);
+        note_trusted(&paths, approved)?;
         reconcile(&paths, true)?;
         assert_eq!(fs::read(&file)?, created);
+        assert_eq!(trusted_at(&paths), Some(approved));
         reconcile(&paths, false)?;
         assert!(!file.try_exists()? && !sidecar.try_exists()?);
 

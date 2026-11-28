@@ -212,6 +212,9 @@ impl QuestionsPort for Codex {
                 state: QuestionStatus::Submitting,
                 digest: (!secret).then_some(digest),
             };
+            // A full queue waits its turn; one that stays full refuses before anything is
+            // reserved, so it never settles an answer that was not tried.
+            let slot = self.connection.answer_slot().await?;
             let receipt = match answer.reserve(attempted).await? {
                 QuestionAdmission::Existing(receipt) => {
                     return self.receipt_form(&answer.access, receipt);
@@ -219,7 +222,7 @@ impl QuestionsPort for Codex {
                 QuestionAdmission::Reserved(receipt) => receipt,
             };
             let access = answer.access.clone();
-            match self.connection.answer(answer, form.clone()).await {
+            match slot.answer(answer, form.clone()).await {
                 Ok(current) if current.state == QuestionStatus::Submitting => Ok(current),
                 Ok(current) => {
                     if current.state == QuestionStatus::Unavailable {

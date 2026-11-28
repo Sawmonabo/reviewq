@@ -486,16 +486,26 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
     Ok(())
 }
 
-/// Asks the Codex at `executable` to trust the hooks this installation wrote.
+/// Asks the Codex at `executable` to trust the hooks this installation wrote, and records
+/// when a real approval wrote that trust.
 async fn approve_codex_hooks(paths: &Paths, executable: &Path) -> Result<HookApproval, Failure> {
     let command = codex_hook::command(paths)?;
-    Ok(reviewq_providers::approve_codex_hooks(executable, &paths.codex_home, &command).await?)
+    let asked = std::time::SystemTime::now();
+    let approval =
+        reviewq_providers::approve_codex_hooks(executable, &paths.codex_home, &command).await?;
+    if let HookApproval::Approved(_) = approval {
+        // A time that could not be written stays as it was, which can only keep a notice away.
+        let _ = codex_hook::note_trusted(paths, asked);
+    }
+    Ok(approval)
 }
 
 /// The command of the Codex hooks this installation writes.
 pub(crate) fn codex_hook_command(paths: &Paths) -> Option<String> {
     codex_hook::command(paths).ok()
 }
+
+pub(crate) use codex_hook::trust_record as codex_trust_record;
 
 fn report_preserved(entries: Vec<PathBuf>) {
     for path in entries {

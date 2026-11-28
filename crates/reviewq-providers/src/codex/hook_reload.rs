@@ -10,23 +10,34 @@
 //! keeps its hooks until Codex loads it again.
 
 use std::path::Path;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use reviewq_app::access::AppError;
 use reviewq_app::hosts::LiveHooks;
 use reviewq_domain::identity::NativeSessionId;
-use serde::de::IgnoredAny;
 use serde_json::{Value, json};
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 
 use super::Codex;
-use super::connection::{Served, request_once};
+use super::connection::{Served, request_once, rpc_result};
 use super::hook_trust::{Hook, Listed, is_own};
 
 /// How long the reload after a trust change may take, discovery and handshake included.
 const RELOAD_DEADLINE: Duration = Duration::from_secs(2);
 /// How long the check of a conversation's hooks at link may take, its one reload included.
 const CHECK_DEADLINE: Duration = Duration::from_secs(3);
+/// The pauses before each new list of a conversation's hooks after the reload, in case Codex
+/// applies it a moment after it replies: about 1.3 seconds in all, well inside
+/// `CHECK_DEADLINE`. The first list follows the reply at once.
+const RELIST_PAUSES: [Duration; 7] = [
+    Duration::ZERO,
+    Duration::from_millis(20),
+    Duration::from_millis(40),
+    Duration::from_millis(80),
+    Duration::from_millis(160),
+    Duration::from_millis(320),
+    Duration::from_millis(640),
+];
 
 /// The request that makes an app-server rebuild the hooks of every conversation it holds. It
 /// writes nothing; it also re-reads the rest of the user config for those conversations.
@@ -53,104 +64,164 @@ pub(super) async fn reload_open_conversations(executable: &Path, profile: &Path)
     .await;
 }
 
-/// The request that asks a new daemon session whether `hooks/list` honours `threadId`: the
-/// hooks of a conversation that cannot exist. A Codex that scopes the list by conversation
-/// answers that it has no such thread; one that ignores the field, as before 0.166.0, lists
+/// The request that asks a daemon session whether `hooks/list` honours `threadId`: the hooks
+/// of a conversation that cannot exist. A Codex that scopes the list by conversation, 0.166.0
+/// and later, answers that it has no such thread; an older one ignores the field and lists
 /// the hooks on disk, which say nothing of any conversation.
-pub(super) fn scope_probe() -> (&'static str, Value) {
+fn scope_probe() -> (&'static str, Value) {
     let thread = uuid::Uuid::new_v4().to_string();
     ("hooks/list", json!({"threadId": thread}))
 }
 
-/// Whether the reply to `scope_probe` shows a daemon that lists one conversation's hooks.
-/// Only the refusal Codex gives for an unknown thread counts; any other answer leaves every
-/// later reading unconfirmed. A Codex with no `hooks/list` refuses the same way, but then
-/// lists no conversation's hooks either, so its readings stay unconfirmed too.
-pub(super) fn scopes_by_thread(reply: &Result<Value, AppError>) -> bool {
-    matches!(reply, Err(AppError::NotFound))
+/// Whether the reply frame to `scope_probe` shows a daemon that lists one conversation's
+/// hooks. Only the refusal Codex gives for an unknown thread counts: an invalid-request error
+/// whose message starts "thread not found", as every Codex from 0.166.0 words it. Any other
+/// answer, such as the same error code for an unknown method, leaves every reading on that
+/// session unconfirmed.
+fn scopes_by_thread(reply: &Value) -> bool {
+    reply.pointer("/error/code").and_then(Value::as_i64) == Some(-32600)
+        && reply
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .is_some_and(|message| message.starts_with("thread not found"))
 }
 
-/// Whether one conversation runs ReviewQ's hooks now, as far as its app-server says.
+/// What one conversation's app-server shows of ReviewQ's hooks there.
 #[derive(Debug, Eq, PartialEq)]
 enum ThreadHooks {
     /// The conversation holds each of ReviewQ's hooks, trusted.
     Live,
     /// The daemon holds the conversation, but not ReviewQ's hooks trusted.
     Stale,
-    /// The daemon does not hold the conversation, cannot list one conversation's hooks, or
-    /// answered otherwise.
-    Unknown,
 }
 
 impl Codex {
     /// What the daemon shows of ReviewQ's hooks in the open conversation `thread`. When it
-    /// holds the conversation without them, it is asked once to reload them, and asked again.
-    /// `Unconfirmed` whenever it cannot show either within the deadline.
+    /// holds the conversation without them, it is asked once to reload them and listed again
+    /// a few times. `Unconfirmed` whenever it cannot show either within the deadline, saying
+    /// whether the conversation was created before ReviewQ last wrote Codex's trust in them.
     pub(super) async fn own_hooks_live(&self, thread: &NativeSessionId) -> LiveHooks {
-        let Some(command) = self.hook_command.as_deref() else {
-            return LiveHooks::Unconfirmed;
-        };
-        let check = async {
-            match self.thread_hooks(thread, command).await {
-                ThreadHooks::Live => return LiveHooks::Running,
-                ThreadHooks::Unknown => return LiveHooks::Unconfirmed,
-                ThreadHooks::Stale => {}
-            }
-            let (method, params) = reload_request();
-            if self
-                .connection
-                .read::<IgnoredAny>(method, params)
+        let shown = match self.hook_command.as_deref() {
+            Some(command) => timeout(CHECK_DEADLINE, self.shown_hooks(thread, command))
                 .await
-                .is_err()
-            {
-                return LiveHooks::Unconfirmed;
-            }
-            match self.thread_hooks(thread, command).await {
-                ThreadHooks::Live => LiveHooks::Running,
-                ThreadHooks::Stale => LiveHooks::NotRunning,
-                ThreadHooks::Unknown => LiveHooks::Unconfirmed,
-            }
+                .ok()
+                .flatten(),
+            None => None,
         };
-        timeout(CHECK_DEADLINE, check)
-            .await
-            .unwrap_or(LiveHooks::Unconfirmed)
+        shown.unwrap_or_else(|| LiveHooks::Unconfirmed {
+            predates_trust: self.predates_trust(thread),
+        })
     }
 
-    /// Reads the hooks the daemon holds for `thread`: one request on the service's connection.
-    async fn thread_hooks(&self, thread: &NativeSessionId, command: &str) -> ThreadHooks {
-        let listed = self
+    /// `Running` or `NotRunning` when one daemon session shows the conversation, from its
+    /// first listing, its reload and its later listings alike; `None` otherwise.
+    async fn shown_hooks(&self, thread: &NativeSessionId, command: &str) -> Option<LiveHooks> {
+        let (first, session) = self.thread_hooks(thread, command).await?;
+        if first == ThreadHooks::Live {
+            return Some(LiveHooks::Running);
+        }
+        let (method, params) = reload_request();
+        let (reply, reloaded) = self.connection.request(method, params).await.ok()?;
+        rpc_result(reply).ok()?;
+        if !Arc::ptr_eq(&reloaded, &session) {
+            return None;
+        }
+        for pause in RELIST_PAUSES {
+            sleep(pause).await;
+            let (now, listed) = self.thread_hooks(thread, command).await?;
+            if !Arc::ptr_eq(&listed, &session) {
+                return None;
+            }
+            if now == ThreadHooks::Live {
+                return Some(LiveHooks::Running);
+            }
+        }
+        Some(LiveHooks::NotRunning)
+    }
+
+    /// Reads the hooks the daemon holds for `thread`, with the session that answered. The
+    /// first check on a session also asks, beside the list, whether its daemon lists one
+    /// conversation's hooks, and keeps the answer for that session. `None` when the list
+    /// failed, as "thread not found" does for a conversation the daemon does not hold, or
+    /// that session cannot list one conversation's hooks.
+    async fn thread_hooks(
+        &self,
+        thread: &NativeSessionId,
+        command: &str,
+    ) -> Option<(ThreadHooks, Arc<Served>)> {
+        let list = self
             .connection
-            .read::<Listed>("hooks/list", json!({"threadId": thread.as_str()}))
-            .await;
-        judge(
-            listed.ok().map(Listed::hooks),
-            self.connection.served().as_ref(),
+            .request("hooks/list", json!({"threadId": thread.as_str()}));
+        let learned = self
+            .connection
+            .served()
+            .is_some_and(|session| session.thread_scoped().is_some());
+        let listed = if learned {
+            list.await
+        } else {
+            let (method, params) = scope_probe();
+            let (listed, probed) = tokio::join!(list, self.connection.request(method, params));
+            if let Ok((reply, session)) = probed {
+                session.learn_scope(scopes_by_thread(&reply));
+            }
+            listed
+        };
+        let (reply, session) = listed.ok()?;
+        let listed: Listed = serde_json::from_value(rpc_result(reply).ok()?).ok()?;
+        let hooks = listed.hooks();
+        let judged = judge(
+            &hooks,
+            &session.hooks_file,
+            session.thread_scoped()?,
             command,
-        )
+        )?;
+        Some((judged, session))
+    }
+
+    /// Whether the conversation `thread` was created before ReviewQ last wrote Codex's trust
+    /// in its hooks. False whenever either time is unknown.
+    fn predates_trust(&self, thread: &NativeSessionId) -> bool {
+        match (created_at(thread.as_str()), self.trusted_at()) {
+            (Some(created), Some(trusted)) => created < trusted,
+            _ => false,
+        }
     }
 }
 
-/// Sorts a conversation's `hooks/list` reply, `None` when it failed, as "thread not found"
-/// does for a conversation the daemon does not hold.
-fn judge(hooks: Option<Vec<Hook>>, served: Option<&Served>, command: &str) -> ThreadHooks {
-    let (Some(hooks), Some(served)) = (hooks, served) else {
-        return ThreadHooks::Unknown;
-    };
-    if !served.thread_scoped {
-        return ThreadHooks::Unknown;
+/// When Codex created the conversation `id`, read from the ID itself. Codex makes a thread ID
+/// as a UUID version 7 (`ThreadId::new` calls `Uuid::now_v7` in `codex-rs/protocol`), whose
+/// first 48 bits are the Unix time in milliseconds. `None` for an ID of any other version.
+fn created_at(id: &str) -> Option<SystemTime> {
+    let uuid = uuid::Uuid::parse_str(id).ok()?;
+    if uuid.get_version_num() != 7 {
+        return None;
+    }
+    let bytes = uuid.as_bytes();
+    let mut millis = [0; 8];
+    millis[2..].copy_from_slice(&bytes[..6]);
+    UNIX_EPOCH.checked_add(Duration::from_millis(u64::from_be_bytes(millis)))
+}
+
+/// Sorts a conversation's hook list from a daemon session that `scoped` says lists one
+/// conversation's hooks; `None` from one that does not, whose list says nothing of it.
+fn judge(hooks: &[Hook], hooks_file: &Path, scoped: bool, command: &str) -> Option<ThreadHooks> {
+    if !scoped {
+        return None;
     }
     let mut own = hooks
         .iter()
-        .filter(|hook| is_own(hook, &served.hooks_file, command))
+        .filter(|hook| is_own(hook, hooks_file, command))
         .peekable();
     if own.peek().is_none() {
-        return ThreadHooks::Stale;
+        return Some(ThreadHooks::Stale);
     }
-    if own.all(|hook| hook.trust_status.as_deref() == Some("trusted")) {
-        ThreadHooks::Live
-    } else {
-        ThreadHooks::Stale
-    }
+    Some(
+        if own.all(|hook| hook.trust_status.as_deref() == Some("trusted")) {
+            ThreadHooks::Live
+        } else {
+            ThreadHooks::Stale
+        },
+    )
 }
 
 #[cfg(test)]
@@ -169,35 +240,40 @@ mod tests {
                 "command": ours, "isManaged": false, "trustStatus": trust,
             }]}]}))
             .unwrap();
-            Some(listed.hooks())
+            listed.hooks()
         };
-        let probed = |reply: Result<Value, AppError>| Served {
-            hooks_file: file.into(),
-            thread_scoped: scopes_by_thread(&reply),
-        };
-        let current = probed(Err(AppError::NotFound));
+        let refusal =
+            |message: &str| json!({"id": 3, "error": {"code": -32600, "message": message}});
+        let current = scopes_by_thread(&refusal(
+            "thread not found: 6ebe8b3f-39f3-41d9-9326-505deb43262c",
+        ));
+        assert!(current);
         assert_eq!(
-            judge(hooks("trusted"), Some(&current), ours),
-            ThreadHooks::Live
+            judge(&hooks("trusted"), file, current, ours),
+            Some(ThreadHooks::Live)
         );
         assert_eq!(
-            judge(hooks("untrusted"), Some(&current), ours),
-            ThreadHooks::Stale
+            judge(&hooks("untrusted"), file, current, ours),
+            Some(ThreadHooks::Stale)
         );
+        assert_eq!(judge(&[], file, current, ours), Some(ThreadHooks::Stale));
+        // An older Codex lists the hooks on disk; one without `hooks/list` refuses the method
+        // with the same code.
+        let older = scopes_by_thread(&json!({"id": 3, "result": {"data": []}}));
+        let unknown_method =
+            scopes_by_thread(&refusal("Invalid request: unknown variant `hooks/list`"));
+        assert!(!older && !unknown_method);
+        assert_eq!(judge(&hooks("trusted"), file, older, ours), None);
+    }
+
+    /// A Codex thread ID carries its creation time only as a UUID version 7.
+    #[test]
+    fn reads_creation_time_only_from_a_version_7_thread_id() {
+        let created = created_at("01a22120-e31b-7c83-bb3f-0aac8462e053");
         assert_eq!(
-            judge(Some(Vec::new()), Some(&current), ours),
-            ThreadHooks::Stale
+            created,
+            UNIX_EPOCH.checked_add(Duration::from_millis(1_795_852_133_147))
         );
-        assert_eq!(judge(None, Some(&current), ours), ThreadHooks::Unknown);
-        let older = probed(Ok(json!({"data": []})));
-        assert_eq!(
-            judge(hooks("trusted"), Some(&older), ours),
-            ThreadHooks::Unknown
-        );
-        let unanswered = probed(Err(AppError::Unavailable));
-        assert_eq!(
-            judge(hooks("trusted"), Some(&unanswered), ours),
-            ThreadHooks::Unknown
-        );
+        assert_eq!(created_at("6ebe8b3f-39f3-41d9-9326-505deb43262c"), None);
     }
 }

@@ -1,4 +1,3 @@
-use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 
 use reviewq_app::access::AppError;
@@ -29,6 +28,7 @@ pub struct Codex {
     executable: PathBuf,
     profile: AbsolutePath,
     hook_command: Option<String>,
+    trust_record: Option<hook_trust::TrustRecord>,
     last_hook_check: hook_trust::LastCheck,
     connection: connection::Connection,
     question_proofs: tokio::sync::Semaphore,
@@ -53,10 +53,7 @@ impl Codex {
             return Err(AppError::InvalidRequest);
         }
         let profile = profile.canonicalize().map_err(|_| AppError::Unavailable)?;
-        let metadata = profile.metadata().map_err(|_| AppError::Unavailable)?;
-        if !metadata.is_dir() || metadata.mode() & 0o022 != 0 {
-            return Err(AppError::Forbidden);
-        }
+        let owner = connection::home_owner(&profile)?;
         if turn_settings.as_ref().is_some_and(|(model, effort)| {
             model.is_empty()
                 || model.len() > 256
@@ -69,13 +66,10 @@ impl Codex {
             return Err(AppError::InvalidRequest);
         }
         Ok(Self {
-            connection: connection::Connection::new(
-                executable.clone(),
-                profile.clone(),
-                metadata.uid(),
-            ),
+            connection: connection::Connection::new(executable.clone(), profile.clone(), owner),
             executable,
             hook_command: None,
+            trust_record: None,
             last_hook_check: Default::default(),
             question_proofs: tokio::sync::Semaphore::new(4),
             capacity: tokio::sync::Mutex::new(None),
@@ -91,6 +85,21 @@ impl Codex {
     /// trust. Only the installed service knows it.
     pub fn with_hook_command(mut self, command: Option<String>) -> Self {
         self.hook_command = command;
+        self
+    }
+
+    /// Names where ReviewQ keeps when it last wrote Codex's trust in its hooks: `read` gives
+    /// that time, and `note` records a new write made no earlier than the time it is given.
+    /// Only the installed service has the record, whose owner keeps its format.
+    pub fn with_trust_record<R, N>(mut self, record: Option<(R, N)>) -> Self
+    where
+        R: Fn() -> Option<std::time::SystemTime> + Send + Sync + 'static,
+        N: Fn(std::time::SystemTime) + Send + Sync + 'static,
+    {
+        self.trust_record = record.map(|(read, note)| hook_trust::TrustRecord {
+            read: Box::new(read),
+            note: Box::new(note),
+        });
         self
     }
 }

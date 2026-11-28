@@ -230,7 +230,8 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             let hook_command = installed.as_ref().and_then(install::codex_hook_command);
             Some(Arc::new(
                 Codex::new(executable.clone(), home.clone(), settings)?
-                    .with_hook_command(hook_command),
+                    .with_hook_command(hook_command)
+                    .with_trust_record(installed.clone().map(install::codex_trust_record)),
             ))
         }
         _ => None,

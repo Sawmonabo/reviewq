@@ -83,6 +83,12 @@ struct Own {
 /// The last completed check, with the state of the files that decide it when it ended.
 pub(super) type LastCheck = tokio::sync::Mutex<Option<(Stamps, HookApproval)>>;
 
+/// Where ReviewQ keeps when it last wrote Codex's trust in its own hooks.
+pub(super) struct TrustRecord {
+    pub(super) read: Box<dyn Fn() -> Option<SystemTime> + Send + Sync>,
+    pub(super) note: Box<dyn Fn(SystemTime) + Send + Sync>,
+}
+
 /// Modification time and length of the profile's `hooks.json` and `config.toml` and of the
 /// Codex executable; `None` for a file that cannot be read.
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -103,11 +109,19 @@ impl Stamps {
 }
 
 impl Codex {
+    /// When ReviewQ last wrote Codex's trust in its hooks, when its record says.
+    pub(super) fn trusted_at(&self) -> Option<SystemTime> {
+        self.trust_record
+            .as_ref()
+            .and_then(|record| (record.read)())
+    }
+
     /// Trusts ReviewQ's own hooks in this profile and returns what Codex says of them. A
     /// Codex child starts only when `hooks.json`, `config.toml` or the executable changed
     /// since the last completed check; otherwise, and for callers that waited behind a
     /// running check, the remembered outcome returns at once. A failure is logged and not
-    /// remembered. Without a hook command, as in a service other than the installed one,
+    /// remembered. An approval that wrote trust is noted in the trust record, when there is
+    /// one. Without a hook command, as in a service other than the installed one,
     /// nothing is ReviewQ's to trust.
     pub(super) async fn approve_own_hooks(&self) -> Result<HookApproval, AppError> {
         let Some(command) = &self.hook_command else {
@@ -121,7 +135,12 @@ impl Codex {
         {
             return Ok(outcome);
         }
+        // Taken before the write, so the recorded time is never later than the write.
+        let asked = SystemTime::now();
         let outcome = approve_hooks(&self.executable, profile, command).await;
+        if let (Ok(HookApproval::Approved(_)), Some(record)) = (&outcome, &self.trust_record) {
+            (record.note)(asked);
+        }
         // Read after the exchange, since trusting a hook changes `config.toml`.
         *last = outcome
             .as_ref()
