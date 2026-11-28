@@ -17,6 +17,6 @@ mod reports;
 mod settings;
 mod workspace;
 
-pub use connection::{SqliteStore, StoreIdentity};
+pub use connection::{SqliteStore, StoppedStore, StoreIdentity};
 pub use error::StoreError;
 pub use hosts::claude::watch::WATCH_TICK;

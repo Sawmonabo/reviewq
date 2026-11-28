@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 
 use reviewq_app::hosts::HookApproval;
 use reviewq_domain::session::AbsolutePath;
-use reviewq_providers::HookRevocation;
 use reviewq_store::SqliteStore;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
@@ -12,10 +11,13 @@ pub(crate) mod bridge;
 mod bundle;
 mod claude;
 mod codex_hook;
+pub(crate) mod data;
 mod files;
 mod managed;
 pub(crate) mod paths;
 mod retention;
+mod start_socket;
+pub(crate) mod uninstall;
 mod windows;
 use crate::{native_client, runtime_settings, service};
 use bundle::Bundle;
@@ -23,6 +25,7 @@ pub(crate) use managed::{Managed, StartupPermission};
 use paths::Paths;
 pub(crate) use retention::PREVIOUS_ASSETS;
 use service::StartupCheck;
+pub(crate) use start_socket::repair as repair_start_socket;
 
 pub(crate) type Failure = Box<dyn std::error::Error + Send + Sync>;
 
@@ -214,6 +217,7 @@ pub(crate) async fn install(bundle_path: &Path) -> Result<(), Failure> {
         Some(pending) => pending,
         None => {
             files::preflight(&paths, old, None)?;
+            start_socket::check(&paths)?;
             bridge::check(&paths, old.is_some())?;
             if let Some(windows) = &next.windows {
                 windows
@@ -397,17 +401,6 @@ async fn approve_codex_hooks(paths: &Paths, executable: &Path) -> Result<HookApp
     Ok(reviewq_providers::approve_codex_hooks(executable, &paths.codex_home, &command).await?)
 }
 
-/// Asks the Codex the runtime settings name to remove its trust in this installation's hooks.
-async fn revoke_codex_hooks(paths: &Paths) -> Result<HookRevocation, Failure> {
-    let configured = runtime_settings::Settings::load(&paths.profile, false)
-        .ok()
-        .and_then(|settings| settings.codex_command);
-    let executable =
-        native_command(paths, "codex", configured.as_deref()).ok_or("Codex is unavailable")?;
-    let command = codex_hook::command(paths)?;
-    Ok(reviewq_providers::revoke_codex_hooks(&executable, &paths.codex_home, &command).await?)
-}
-
 /// The command of the Codex hooks this installation writes.
 pub(crate) fn codex_hook_command(paths: &Paths) -> Option<String> {
     codex_hook::command(paths).ok()
@@ -457,6 +450,7 @@ async fn activate(
     unit: &[u8],
     store_id: Option<&str>,
 ) -> Result<reviewq_transport::ServiceIdentity, Failure> {
+    start_socket::stop(paths).await?;
     if service::state().await?.1 {
         service::switch("stop").await?;
     }
@@ -465,6 +459,7 @@ async fn activate(
         return Err("The retained data changed during activation.".into());
     }
     files::set(paths, old, next, unit)?;
+    start_socket::write(paths)?;
     claude::activate(paths, old, next).await?;
     if let Some(windows) = &next.windows {
         let release = paths.profile.join("releases").join(&next.id);
@@ -474,7 +469,12 @@ async fn activate(
     }
     service::reload().await?;
     service::unit_location(paths).await?;
-    service::switch("enable").await?;
+    // The socket listens before the service starts, so the service is handed it.
+    start_socket::open().await;
+    // Only a first install turns on starting at login; an update keeps the user's choice.
+    if old.is_none() {
+        service::switch("enable").await?;
+    }
     service::switch("start").await?;
     let identity = service::ready(paths, &next.binary, next.store, StartupCheck::Identity).await?;
     if stopped_store.is_some_and(|id| id != identity.store_id) {
@@ -500,6 +500,7 @@ async fn rollback(
         Some(unit) => unit,
         None => verified_unit(paths, previous, &bundle)?,
     };
+    start_socket::stop(paths).await?;
     if service::state().await?.1 {
         service::switch("stop").await?;
     }
@@ -511,6 +512,7 @@ async fn rollback(
         return Err("The previous installation's retained store is missing or changed.".into());
     }
     files::set(paths, Some(&pending.next), previous, &unit)?;
+    start_socket::write(paths)?;
     if previous.claude.is_some() {
         let previous_paths = Paths {
             claude_home_is_explicit: service::unit_has_claude_override(&unit),
@@ -528,6 +530,7 @@ async fn rollback(
         windows.remove().await?;
     }
     service::reload().await?;
+    start_socket::open().await;
     service::switch(if pending.was_enabled {
         "enable"
     } else {
@@ -565,144 +568,6 @@ fn verified_unit(paths: &Paths, release: &Release, bundle: &Bundle) -> Result<Ve
         }
     }
     Err("The previous service unit no longer matches its installation.".into())
-}
-
-/// Removes ReviewQ's Codex hooks while uninstalling and returns the `hooks.json` files that
-/// still hold an entry it could not remove, usually because the user changed it, after
-/// saying what to remove there. Codex's trust in them is removed first, while Codex still
-/// lists them; when that fails, one line says so. The uninstall continues. Fails when the
-/// ownership file cannot be written or removed.
-async fn retire_codex_hooks(paths: &Paths) -> Result<Vec<PathBuf>, Failure> {
-    if paths::exists(&paths.codex_home.join("hooks.json"))? {
-        let config = paths.codex_home.join("config.toml");
-        match revoke_codex_hooks(paths).await {
-            Ok(HookRevocation::Revoked(count)) => println!(
-                "ReviewQ removed Codex's approval of {count} of its hooks from {}.",
-                config.display()
-            ),
-            Ok(HookRevocation::NoneTrusted | HookRevocation::NotListed) => {}
-            Ok(HookRevocation::Unsupported) => eprintln!(
-                "This Codex cannot say which hooks it trusts, so any approval of ReviewQ's hooks stays in {}.",
-                config.display()
-            ),
-            Err(error) => eprintln!(
-                "ReviewQ could not remove Codex's approval of its hooks from {} ({error}).",
-                config.display()
-            ),
-        }
-    }
-    match codex_hook::reconcile(paths, false)? {
-        codex_hook::Reconciled::Done => Ok(Vec::new()),
-        codex_hook::Reconciled::Kept { files, reason } => {
-            for file in &files {
-                eprintln!(
-                    "ReviewQ could not remove a Codex hook of its own from {}: {reason} Remove the hook there that runs ReviewQ's launcher and leave the others.",
-                    file.display()
-                );
-            }
-            Ok(files)
-        }
-    }
-}
-
-/// The uninstall's failure when `entries` were left in place for the user to resolve.
-fn preserved_entries(entries: &[PathBuf]) -> Failure {
-    format!(
-        "Preserved modified installation entries: {}",
-        entries
-            .iter()
-            .map(|path| path.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
-    .into()
-}
-
-pub(crate) async fn uninstall() -> Result<(), Failure> {
-    let mut paths = Paths::resolve()?;
-    let _lock = paths.lock()?;
-    let mut inventory = load(&paths)?;
-    if inventory.pending.is_some() {
-        return Err("Finish the interrupted activation before uninstalling.".into());
-    }
-    let Some(active) = inventory.active.as_ref() else {
-        let kept_hooks = retire_codex_hooks(&paths).await?;
-        if !kept_hooks.is_empty() {
-            return Err(preserved_entries(&kept_hooks));
-        }
-        println!(
-            "ReviewQ is already removed. Retained data {}",
-            paths.profile.display()
-        );
-        return Ok(());
-    };
-    service::manager().await?;
-    service::unit_location(&paths).await?;
-    if let Some(unit) = files::read_unit(&paths.unit)? {
-        if bundle::hex(&sha2::Sha256::digest(&unit)) != active.unit {
-            return Err(paths::conflict(&paths.unit));
-        }
-        paths.claude_home_is_explicit = service::unit_has_claude_override(&unit);
-    }
-    if inventory.removal_stage.is_none() {
-        inventory.removal_stage = Some(files::reserve_removal(&paths)?);
-        inventory.removing = true;
-        paths::write_json(&journal(&paths), &inventory)?;
-    }
-    if service::state().await?.1 {
-        service::switch("stop").await?;
-    }
-    if service::state().await?.0 {
-        service::switch("disable").await?;
-    }
-    let expected = inventory
-        .store_id
-        .as_deref()
-        .ok_or("Missing installed store identity.")?;
-    if probe(&paths, active.store).await?.as_deref() != Some(expected) {
-        return Err("The installed profile's retained store is missing or changed.".into());
-    }
-    let database = AbsolutePath::from_canonical(paths.profile.join("reviewq.sqlite3"))?;
-    let store = SqliteStore::open(database).await?;
-    if store.identity().store_id.to_string() != expected {
-        return Err("ReviewQ opened a different store while uninstalling.".into());
-    }
-    let removed = crate::checkout_setup::remove_installation(&paths.profile, &store).await;
-    store.close(std::time::Duration::from_secs(10)).await?;
-    removed?;
-    let kept_hooks = retire_codex_hooks(&paths).await?;
-    claude::remove(&paths, active).await?;
-    if let Some(windows) = &active.windows {
-        windows.remove().await?;
-    }
-    bridge::remove(&paths)?;
-    let removal = inventory
-        .removal_stage
-        .as_deref()
-        .ok_or("Missing removal stage.")?;
-    let mut conflicts = retention::remove_assets(&paths, &inventory.known)?;
-    if conflicts.is_empty() {
-        conflicts = files::remove(&paths, active, &inventory.known, removal)?;
-    }
-    service::reload().await?;
-    if !conflicts.is_empty() {
-        conflicts.extend(kept_hooks);
-        return Err(preserved_entries(&conflicts));
-    }
-    // The launcher and releases are gone, so a kept hook entry no longer holds the uninstall
-    // open: it is reported once the removal is recorded.
-    retention::clear_assets_journal(&paths)?;
-    inventory = Inventory::default();
-    paths::write_json(&journal(&paths), &inventory)?;
-    println!(
-        "ReviewQ removed. Retained data at {} and runtime settings at {}.",
-        paths.profile.display(),
-        runtime_settings::config_path(&paths.profile, false).display()
-    );
-    if !kept_hooks.is_empty() {
-        return Err(preserved_entries(&kept_hooks));
-    }
-    Ok(())
 }
 
 async fn probe(paths: &Paths, expected: i64) -> Result<Option<String>, Failure> {

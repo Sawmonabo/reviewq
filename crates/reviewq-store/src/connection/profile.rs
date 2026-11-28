@@ -45,9 +45,18 @@ impl Profile {
     }
 
     pub(super) fn try_lock(&self) -> Result<(), StoreError> {
+        if self.try_hold()? {
+            Ok(())
+        } else {
+            Err(AppError::Busy.into())
+        }
+    }
+
+    /// Takes the profile's exclusive lock, or returns `false` when another holder has it.
+    pub(super) fn try_hold(&self) -> Result<bool, StoreError> {
         match self.directory.try_lock() {
-            Ok(()) => Ok(()),
-            Err(TryLockError::WouldBlock) => Err(AppError::Busy.into()),
+            Ok(()) => Ok(true),
+            Err(TryLockError::WouldBlock) => Ok(false),
             Err(TryLockError::Error(error)) => Err(error.into()),
         }
     }

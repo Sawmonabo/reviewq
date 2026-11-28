@@ -38,6 +38,8 @@ use crate::{cli::Serve, install, runtime_settings};
 mod desktop;
 mod diagram;
 mod http;
+pub(crate) mod start_door;
+mod system;
 mod workflow;
 
 const RUNTIME: &str = "service.json";
@@ -68,7 +70,11 @@ pub(crate) fn profile(override_path: Option<PathBuf>) -> Result<PathBuf, Failure
         .join("reviewq"))
 }
 
-pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failure> {
+pub(crate) async fn serve(
+    profile: PathBuf,
+    options: Serve,
+    start_door: Option<std::net::TcpListener>,
+) -> Result<(), Failure> {
     let settings = runtime_settings::Settings::load(&profile, options.validation)?;
     let (browser_port, native_port) = settings.ports(options.port, options.native_port)?;
     let web = match options.web.as_ref() {
@@ -105,6 +111,14 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         }
         None
     };
+    let door = start_door
+        .filter(|_| managed.is_some())
+        .and_then(|listener| start_door::Door::new(listener, browser_port));
+    if let Some(door) = &door
+        && !door.admits_start().await
+    {
+        return Ok(());
+    }
     let v4 = TcpListener::bind((Ipv4Addr::LOCALHOST, browser_port)).await?;
     let v6 = match native_listener(native_port) {
         Ok(listener) => Some(listener),
@@ -353,7 +367,11 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
             claude_interrupt,
             terminal,
             browser_desktop: browser_desktop.clone(),
-            system: None,
+            system: Some(Arc::new(system::System::new(
+                &profile,
+                options.validation,
+                installed.clone(),
+            ))),
             workflow: WorkflowIntegration {
                 proof: workflow.clone(),
             },
@@ -383,6 +401,9 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
     listeners.spawn(http::serve(v4, router.clone(), wait.clone()));
     if let Some(v6) = v6 {
         listeners.spawn(http::serve(v6, router, wait.clone()));
+    }
+    if let Some(door) = door {
+        listeners.spawn(door.serve(wait.clone()));
     }
     let start = async {
         if let Some(managed) = &managed
@@ -441,6 +462,9 @@ pub(crate) async fn serve(profile: PathBuf, options: Serve) -> Result<(), Failur
         }
         if let Some(desktop) = browser_desktop {
             workers.push(desktop::start(store.clone(), browser, desktop, windows));
+        }
+        if let Some(paths) = installed.clone() {
+            workers.push(tokio::spawn(start_door::repair(paths)));
         }
         if let Some((host, paths)) = hooks_host.zip(installed) {
             workers.push(tokio::spawn(check_codex_hooks(host, paths)));

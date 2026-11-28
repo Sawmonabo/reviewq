@@ -1,0 +1,151 @@
+//! The System page's controls for this process. Starting at login, Quit and Uninstall exist
+//! only in the installed service, and each is refused while an install, update, uninstall,
+//! start or stop holds the installation lock.
+
+use std::fs::File;
+use std::path::{Path, PathBuf};
+
+use reviewq_app::access::{AppError, AppFuture};
+use reviewq_app::system::{
+    SystemControl, SystemFacts, SystemMode, SystemRefusal, UninstallStarted,
+};
+
+use crate::install::{self, data::Folders, paths::Paths};
+use crate::service;
+
+pub(super) struct System {
+    mode: SystemMode,
+    /// The installation's paths, in the installed service only.
+    installed: Option<Paths>,
+    folders: Folders,
+    data_folder: String,
+}
+
+impl System {
+    /// The controls for a server on `profile`. `installed` holds the installation's paths
+    /// when this is the installed service.
+    pub(super) fn new(profile: &Path, validation: bool, installed: Option<Paths>) -> Self {
+        let mode = if installed.is_some() {
+            SystemMode::Installed
+        } else if validation {
+            SystemMode::Validation
+        } else {
+            SystemMode::Foreground
+        };
+        let folders = match installed.clone().or_else(|| {
+            Paths::resolve()
+                .ok()
+                .filter(|paths| !validation && paths.profile == profile)
+        }) {
+            Some(paths) => Folders::installed(&paths),
+            None => Folders::profile(profile),
+        };
+        Self {
+            mode,
+            installed,
+            folders,
+            data_folder: display(profile),
+        }
+    }
+
+    /// The installation's paths under the installation lock, or why the change is refused.
+    fn hold(&self) -> Result<Result<(&Paths, File), SystemRefusal>, AppError> {
+        let Some(paths) = &self.installed else {
+            return Ok(Err(SystemRefusal::NotInstalled));
+        };
+        match paths.try_lock().map_err(failed)? {
+            Some(lock) => Ok(Ok((paths, lock))),
+            None => Ok(Err(SystemRefusal::InstallRunning)),
+        }
+    }
+}
+
+impl SystemControl for System {
+    fn mode(&self) -> SystemMode {
+        self.mode
+    }
+
+    fn facts(&self) -> AppFuture<'_, SystemFacts> {
+        Box::pin(async move {
+            let folders = self.folders.clone();
+            let data_bytes = tokio::task::spawn_blocking(move || folders.size())
+                .await
+                .ok()
+                .flatten();
+            let start_at_login = if self.installed.is_some() {
+                service::state().await.ok().map(|(enabled, _)| enabled)
+            } else {
+                None
+            };
+            Ok(SystemFacts {
+                data_folder: self.data_folder.clone(),
+                data_bytes,
+                start_at_login,
+            })
+        })
+    }
+
+    fn set_start_at_login(&self, enabled: bool) -> AppFuture<'_, Result<bool, SystemRefusal>> {
+        Box::pin(async move {
+            let _lock = match self.hold()? {
+                Ok((_, lock)) => lock,
+                Err(refusal) => return Ok(Err(refusal)),
+            };
+            service::switch(if enabled { "enable" } else { "disable" })
+                .await
+                .map_err(failed)?;
+            Ok(Ok(service::state().await.map_err(failed)?.0))
+        })
+    }
+
+    fn quit(&self) -> AppFuture<'_, Result<(), SystemRefusal>> {
+        Box::pin(async move {
+            let _lock = match self.hold()? {
+                Ok((_, lock)) => lock,
+                Err(refusal) => return Ok(Err(refusal)),
+            };
+            service::stop_without_waiting().await.map_err(failed)?;
+            Ok(Ok(()))
+        })
+    }
+
+    fn uninstall(
+        &self,
+        delete_data: bool,
+    ) -> AppFuture<'_, Result<UninstallStarted, SystemRefusal>> {
+        Box::pin(async move {
+            let (paths, lock) = match self.hold()? {
+                Ok(held) => held,
+                Err(refusal) => return Ok(Err(refusal)),
+            };
+            let started = install::uninstall::start_job(paths, delete_data).await;
+            drop(lock);
+            Ok(match started {
+                Ok(()) => Ok(UninstallStarted {
+                    delete_data,
+                    data_folder: self.data_folder.clone(),
+                }),
+                Err(reason) => Err(SystemRefusal::Blocked(reason.to_string())),
+            })
+        })
+    }
+}
+
+/// Logs a lifecycle failure and reports it as the internal error it is.
+fn failed(error: install::Failure) -> AppError {
+    eprintln!("ReviewQ could not complete a System page change: {error}");
+    AppError::Internal
+}
+
+/// `path` for display, with the home folder shortened to `~`.
+fn display(path: &Path) -> String {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    match home
+        .as_deref()
+        .and_then(|home| path.strip_prefix(home).ok())
+    {
+        Some(rest) if rest.as_os_str().is_empty() => "~".into(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}

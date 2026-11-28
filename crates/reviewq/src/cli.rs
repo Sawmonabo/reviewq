@@ -38,8 +38,16 @@ enum Command {
     Logs,
     /// Send one local test notification.
     NotifyTest,
-    /// Remove the installed application and keep private review data.
-    Uninstall,
+    /// Remove the installed application. Keeps private review data unless --delete-data.
+    Uninstall {
+        /// Also delete ReviewQ's reviews, reports, settings and saved tokens once everything
+        /// else is removed.
+        #[arg(long)]
+        delete_data: bool,
+        /// Refuse unless the install record names this store; set by the dashboard's job.
+        #[arg(long, hide = true, value_name = "STORE")]
+        expect_store: Option<String>,
+    },
     /// Serve the dashboard and API in the foreground.
     Serve(Serve),
     /// Open the local dashboard in a browser.
@@ -177,6 +185,11 @@ pub(crate) struct Open {
 
 pub(crate) fn run() -> Result<(), Failure> {
     let options = CommandLine::parse();
+    // Taken before the runtime starts any thread, since taking it edits the environment.
+    let start_door = match &options.command {
+        Some(Command::Serve(serve)) if serve.managed => runtime::start_door::take(),
+        _ => None,
+    };
     let mut runtime = if matches!(options.command, Some(Command::Serve(_))) {
         let mut runtime = tokio::runtime::Builder::new_multi_thread();
         runtime.worker_threads(2);
@@ -184,16 +197,22 @@ pub(crate) fn run() -> Result<(), Failure> {
     } else {
         tokio::runtime::Builder::new_current_thread()
     };
-    runtime.enable_all().build()?.block_on(execute(options))
+    runtime
+        .enable_all()
+        .build()?
+        .block_on(execute(options, start_door))
 }
 
-async fn execute(options: CommandLine) -> Result<(), Failure> {
+async fn execute(
+    options: CommandLine,
+    start_door: Option<std::net::TcpListener>,
+) -> Result<(), Failure> {
     if options.profile.is_some()
         && matches!(
             options.command,
             Some(
                 Command::Install { .. }
-                    | Command::Uninstall
+                    | Command::Uninstall { .. }
                     | Command::Start
                     | Command::Stop
                     | Command::Logs
@@ -205,7 +224,16 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
     }
     match options.command {
         Some(Command::Install { from }) => install::install(&from).await,
-        Some(Command::Uninstall) => install::uninstall().await,
+        Some(Command::Uninstall {
+            delete_data,
+            expect_store,
+        }) => {
+            install::uninstall::uninstall(install::uninstall::Options {
+                delete_data,
+                expect_store,
+            })
+            .await
+        }
         Some(Command::Start) => service::operate(true).await,
         Some(Command::Stop) => service::operate(false).await,
         Some(Command::Logs) => service::logs().await,
@@ -219,7 +247,7 @@ async fn execute(options: CommandLine) -> Result<(), Failure> {
                 (None, Some(root)) => root.clone(),
                 (profile, None) => runtime::profile(profile)?,
             };
-            runtime::serve(profile, serve).await
+            runtime::serve(profile, serve, start_door).await
         }
         Some(Command::Status) => native_client::status(&runtime::profile(options.profile)?).await,
         Some(Command::Refresh) => native_client::refresh(&runtime::profile(options.profile)?).await,

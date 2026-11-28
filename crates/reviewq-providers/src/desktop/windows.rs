@@ -107,7 +107,9 @@ impl WindowsDesktop {
         .await
     }
 
-    async fn show(
+    /// Shows one notification with `title` and `body` that opens the dashboard at `browser`
+    /// when clicked. A later notification with the same `key` replaces it.
+    pub async fn show(
         &self,
         browser: SocketAddr,
         title: &str,

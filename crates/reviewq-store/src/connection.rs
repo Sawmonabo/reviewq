@@ -20,7 +20,7 @@ mod search_index;
 mod staging;
 mod wal;
 
-pub use database::StoreIdentity;
+pub use database::{StoppedStore, StoreIdentity};
 
 const QUEUE_CAPACITY: usize = 64;
 
@@ -85,6 +85,14 @@ impl SqliteStore {
         })
         .await
         .map_err(|_| AppError::Internal)?
+    }
+
+    /// Takes the exclusive lock every open store holds on its profile directory, which proves
+    /// no process has the database open, and reads which store is there without changing it.
+    /// Returns `None` when another process holds the lock. Keep the returned value alive for as
+    /// long as the profile must stay closed.
+    pub fn hold_stopped(path: &AbsolutePath) -> Result<Option<StoppedStore>, StoreError> {
+        database::hold_stopped(path)
     }
 
     /// Verifies a stopped existing profile without mutating the database or its sidecars.

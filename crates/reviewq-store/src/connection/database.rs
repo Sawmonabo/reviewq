@@ -108,6 +108,28 @@ pub(super) fn open_profile(
     Ok((profile, identity, reader, writer))
 }
 
+/// A profile held under its exclusive lock while no store has it open.
+pub struct StoppedStore {
+    _profile: Profile,
+    /// The store in the profile, or `None` when it has no database file.
+    pub identity: Option<StoreIdentity>,
+}
+
+pub(super) fn hold_stopped(path: &AbsolutePath) -> Result<Option<StoppedStore>, StoreError> {
+    let profile = Profile::resolve(path)?;
+    if !profile.try_hold()? {
+        return Ok(None);
+    }
+    let identity = match profile.file("")? {
+        Some(database) => Some(inspect_existing(&profile, database)?),
+        None => None,
+    };
+    Ok(Some(StoppedStore {
+        _profile: profile,
+        identity,
+    }))
+}
+
 pub(super) fn probe(path: &AbsolutePath) -> Result<StoreIdentity, StoreError> {
     let profile = Profile::resolve(path)?;
     profile.try_lock()?;

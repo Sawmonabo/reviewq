@@ -10,6 +10,10 @@ use crate::install::{self, Failure, paths::Paths};
 use crate::{cli::Open, native_client, runtime, runtime_settings};
 
 const UNIT: &str = "reviewq.service";
+/// The socket unit that starts `reviewq.service` when the stopped page's Start is clicked.
+pub(crate) const START_SOCKET: &str = "reviewq-start.socket";
+/// The transient service the dashboard's uninstall runs in, outside `reviewq.service`.
+pub(crate) const UNINSTALL_JOB: &str = "reviewq-uninstall";
 const CLAUDE_DEFAULT: &str = "UnsetEnvironment=CLAUDE_CONFIG_DIR";
 
 pub(crate) fn unit(
@@ -82,22 +86,37 @@ pub(crate) async fn manager() -> Result<(), Failure> {
     Ok(())
 }
 
+/// Fails when the user manager loads ReviewQ's service or start socket from a file other
+/// than the one ReviewQ installs.
 pub(crate) async fn unit_location(paths: &Paths) -> Result<(), Failure> {
-    let (success, location) =
-        systemctl(&["show", UNIT, "--property=FragmentPath", "--value"], true).await?;
-    if success && !location.is_empty() && Path::new(&location) != paths.unit {
-        return Err(format!("Preserved the unrelated service at {location}").into());
+    for (unit, path) in [(UNIT, &paths.unit), (START_SOCKET, &paths.start_socket)] {
+        let (success, location) =
+            systemctl(&["show", unit, "--property=FragmentPath", "--value"], true).await?;
+        if success && !location.is_empty() && Path::new(&location) != path {
+            return Err(format!("Preserved the unrelated unit at {location}").into());
+        }
     }
     Ok(())
 }
 
+/// Whether `reviewq.service` starts at login, and whether it is running now.
 pub(crate) async fn state() -> Result<(bool, bool), Failure> {
-    let (_, enabled) = systemctl(&["is-enabled", UNIT], true).await?;
-    let (_, active) = systemctl(&["is-active", UNIT], true).await?;
+    unit_state(UNIT).await
+}
+
+/// Whether `unit` is enabled, and whether it is active or on its way there.
+pub(crate) async fn unit_state(unit: &str) -> Result<(bool, bool), Failure> {
+    let (_, enabled) = systemctl(&["is-enabled", unit], true).await?;
+    let (_, active) = systemctl(&["is-active", unit], true).await?;
     Ok((
         enabled == "enabled",
         matches!(active.as_str(), "active" | "activating" | "reloading"),
     ))
+}
+
+/// Whether `unit` is in the failed state, as after its start limit was hit.
+pub(crate) async fn failed(unit: &str) -> Result<bool, Failure> {
+    Ok(systemctl(&["is-failed", unit], true).await?.1 == "failed")
 }
 
 pub(crate) async fn reload() -> Result<(), Failure> {
@@ -106,7 +125,19 @@ pub(crate) async fn reload() -> Result<(), Failure> {
 }
 
 pub(crate) async fn switch(verb: &str) -> Result<(), Failure> {
-    systemctl(&[verb, UNIT], false).await?;
+    control(verb, UNIT).await
+}
+
+/// Runs `systemctl --user <verb> <unit>` and fails when it does.
+pub(crate) async fn control(verb: &str, unit: &str) -> Result<(), Failure> {
+    systemctl(&[verb, unit], false).await?;
+    Ok(())
+}
+
+/// Asks the user manager to stop `reviewq.service` and returns without waiting for it, so a
+/// reply from the service itself can still leave.
+pub(crate) async fn stop_without_waiting() -> Result<(), Failure> {
+    systemctl(&["--no-block", "stop", UNIT], false).await?;
     Ok(())
 }
 
@@ -179,6 +210,10 @@ pub(crate) async fn operate(start: bool) -> Result<(), Failure> {
 
 async fn ensure_running(paths: &Paths, record: &install::Release) -> Result<(), Failure> {
     runtime_settings::Settings::load(&paths.profile, false)?;
+    // The start socket must listen before the service starts, or the service never gets it.
+    if let Err(error) = install::repair_start_socket(paths).await {
+        eprintln!("ReviewQ's Start button may not work: {error}");
+    }
     if !state().await?.1 {
         switch("start").await?;
     }

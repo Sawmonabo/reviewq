@@ -16,11 +16,10 @@ pub enum SystemMode {
     Validation,
 }
 
-/// What only the running process knows about itself. The transport adds the version, the
-/// dashboard address and the last refresh.
+/// What only the running process knows about itself, apart from its mode. The transport
+/// adds the version, the dashboard address and the last refresh.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SystemFacts {
-    pub mode: SystemMode,
     /// The data folder for display, with the home folder shortened to `~`.
     pub data_folder: String,
     /// The total size of the data an uninstall with "delete my data" removes, or `None` when a
@@ -53,6 +52,9 @@ pub enum SystemRefusal {
 /// The running service's own controls. Each change is refused with `SystemRefusal` unless the
 /// process is the installed service and no install holds the install lock.
 pub trait SystemControl: Send + Sync {
+    /// How this process was started; it never changes while it runs.
+    fn mode(&self) -> SystemMode;
+
     fn facts(&self) -> AppFuture<'_, SystemFacts>;
 
     /// Turns starting at login on or off without starting or stopping the service, and returns

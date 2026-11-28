@@ -18,6 +18,7 @@ pub(crate) struct Paths {
     pub state: PathBuf,
     pub launcher: PathBuf,
     pub unit: PathBuf,
+    pub start_socket: PathBuf,
     pub codex_home: PathBuf,
     pub claude_home: PathBuf,
     pub claude_home_is_explicit: bool,
@@ -56,6 +57,7 @@ impl Paths {
             launcher: home.join(".local/bin/reviewq"),
             config: config_home.join("reviewq"),
             unit: config_home.join("systemd/user/reviewq.service"),
+            start_socket: config_home.join("systemd/user/reviewq-start.socket"),
             state: state_home.join("reviewq"),
             home,
             config_home,
@@ -75,7 +77,25 @@ impl Paths {
         ensure_dir(parent(&self.unit)?, false)
     }
 
+    /// Holds the installation lock, waiting while an install, uninstall, start or stop has it.
     pub(crate) fn lock(&self) -> Result<File, Failure> {
+        let file = self.lock_file()?;
+        file.lock()?;
+        Ok(file)
+    }
+
+    /// Holds the installation lock without waiting, or returns `None` while another
+    /// install, uninstall, start or stop has it.
+    pub(crate) fn try_lock(&self) -> Result<Option<File>, Failure> {
+        let file = self.lock_file()?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(file)),
+            Err(TryLockError::WouldBlock) => Ok(None),
+            Err(TryLockError::Error(error)) => Err(error.into()),
+        }
+    }
+
+    fn lock_file(&self) -> Result<File, Failure> {
         ensure_dir(&self.state, true)?;
         let path = self.state.join("install.lock");
         let file = OpenOptions::new()
@@ -87,7 +107,6 @@ impl Paths {
             .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
             .open(&path)?;
         private(&file, &path)?;
-        file.lock()?;
         Ok(file)
     }
 

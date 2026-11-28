@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -18,6 +18,10 @@ use serde::de::DeserializeOwned;
 use super::error::ApiBytes;
 use super::pages::{count, success};
 use super::{ApiError, Entry};
+
+/// The page's one door marker. Only the installed service turns the Start button on.
+const DOOR_OFF: &str = "data-door=\"off\"";
+const DOOR_ON: &str = "data-door=\"on\"";
 
 pub(super) fn routes() -> Router<Arc<Entry>> {
     Router::new()
@@ -40,7 +44,7 @@ async fn facts(
     )?;
     let data = dto::SystemFacts {
         version: env!("CARGO_PKG_VERSION").into(),
-        mode: match facts.mode {
+        mode: match system.mode() {
             SystemMode::Installed => dto::SystemMode::Installed,
             SystemMode::Foreground => dto::SystemMode::Foreground,
             SystemMode::Validation => dto::SystemMode::Validation,
@@ -93,6 +97,25 @@ async fn uninstall(
     };
     let response: dto::UninstallResponse = success(receipt, *entry.commits.borrow())?;
     Ok((StatusCode::ACCEPTED, Json(response)).into_response())
+}
+
+/// `GET /stopped.html`: the page shown while ReviewQ is stopped, read from the build. In the
+/// installed service it carries `data-door="on"` in place of its one `data-door="off"`; nothing
+/// else in it changes. Without the file, the answer is `404`.
+pub(super) async fn stopped_page(State(entry): State<Arc<Entry>>) -> Response {
+    let Ok(page) = tokio::fs::read_to_string(&entry.stopped_page).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let installed = entry
+        .system
+        .as_deref()
+        .is_some_and(|system| system.mode() == SystemMode::Installed);
+    let page = if installed && page.matches(DOOR_OFF).count() == 1 {
+        page.replacen(DOOR_OFF, DOOR_ON, 1)
+    } else {
+        page
+    };
+    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], page).into_response()
 }
 
 /// The wired `SystemControl`, or `Unavailable` when this listener has none.

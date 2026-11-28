@@ -7,6 +7,8 @@ use std::time::Duration;
 use serde::Deserialize;
 
 const MAX_BYTES: u64 = 8192;
+/// The start door listens this far above the browser port.
+const START_PORT_OFFSET: u16 = 4;
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Deserialize)]
@@ -100,7 +102,7 @@ impl Settings {
             let valid = match key.as_str() {
                 "port" => value
                     .as_u64()
-                    .is_some_and(|value| (1024..=65534).contains(&value)),
+                    .is_some_and(|value| (1024..=65531).contains(&value)),
                 "pollSeconds" => value.as_u64().is_some_and(|value| {
                     value >= 60
                         && tokio::time::Instant::now()
@@ -146,11 +148,19 @@ impl Settings {
         if (browser != 0 && browser < 1024)
             || (native != 0 && native < 1024)
             || (browser != 0 && browser == native)
+            || (browser != 0 && start_port(browser) == Some(native))
         {
-            return Err("browser and native ports must be separate and unprivileged".into());
+            return Err("browser, native and start ports must be separate and unprivileged".into());
         }
         Ok((browser, native))
     }
+}
+
+/// The installed service's start door: the loopback port a Start click connects to while
+/// ReviewQ is stopped. It is always the browser port plus four, so the stopped page works it
+/// out from its own address. `None` when the browser port leaves no room for it.
+pub(crate) fn start_port(browser: u16) -> Option<u16> {
+    browser.checked_add(START_PORT_OFFSET)
 }
 
 fn valid_command(value: &str) -> bool {

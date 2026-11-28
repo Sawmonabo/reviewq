@@ -325,6 +325,7 @@ mod tests {
             state: home.join("state"),
             launcher: home.join("reviewq dir's/reviewq"),
             unit: home.join("reviewq.service"),
+            start_socket: home.join("reviewq-start.socket"),
             codex_home: codex_home.clone(),
             claude_home: home.join("claude"),
             claude_home_is_explicit: false,

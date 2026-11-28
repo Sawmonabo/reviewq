@@ -165,6 +165,7 @@ pub(super) struct Entry {
     terminal: Arc<dyn NativeTerminal>,
     browser_desktop: Option<BrowserDesktop>,
     system: Option<Arc<dyn SystemControl>>,
+    stopped_page: std::path::PathBuf,
     sends_allowed: bool,
     commits: watch::Receiver<EventCursor>,
     shutdown: watch::Receiver<bool>,
@@ -258,6 +259,7 @@ pub fn router(
         terminal: runtime.terminal,
         browser_desktop: runtime.browser_desktop,
         system: runtime.system,
+        stopped_page: runtime.web.join("stopped.html"),
         sends_allowed: runtime.sends_allowed,
         commits: runtime.commits,
         shutdown: runtime.shutdown,
@@ -402,6 +404,7 @@ pub fn router(
         .layer(DefaultBodyLimit::max(64 * 1024));
     let router = Router::new()
         .merge(mcp::mount(entry.clone()))
+        .route("/stopped.html", get(system::stopped_page))
         .nest("/api/v1", api);
     let assets = ServeDir::new(web.join("assets"));
     let router = if let Some(previous) = runtime.retained_assets {
